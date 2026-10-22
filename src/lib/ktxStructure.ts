@@ -266,16 +266,29 @@ export function useKtxStructure() {
 
   // Realtime: auto-discover new KTX/dãy the moment workers/facilities/room_units/profiles change.
   useEffect(() => {
-    const supabase = createClient();
-    const channel = supabase
-      .channel('ktx_structure_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'workers' }, () => reload(true))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, () => reload(true))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_units' }, () => reload(true))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => reload(true))
-      .subscribe();
+    let supabase: ReturnType<typeof createClient> | null = null;
+    try {
+      supabase = createClient();
+    } catch (err) {
+      console.warn('[ktxStructure] Realtime disabled (client init failed):', err);
+      return;
+    }
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    try {
+      channel = supabase
+        .channel('ktx_structure_realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'workers' }, () => reload(true))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, () => reload(true))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'room_units' }, () => reload(true))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => reload(true))
+        .subscribe();
+    } catch (err) {
+      console.warn('[ktxStructure] Realtime subscribe failed (table may be missing):', err);
+    }
     return () => {
-      supabase.removeChannel(channel);
+      try {
+        if (channel) supabase!.removeChannel(channel);
+      } catch {}
     };
   }, [reload]);
 

@@ -26,9 +26,9 @@ export async function fetchRoomCapacities(): Promise<RoomCapacityMap> {
     }
 
     for (const row of (data ?? [])) {
-      const key = buildRoomKey(row.ktx, row.day, row.phong_khu_vuc);
-      const count = Number(row.giuong ?? 0);
-      if (count > 0) {
+      const key = buildRoomKey(row?.ktx ?? '', row?.day ?? '', row?.phong_khu_vuc ?? '');
+      const count = Number(row?.giuong ?? 0);
+      if (Number.isFinite(count) && count > 0) {
         map[key] = count;
       }
     }

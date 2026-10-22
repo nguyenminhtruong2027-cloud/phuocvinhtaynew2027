@@ -21,6 +21,7 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
 
 export default function DaysHistogram() {
   const { workers } = useWorkers();
+  const workerList = Array.isArray(workers) ? workers : [];
   const buckets = [
     { label: '1–7', min: 1, max: 7 },
     { label: '8–14', min: 8, max: 14 },
@@ -32,8 +33,8 @@ export default function DaysHistogram() {
 
   const data = buckets.map(b => ({
     name: b.label,
-    count: workers.filter(w => {
-      const d = calcSoNgay(w.ngayVaoKTX, w.ngayRaKTX);
+    count: workerList.filter(w => {
+      const d = calcSoNgay(w?.ngayVaoKTX, w?.ngayRaKTX);
       return d !== null && d >= b.min && d <= b.max;
     }).length,
   }));

@@ -39,21 +39,22 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
 export default function PlatoonBarChart() {
   const { workers } = useWorkers();
 
-  const platoons = useMemo(() => getUniquePlatoons(workers), [workers]);
-  const buildings = useMemo(() => getUniqueBuildings(workers), [workers]);
+  const platoons = useMemo(() => getUniquePlatoons(workers || []), [workers]);
+  const buildings = useMemo(() => getUniqueBuildings(workers || []), [workers]);
 
   const data = useMemo(() => {
-    const platoonList = platoons;
+    const platoonList = platoons || [];
+    const safeWorkers = workers || [];
     return platoonList.map(td => {
       const entry: Record<string, string | number> = { name: `Tiểu Đoàn ${td}` };
       buildings.forEach(b => {
-        entry[b] = workers.filter(w => w.tieuDoan === td && w.day === b).length;
+        entry[b] = safeWorkers.filter(w => w?.tieuDoan === td && w?.day === b).length;
       });
       return entry;
     });
   }, [workers, platoons, buildings]);
 
-  const displayBuildings = buildings;
+  const displayBuildings = buildings || [];
 
   return (
     <div className="bg-[#1F2937] border border-gray-700/60 rounded-2xl shadow-xl p-5 transition-all duration-200 hover:border-gray-600/80">

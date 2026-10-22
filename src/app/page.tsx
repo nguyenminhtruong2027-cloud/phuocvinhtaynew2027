@@ -562,8 +562,8 @@ function BlockTitle({
   buildingWorkerCount: number; totalCap: number; occupancyPct: number; barColor: string;
 }) {
   const blockKey = `${ktx} - ${building}`;
-  const assigned = assignments.find(a => a.blockKey.toLowerCase() === blockKey.toLowerCase());
-  const staffLabel = assigned ? `Phụ trách: ${assigned.staffName}` : 'Chưa gán';
+  const assigned = (assignments || []).find(a => a?.blockKey?.toLowerCase() === blockKey.toLowerCase());
+  const staffLabel = assigned ? `Phụ trách: ${assigned.staffName ?? ''}` : 'Chưa gán';
 
   return (
     <div className="mb-2.5">
@@ -688,7 +688,9 @@ export default function OccupancyDashboardPage() {
 
   // Filtered workers by selected KTX
   const filteredWorkers = useMemo(() =>
-    selectedKTX === 'all' ? workers : workers.filter(w => w.ktx === selectedKTX),
+    selectedKTX === 'all'
+      ? (workers || [])
+      : (workers || []).filter(w => w?.ktx === selectedKTX),
     [workers, selectedKTX]
   );
 
@@ -750,30 +752,34 @@ export default function OccupancyDashboardPage() {
 
   // ── Load room → don_vi mapping ─────────────────────────────────────────────
   useEffect(() => {
-    const supabase = createClient();
     const fetchRoomUnits = async () => {
-      let allData: { ktx: string; day: string; phong_so: string; don_vi: string }[] = [];
-      let from = 0;
-      const SIZE = 1000;
-      let hasMore = true;
-      while (hasMore) {
-        const { data: batch } = await supabase
-          .from('workers')
-          .select('ktx, day, phong_so, don_vi')
-          .not('phong_so', 'is', null)
-          .not('don_vi', 'is', null)
-          .range(from, from + SIZE - 1);
-        if (!batch || batch.length === 0) { hasMore = false; break; }
-        allData = allData.concat(batch as { ktx: string; day: string; phong_so: string; don_vi: string }[]);
-        if (batch.length < SIZE) hasMore = false; else from += SIZE;
+      try {
+        const supabase = createClient();
+        let allData: { ktx: string; day: string; phong_so: string; don_vi: string }[] = [];
+        let from = 0;
+        const SIZE = 1000;
+        let hasMore = true;
+        while (hasMore) {
+          const { data: batch, error: batchErr } = await supabase
+            .from('workers')
+            .select('ktx, day, phong_so, don_vi')
+            .not('phong_so', 'is', null)
+            .not('don_vi', 'is', null)
+            .range(from, from + SIZE - 1);
+          if (batchErr || !batch || batch.length === 0) { hasMore = false; break; }
+          allData = allData.concat(batch as { ktx: string; day: string; phong_so: string; don_vi: string }[]);
+          if (batch.length < SIZE) hasMore = false; else from += SIZE;
+        }
+        const map: Record<string, string> = {};
+        allData.forEach(row => {
+          if (!row?.ktx || !row?.day || !row?.phong_so || !row?.don_vi?.trim()) return;
+          const key = `${row.ktx}||${row.day}||${row.phong_so}`;
+          if (!map[key]) map[key] = row.don_vi.trim();
+        });
+        setRoomUnitMap(map);
+      } catch (err) {
+        console.warn('[Dashboard] Load room unit map failed (offline?):', err);
       }
-      const map: Record<string, string> = {};
-      allData.forEach(row => {
-        if (!row.ktx || !row.day || !row.phong_so || !row.don_vi?.trim()) return;
-        const key = `${row.ktx}||${row.day}||${row.phong_so}`;
-        if (!map[key]) map[key] = row.don_vi.trim();
-      });
-      setRoomUnitMap(map);
     };
     fetchRoomUnits();
   }, [workers.length]);
@@ -829,8 +835,8 @@ export default function OccupancyDashboardPage() {
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     let entered = 0;
     let left = 0;
-    workers.forEach(w => {
-      if (w.ngayVaoKTX) {
+    (workers || []).forEach(w => {
+      if (w?.ngayVaoKTX) {
         const d = new Date(w.ngayVaoKTX);
         if (!isNaN(d.getTime())) {
           const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

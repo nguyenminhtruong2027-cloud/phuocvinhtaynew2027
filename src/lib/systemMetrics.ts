@@ -85,6 +85,16 @@ export function computeSystemMetrics(
   const safeRoomGenderMap = roomGenderMap && typeof roomGenderMap === 'object' ? roomGenderMap : {};
   const activeKtxList = getActiveKtxList(safeWorkers, knownKtxList);
 
+  // Defensive capacity lookup: never throw / NaN even if facilities data is incomplete.
+  const safeCap = (k: string, b: string, r: string): number => {
+    try {
+      const v = getCapacity(k, b, r);
+      return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0;
+    } catch {
+      return 0;
+    }
+  };
+
   // Filter workers based on selected KTX
   const filteredWorkers = selectedKtx === 'all'
     ? safeWorkers
@@ -146,7 +156,7 @@ export function computeSystemMetrics(
   let capacity = 0;
   uniqueRooms.forEach(roomKey => {
     const [k, b, r] = roomKey.split('||');
-    capacity += getCapacity(k, b, r);
+    capacity += safeCap(k, b, r);
   });
   const workersWithoutRoom = Math.max(0, selectedWorkersCount - workersWithRoom);
   const fillRate = capacity > 0 ? Math.round((workersWithRoom / capacity) * 100) : 0;
@@ -157,7 +167,7 @@ export function computeSystemMetrics(
   let emptyRoomsCount = 0;
   roomOccupancyMap.forEach((rWorkers, roomKey) => {
     const [k, b, r] = roomKey.split('||');
-    if (rWorkers.length > getCapacity(k, b, r)) overloadedRooms++;
+    if (rWorkers.length > safeCap(k, b, r)) overloadedRooms++;
     if (rWorkers.length === 0) emptyRoomsCount++;
   });
 
@@ -263,7 +273,7 @@ export function computeSystemMetrics(
     let ktxCapacity = 0;
     ktxRooms.forEach((_rWorkers, rKey) => {
       const [k, b, r] = rKey.split('||');
-      ktxCapacity += getCapacity(k, b, r);
+      ktxCapacity += safeCap(k, b, r);
     });
     const ktxFillRate = ktxCapacity > 0 ? Math.round((withRoomCount / ktxCapacity) * 100) : 0;
     const vacant = Math.max(0, ktxCapacity - withRoomCount);
