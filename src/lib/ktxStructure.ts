@@ -153,6 +153,35 @@ export async function fetchDynamicKtxStructure(forceRefresh = false): Promise<Kt
         }
       }
 
+      // Source 2.5: facilities table (ktx, day) — auto-discovers new KTX/dãy created in facilities
+      from = 0;
+      hasMore = true;
+      while (hasMore) {
+        const { data: facilityRows, error: facilityErr } = await supabase
+          .from('facilities')
+          .select('ktx, day')
+          .range(from, from + PAGE_SIZE - 1);
+
+        if (facilityErr) {
+          console.warn('[ktxStructure] Warning fetching facilities:', facilityErr.message);
+          break;
+        }
+
+        if (facilityRows && facilityRows.length > 0) {
+          facilityRows.forEach(row => {
+            addEntry(row.ktx, row.day);
+          });
+
+          if (facilityRows.length < PAGE_SIZE) {
+            hasMore = false;
+          } else {
+            from += PAGE_SIZE;
+          }
+        } else {
+          hasMore = false;
+        }
+      }
+
       // Source 3: profiles.assigned_blocks
       const { data: profileRows, error: profileErr } = await supabase
         .from('profiles')
@@ -233,6 +262,21 @@ export function useKtxStructure() {
     if (!_cachedKtxStructure) {
       reload(false);
     }
+  }, [reload]);
+
+  // Realtime: auto-discover new KTX/dãy the moment workers/facilities/room_units/profiles change.
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel('ktx_structure_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'workers' }, () => reload(true))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, () => reload(true))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_units' }, () => reload(true))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => reload(true))
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [reload]);
 
   const ktxNames = ktxGroups.map(g => g.ktx);

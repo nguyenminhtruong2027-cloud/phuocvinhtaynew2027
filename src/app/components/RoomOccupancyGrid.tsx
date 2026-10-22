@@ -78,15 +78,21 @@ export default function RoomOccupancyGrid() {
     fetchCapacities();
     const supabase = createClient();
     const channel = supabase
-      .channel('facilities_realtime_capacity')
+      .channel('room_diagram_realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, () => {
         fetchCapacities();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_units' }, () => {
+        fetchRoomUnitAssignments();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'beds' }, () => {
+        fetchRoomUnitAssignments();
       })
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [fetchCapacities]);
+  }, [fetchCapacities, fetchRoomUnitAssignments]);
 
   // Build unique KTX list
   const ktxList = useMemo(() => {
