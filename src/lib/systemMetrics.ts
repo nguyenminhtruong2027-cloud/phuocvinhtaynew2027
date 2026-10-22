@@ -1,4 +1,4 @@
-import { Worker, ROOM_CAPACITY, compareKtxNames } from '@/data/workers';
+import { Worker, DEFAULT_ROOM_CAPACITY, compareKtxNames, RoomCapacityLookup } from '@/data/workers';
 import { getRoomGenderInfo, normalizeGender } from '@/lib/roomGender';
 
 export interface KtxMetricItem {
@@ -78,7 +78,8 @@ export function computeSystemMetrics(
   workers: Worker[] = [],
   roomGenderMap: Record<string, 'male' | 'female' | 'auto'> = {},
   selectedKtx: string = 'all',
-  knownKtxList: string[] = []
+  knownKtxList: string[] = [],
+  getCapacity: RoomCapacityLookup = () => DEFAULT_ROOM_CAPACITY
 ): SystemMetrics {
   const safeWorkers = Array.isArray(workers) ? workers : [];
   const safeRoomGenderMap = roomGenderMap && typeof roomGenderMap === 'object' ? roomGenderMap : {};
@@ -142,7 +143,11 @@ export function computeSystemMetrics(
   const buildingCount = uniqueBuildings.length;
   const uniqueRooms = Array.from(roomSet);
   const roomCount = uniqueRooms.length;
-  const capacity = roomCount * ROOM_CAPACITY;
+  let capacity = 0;
+  uniqueRooms.forEach(roomKey => {
+    const [k, b, r] = roomKey.split('||');
+    capacity += getCapacity(k, b, r);
+  });
   const workersWithoutRoom = Math.max(0, selectedWorkersCount - workersWithRoom);
   const fillRate = capacity > 0 ? Math.round((workersWithRoom / capacity) * 100) : 0;
   const vacantSpots = Math.max(0, capacity - workersWithRoom);
@@ -150,8 +155,9 @@ export function computeSystemMetrics(
   // Overloaded & empty room counts
   let overloadedRooms = 0;
   let emptyRoomsCount = 0;
-  roomOccupancyMap.forEach(rWorkers => {
-    if (rWorkers.length > ROOM_CAPACITY) overloadedRooms++;
+  roomOccupancyMap.forEach((rWorkers, roomKey) => {
+    const [k, b, r] = roomKey.split('||');
+    if (rWorkers.length > getCapacity(k, b, r)) overloadedRooms++;
     if (rWorkers.length === 0) emptyRoomsCount++;
   });
 
@@ -254,7 +260,11 @@ export function computeSystemMetrics(
     });
 
     const totalRooms = ktxRooms.size;
-    const ktxCapacity = totalRooms * ROOM_CAPACITY;
+    let ktxCapacity = 0;
+    ktxRooms.forEach((_rWorkers, rKey) => {
+      const [k, b, r] = rKey.split('||');
+      ktxCapacity += getCapacity(k, b, r);
+    });
     const ktxFillRate = ktxCapacity > 0 ? Math.round((withRoomCount / ktxCapacity) * 100) : 0;
     const vacant = Math.max(0, ktxCapacity - withRoomCount);
     const overflow = Math.max(0, withRoomCount - ktxCapacity);

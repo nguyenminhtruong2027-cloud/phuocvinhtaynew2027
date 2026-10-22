@@ -128,37 +128,6 @@ function getKtxTheme(ktxName: string) {
   };
 }
 
-const DEFAULT_FALLBACK_SPECIALISTS: SpecialistItem[] = [
-  {
-    id: 'admin-pvt-master',
-    name: 'Quản Trị Viên Phước Vĩnh Tây',
-    email: 'adminpvt@ktx.com',
-    role: 'admin',
-    assignedBlocks: [],
-  },
-  {
-    id: 'staff-pvt-01',
-    name: 'Nguyễn Văn Hùng (Bảo Vệ / Quản Lý)',
-    email: 'staffpvt@ktx.com',
-    role: 'staff',
-    assignedBlocks: ['KTX 1 - Dãy 1', 'KTX 1 - Dãy 2', 'KTX 1 - Dãy 3'],
-  },
-  {
-    id: 'staff-pvt-02',
-    name: 'Trần Văn Toàn (Quản Lý Dãy)',
-    email: 'toantran@ktx.com',
-    role: 'staff',
-    assignedBlocks: ['KTX 2 - Dãy 1', 'KTX 2 - Dãy 2'],
-  },
-  {
-    id: 'staff-pvt-03',
-    name: 'Lê Thị Mai (Quản Lý Dãy)',
-    email: 'maile@ktx.com',
-    role: 'staff',
-    assignedBlocks: ['KTX 3 - Dãy 1', 'KTX 3 - Dãy 2'],
-  },
-];
-
 export default function ExecutiveSpecialistsCard({
   specialists: propsSpecialists,
   onDutyRosterChange,
@@ -184,7 +153,7 @@ export default function ExecutiveSpecialistsCard({
         }
       }
     } catch {}
-    return DEFAULT_FALLBACK_SPECIALISTS;
+    return [];
   });
   const [dutyMap, setDutyMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -211,7 +180,7 @@ export default function ExecutiveSpecialistsCard({
 
   // 1. Fetch profiles directly if not provided via props
   const loadProfiles = useCallback(async () => {
-    let localFormatted: SpecialistItem[] = DEFAULT_FALLBACK_SPECIALISTS;
+    let localFormatted: SpecialistItem[] = [];
     try {
       const raw = typeof window !== 'undefined' ? localStorage.getItem('ktx_local_profiles') : null;
       if (raw) {
@@ -352,7 +321,7 @@ export default function ExecutiveSpecialistsCard({
     if (internalProfiles && internalProfiles.length > 0) {
       return internalProfiles;
     }
-    return DEFAULT_FALLBACK_SPECIALISTS;
+    return [];
   }, [propsSpecialists, internalProfiles]);
 
   // Merge specialist list with duty assignment from database/localStorage
@@ -367,7 +336,7 @@ export default function ExecutiveSpecialistsCard({
         id: sp.id,
         name: sp.name,
         email: sp.email,
-        phone: sp.phone || '0988 123 456',
+        phone: sp.phone,
         role: sp.role,
         assignedBlocks: sp.role === 'admin' ? [] : (sp.assignedBlocks ?? []),
         dutyKtx: effectiveDutyKtx,

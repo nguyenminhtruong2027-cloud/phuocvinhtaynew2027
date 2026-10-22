@@ -3,7 +3,8 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import { useWorkers } from '@/context/WorkerContext';
-import { getUniqueKTX, getUniqueBuildings, getUniqueRooms, countUniqueBuildings, aggregateKtxOccupancy, ROOM_CAPACITY } from '@/data/workers';
+import { getUniqueKTX, getUniqueBuildings, getUniqueRooms, countUniqueBuildings, aggregateKtxOccupancy, DEFAULT_ROOM_CAPACITY } from '@/data/workers';
+import { fetchRoomCapacities, getRoomCapacity, RoomCapacityMap } from '@/lib/facilityCapacity';
 import KtxOccupancyBreakdown from './components/KtxOccupancyBreakdown';
 import {
   Users, LayoutGrid, FileSpreadsheet, Wifi,
@@ -600,6 +601,7 @@ export default function OccupancyDashboardPage() {
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [roomUnitMap, setRoomUnitMap] = useState<Record<string, string>>({});
   const [roomGenderMap, setRoomGenderMap] = useState<Record<string, 'male' | 'female' | 'auto'>>({});
+  const [capacities, setCapacities] = useState<RoomCapacityMap>({});
 
   // Load and sync room gender designations
   useEffect(() => {
@@ -617,12 +619,34 @@ export default function OccupancyDashboardPage() {
     });
   }, []);
 
+  // Load room capacities from facilities + realtime
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      const map = await fetchRoomCapacities();
+      if (active) setCapacities(map);
+    };
+    load();
+    const supabase = createClient();
+    const channel = supabase
+      .channel('dashboard_facilities_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, () => {
+        load();
+      })
+      .subscribe();
+    return () => {
+      active = false;
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
   const isEmpty = !loading && workers.length === 0;
 
   // ── Unified Single Source of Truth for all operational metrics ───────────
   const systemMetrics = useMemo(() => {
-    return computeSystemMetrics(workers, roomGenderMap, selectedKTX, ktxNames);
-  }, [workers, roomGenderMap, selectedKTX, ktxNames]);
+    const getCap = (k: string, b: string, r: string) => getRoomCapacity(capacities, k, b, r) || DEFAULT_ROOM_CAPACITY;
+    return computeSystemMetrics(workers, roomGenderMap, selectedKTX, ktxNames, getCap);
+  }, [workers, roomGenderMap, selectedKTX, ktxNames, capacities]);
 
   // Dynamically retrieved KTX list that actually exist in the database (Supabase)
   // Guaranteed NO hardcoded, virtual, or empty KTXs (no KTX 4, KTX 5).
@@ -672,37 +696,6 @@ export default function OccupancyDashboardPage() {
 
   // ── Load block assignments & specialists from profiles ───────────────────
   useEffect(() => {
-    const DEFAULT_STAFF_PROFILES = [
-      {
-        id: 'admin-pvt-master',
-        full_name: 'Quản Trị Viên Phước Vĩnh Tây',
-        email: 'adminpvt@ktx.com',
-        role: 'admin',
-        assigned_blocks: [],
-      },
-      {
-        id: 'staff-pvt-01',
-        full_name: 'Nguyễn Văn Hùng (Bảo Vệ / Quản Lý)',
-        email: 'staffpvt@ktx.com',
-        role: 'staff',
-        assigned_blocks: ['KTX 1 - Dãy 1', 'KTX 1 - Dãy 2', 'KTX 1 - Dãy 3'],
-      },
-      {
-        id: 'staff-pvt-02',
-        full_name: 'Trần Văn Toàn (Quản Lý Dãy)',
-        email: 'toantran@ktx.com',
-        role: 'staff',
-        assigned_blocks: ['KTX 2 - Dãy 1', 'KTX 2 - Dãy 2'],
-      },
-      {
-        id: 'staff-pvt-03',
-        full_name: 'Lê Thị Mai (Quản Lý Dãy)',
-        email: 'maile@ktx.com',
-        role: 'staff',
-        assigned_blocks: ['KTX 3 - Dãy 1', 'KTX 3 - Dãy 2'],
-      },
-    ];
-
     const loadStaff = async () => {
       let rawProfiles: any[] = [];
       try {
@@ -712,10 +705,6 @@ export default function OccupancyDashboardPage() {
           if (Array.isArray(parsed) && parsed.length > 0) rawProfiles = parsed;
         }
       } catch {}
-
-      if (rawProfiles.length === 0) {
-        rawProfiles = DEFAULT_STAFF_PROFILES;
-      }
 
       const supabase = createClient();
       try {
@@ -798,7 +787,10 @@ export default function OccupancyDashboardPage() {
   const workersWithRoom = useMemo(() => workers.filter(w => w.day && w.phongSo), [workers]);
   const fillRateAll = systemMetrics.fillRate;
 
-  const ktxOccupancy = useMemo(() => aggregateKtxOccupancy(workers), [workers]);
+  const ktxOccupancy = useMemo(() =>
+    aggregateKtxOccupancy(workers, (k, b, r) => getRoomCapacity(capacities, k, b, r) || DEFAULT_ROOM_CAPACITY),
+    [workers, capacities]
+  );
   const totalVacant = systemMetrics.vacantSpots;
 
   const filteredBuildingCount = systemMetrics.buildingCount;
@@ -824,9 +816,13 @@ export default function OccupancyDashboardPage() {
 
   const overloadedRooms = useMemo(() => {
     let count = 0;
-    roomWorkerMap.forEach(v => { if (v > ROOM_CAPACITY) count++; });
+    roomWorkerMap.forEach((v, key) => {
+      const [k, b, r] = key.split('||');
+      const cap = getRoomCapacity(capacities, k, b, r) || DEFAULT_ROOM_CAPACITY;
+      if (v > cap) count++;
+    });
     return count;
-  }, [roomWorkerMap]);
+  }, [roomWorkerMap, capacities]);
 
   useEffect(() => {
     const today = new Date();
@@ -1055,7 +1051,7 @@ export default function OccupancyDashboardPage() {
                 <div className="flex items-center justify-between text-xs text-gray-400 font-medium">
                   <span>Định mức thiết kế:</span>
                   <span className="text-indigo-300 font-semibold font-tabular">
-                    {ROOM_CAPACITY} người / phòng
+                    Theo số giường thực tế
                   </span>
                 </div>
               }
@@ -1110,7 +1106,7 @@ export default function OccupancyDashboardPage() {
                 <ExecutiveAlertCard
                   icon={XCircle}
                   label="Phòng Trống (0 người)"
-                  value={`${Array.from(roomWorkerMap.values()).filter(v => v === 0).length} phòng`}
+                  value={`${systemMetrics.emptyRooms} phòng`}
                   colorBg="bg-gray-800"
                   colorText="text-gray-400"
                   colorBorder="border-gray-700"
@@ -1118,7 +1114,7 @@ export default function OccupancyDashboardPage() {
                 />
                 <ExecutiveAlertCard
                   icon={AlertTriangle}
-                  label="Phòng Quá Tải (> 10)"
+                  label="Phòng Quá Tải"
                   value={`${overloadedRooms} phòng`}
                   colorBg={overloadedRooms > 0 ? "bg-rose-500/10" : "bg-gray-800"}
                   colorText={overloadedRooms > 0 ? "text-rose-400" : "text-gray-500"}
@@ -1543,7 +1539,10 @@ export default function OccupancyDashboardPage() {
                         {ktxBuildings.map(building => {
                           const buildingWorkers = ktxWorkers.filter(w => w.day === building);
                           const rooms = getUniqueRooms(ktxWorkers, building);
-                          const totalCap = rooms.length * ROOM_CAPACITY;
+                          const totalCap = rooms.reduce(
+                            (sum, room) => sum + (getRoomCapacity(capacities, ktx, building, room) || DEFAULT_ROOM_CAPACITY),
+                            0
+                          );
                           const occupancyPct = totalCap > 0 ? buildingWorkers.length / totalCap : 0;
                           const barColor = occupancyPct > 1 ? 'bg-rose-500' : occupancyPct >= 1 ? 'bg-amber-400' : occupancyPct >= 0.5 ? 'bg-emerald-400' : 'bg-blue-400';
                           return (
@@ -1572,7 +1571,7 @@ export default function OccupancyDashboardPage() {
                                       key={`${ktx}-${building}-${room}`}
                                       room={room}
                                       count={roomWorkers.length}
-                                      capacity={ROOM_CAPACITY}
+                                      capacity={getRoomCapacity(capacities, ktx, building, room) || DEFAULT_ROOM_CAPACITY}
                                       ktx={ktx}
                                       building={building}
                                       workers={roomWorkers.map(w => ({ hoVaTen: w.hoVaTen, maNV: w.maNV, gioiTinh: w.gioiTinh }))}

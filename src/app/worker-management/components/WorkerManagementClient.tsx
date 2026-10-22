@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Worker, getProfileStatus, calcSoNgay, ROOM_CAPACITY, removeAccents } from '@/data/workers';
+import { Worker, getProfileStatus, calcSoNgay, DEFAULT_ROOM_CAPACITY, removeAccents } from '@/data/workers';
 import WorkerTable from './WorkerTable';
 import WorkerFilters from './WorkerFilters';
 import WorkerFormModal from './WorkerFormModal';
@@ -1125,7 +1125,7 @@ export function WorkerManagementClient() {
     const count = workers.filter(w =>
       w.ktx === ktx && w.day === day && w.phongSo === phongSo && w.id !== excludeId
     ).length;
-    return { count, overCapacity: count >= ROOM_CAPACITY };
+    return { count, overCapacity: count >= DEFAULT_ROOM_CAPACITY };
   }, [workers]);
 
   const handleSave = useCallback(async (data: Worker) => {
@@ -1143,13 +1143,13 @@ export function WorkerManagementClient() {
       if (isRoomChange) {
         const { count, overCapacity } = checkRoomCapacity(data.ktx, data.day, data.phongSo, data.id);
         if (overCapacity) {
-          toast.warning(`⚠️ Phòng quá tải: ${count + 1}/${ROOM_CAPACITY} người — vẫn lưu được.`);
+          toast.warning(`⚠️ Phòng quá tải: ${count + 1}/${DEFAULT_ROOM_CAPACITY} người — vẫn lưu được.`);
         }
       }
     } else {
       const { count, overCapacity } = checkRoomCapacity(data.ktx, data.day, data.phongSo);
       if (overCapacity) {
-        toast.warning(`⚠️ Phòng quá tải: ${count + 1}/${ROOM_CAPACITY} người — vẫn lưu được.`);
+        toast.warning(`⚠️ Phòng quá tải: ${count + 1}/${DEFAULT_ROOM_CAPACITY} người — vẫn lưu được.`);
       }
     }
 

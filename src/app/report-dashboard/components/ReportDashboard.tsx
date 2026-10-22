@@ -7,7 +7,7 @@ import {
   Calendar, Clock, RefreshCw, Filter, X, Building, BarChart2, CheckCircle2
 } from 'lucide-react';
 import { useWorkers } from '@/context/WorkerContext';
-import { Worker, ROOM_CAPACITY, getUniqueBuildings, getUniqueRooms, countUniqueBuildings } from '@/data/workers';
+import { Worker, DEFAULT_ROOM_CAPACITY, getUniqueBuildings, getUniqueRooms, countUniqueBuildings } from '@/data/workers';
 import { getActiveKtxList } from '@/lib/systemMetrics';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -260,7 +260,7 @@ export default function ReportDashboard() {
     const buildingCount = countUniqueBuildings(filtered);
     const roomSet = new Set(filtered.map(w => `${w.ktx}||${w.day}||${w.phongSo}`).filter(k => !k.startsWith('||')));
     const roomCount = roomSet.size;
-    const capacity = roomCount * ROOM_CAPACITY;
+    const capacity = roomCount * DEFAULT_ROOM_CAPACITY;
     const workersWithRoom = filtered.filter(w => w.day && w.phongSo).length;
     const fillRate = capacity > 0 ? Math.round((workersWithRoom / capacity) * 100) : 0;
     const missingData = filtered.filter(w => !w.day || !w.phongSo).length;
@@ -296,7 +296,7 @@ export default function ReportDashboard() {
 
     activeKtxList.forEach(k => {
       const rooms = roomsMap[k]?.size || 0;
-      const capacity = rooms * ROOM_CAPACITY;
+      const capacity = rooms * DEFAULT_ROOM_CAPACITY;
       map[k].rooms = rooms;
       map[k].capacity = capacity;
       map[k].fillRate = capacity > 0 ? Math.round((map[k].total / capacity) * 100) : 0;

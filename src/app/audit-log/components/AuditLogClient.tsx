@@ -12,6 +12,10 @@ const ACTION_COLORS: Record<AuditAction, string> = {
   'Chuyển phòng': 'bg-orange-100 text-orange-700 border-orange-200',
   'Đổi trạng thái tạm trú': 'bg-purple-100 text-purple-700 border-purple-200',
   'Import': 'bg-cyan-100 text-cyan-700 border-cyan-200',
+  CREATE: 'bg-green-100 text-green-700 border-green-200',
+  UPDATE: 'bg-blue-100 text-blue-700 border-blue-200',
+  DELETE: 'bg-red-100 text-red-700 border-red-200',
+  IMPORT: 'bg-cyan-100 text-cyan-700 border-cyan-200',
 };
 
 const ALL_ACTIONS: AuditAction[] = ['Thêm', 'Sửa', 'Xóa', 'Chuyển phòng', 'Đổi trạng thái tạm trú', 'Import'];

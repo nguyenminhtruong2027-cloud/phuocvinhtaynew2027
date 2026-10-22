@@ -297,6 +297,16 @@ export default function AttendancePortalClient() {
 
   useEffect(() => { fetchSessions(selectedDate); }, [selectedDate, fetchSessions]);
 
+  useEffect(() => {
+    const channel = supabase
+      .channel('attendance_sessions_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_sessions' }, () => {
+        fetchSessions(selectedDate, true);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchSessions, selectedDate, supabase]);
+
   // ─── Load records ─────────────────────────────────────────────────────────
   const fetchRecords = useCallback(async (silent = false) => {
     if (!activeSession) return;

@@ -59,7 +59,7 @@ function MaNVCell({ value }: { value: string }) {
   return <span className="text-xs font-tabular font-bold text-gray-200 whitespace-nowrap">{value}</span>;
 }
 
-function CCCDCell({ value }: { value: string }) {
+function CCCDCell({ value }: { value: string | undefined }) {
   if (!value) {
     return (
       <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30 whitespace-nowrap shrink-0">

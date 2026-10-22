@@ -45,6 +45,7 @@ interface AuthContextValue {
   deleteUser: (id: string) => void;
   toggleUserStatus: (id: string) => void;
   updateProfile: (updates: { name?: string; email?: string }) => void;
+  changePassword: (password: string) => Promise<void>;
   setCurrentUser: (user: AppUser) => void;
 }
 
@@ -58,68 +59,60 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const supabase = supabaseRef.current;
 
   useEffect(() => {
-    // 1. Check local session first
-    let hasLocal = false;
-    try {
-      const savedLocal = typeof window !== 'undefined' ? localStorage.getItem('ktx_local_user') : null;
-      if (savedLocal) {
-        const parsed = JSON.parse(savedLocal);
-        if (parsed?.id && parsed?.role) {
-          setCurrentUserState(parsed);
-          hasLocal = true;
+    let mounted = true;
+
+    const resolveUser = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!mounted) return;
+        if (user) {
+          await loadUserProfile(user.id, user.email ?? '');
+        } else {
+          setCurrentUserState(null);
+          setLoading(false);
+        }
+      } catch {
+        if (mounted) {
+          setCurrentUserState(null);
           setLoading(false);
         }
       }
-    } catch {}
+    };
 
-    // 2. Check Supabase session with safety timeout
-    let resolved = false;
-    const safetyTimeout = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        setLoading(false);
-      }
-    }, 2500);
-
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      resolved = true;
-      clearTimeout(safetyTimeout);
-      if (session?.user) {
-        await loadUserProfile(session.user.id, session.user.email ?? '');
-      } else {
-        setLoading(false);
-      }
-    }).catch(() => {
-      resolved = true;
-      clearTimeout(safetyTimeout);
-      setLoading(false);
-    });
+    resolveUser();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
         await loadUserProfile(session.user.id, session.user.email ?? '');
       } else {
-        try {
-          const savedLocal = localStorage.getItem('ktx_local_user');
-          if (savedLocal) {
-            const parsed = JSON.parse(savedLocal);
-            if (parsed?.id && parsed?.role) {
-              setCurrentUserState(parsed);
-              setLoading(false);
-              return;
-            }
-          }
-        } catch {}
         setCurrentUserState(null);
         setLoading(false);
       }
     });
 
     return () => {
-      clearTimeout(safetyTimeout);
+      mounted = false;
       subscription.unsubscribe();
     };
   }, []);
+
+  // Keep the current user's displayed name/role in sync with `profiles` in real time.
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const channel = supabase
+      .channel(`profile_realtime_${currentUser.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${currentUser.id}` },
+        () => {
+          loadUserProfile(currentUser.id, currentUser.email ?? '');
+        }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser?.id, currentUser?.email, supabase]);
 
   const loadUserProfile = async (userId: string, email: string) => {
     try {
@@ -171,7 +164,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signIn = useCallback(async (email: string, password: string) => {
-    let trimmedEmail = (email || '').trim().toLowerCase();
+    const trimmedEmail = (email || '').trim();
     const trimmedPassword = (password || '').trim();
 
     if (!trimmedEmail) {
@@ -181,147 +174,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Vui lòng nhập Mật khẩu.');
     }
 
-    // Auto-expand shortcut usernames
-    if (trimmedEmail === 'admin' || trimmedEmail === 'adminpvt') {
-      trimmedEmail = 'adminpvt@ktx.com';
-    } else if (trimmedEmail === 'staff' || trimmedEmail === 'staffpvt') {
-      trimmedEmail = 'staffpvt@ktx.com';
-    }
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: trimmedEmail,
+      password: trimmedPassword,
+    });
 
-    const isDefaultAdmin = trimmedEmail === 'adminpvt@ktx.com' || trimmedEmail === 'admin@ktx.com';
-    const isDefaultStaff = trimmedEmail === 'staffpvt@ktx.com' || trimmedEmail === 'staff@ktx.com';
-    const isStaffToan = trimmedEmail === 'toantran@ktx.com';
-    const isStaffMai = trimmedEmail === 'maile@ktx.com';
-
-    // 1. Try Supabase Auth with quick timeout
-    try {
-      const authPromise = supabase.auth.signInWithPassword({
-        email: trimmedEmail,
-        password: trimmedPassword,
-      });
-
-      const timeoutPromise = new Promise<{ data: { session: null }; error: Error }>((resolve) => {
-        setTimeout(() => resolve({ data: { session: null }, error: new Error('timeout') }), 2000);
-      });
-
-      const res = await Promise.race([authPromise, timeoutPromise]);
-
-      if (!res.error && res.data?.session?.user) {
-        try {
-          localStorage.removeItem('ktx_local_user');
-        } catch {}
-        await loadUserProfile(res.data.session.user.id, res.data.session.user.email ?? trimmedEmail);
-        return;
+    if (error) {
+      const msg = (error.message || '').toLowerCase();
+      if (msg.includes('invalid login credentials') || msg.includes('invalid_credentials')) {
+        throw new Error('Email hoặc mật khẩu không đúng. Vui lòng kiểm tra lại.');
       }
-    } catch {}
-
-    // 2. Check local profiles database (created or stored locally)
-    try {
-      const rawProfiles = typeof window !== 'undefined' ? localStorage.getItem('ktx_local_profiles') : null;
-      if (rawProfiles) {
-        const parsedList = JSON.parse(rawProfiles);
-        if (Array.isArray(parsedList)) {
-          const matched = parsedList.find((p: any) => p?.email?.toLowerCase() === trimmedEmail);
-          if (matched) {
-            // Verify password if recorded, else allow standard fallback
-            if (matched.password && matched.password !== trimmedPassword && trimmedPassword !== 'admin123' && trimmedPassword !== '123456') {
-              throw new Error('Mật khẩu không đúng cho tài khoản này.');
-            }
-
-            const localUser: AppUser = {
-              id: matched.id || `local-${Date.now()}`,
-              email: matched.email,
-              name: matched.full_name || matched.name || matched.email.split('@')[0],
-              role: (matched.role as UserRole) || 'staff',
-              status: 'active',
-              assignedBlocks: matched.assigned_blocks || [],
-            };
-
-            try {
-              localStorage.setItem('ktx_local_user', JSON.stringify(localUser));
-            } catch {}
-            setCurrentUserState(localUser);
-            setLoading(false);
-            return;
-          }
-        }
-      }
-    } catch (err: any) {
-      if (err.message && err.message.includes('Mật khẩu không đúng')) {
-        throw err;
-      }
+      throw new Error(error.message);
     }
 
-    // 3. Default Seed Accounts for KTX Phước Vĩnh Tây
-    if (isDefaultAdmin) {
-      const adminUser: AppUser = {
-        id: 'admin-pvt-master',
-        email: 'adminpvt@ktx.com',
-        name: 'Quản Trị Viên Phước Vĩnh Tây',
-        role: 'admin',
-        status: 'active',
-        assignedBlocks: [],
-      };
-      try {
-        localStorage.setItem('ktx_local_user', JSON.stringify(adminUser));
-      } catch {}
-      setCurrentUserState(adminUser);
-      setLoading(false);
-      return;
+    if (data?.session?.user) {
+      await loadUserProfile(data.session.user.id, data.session.user.email ?? trimmedEmail);
     }
-
-    if (isDefaultStaff) {
-      const staffUser: AppUser = {
-        id: 'staff-pvt-01',
-        email: 'staffpvt@ktx.com',
-        name: 'Nguyễn Văn Hùng (Bảo Vệ / Quản Lý)',
-        role: 'staff',
-        status: 'active',
-        assignedBlocks: ['KTX 1 - Dãy 1', 'KTX 1 - Dãy 2', 'KTX 1 - Dãy 3'],
-      };
-      try {
-        localStorage.setItem('ktx_local_user', JSON.stringify(staffUser));
-      } catch {}
-      setCurrentUserState(staffUser);
-      setLoading(false);
-      return;
-    }
-
-    if (isStaffToan) {
-      const toanUser: AppUser = {
-        id: 'staff-pvt-02',
-        email: 'toantran@ktx.com',
-        name: 'Trần Văn Toàn (Quản Lý Dãy)',
-        role: 'staff',
-        status: 'active',
-        assignedBlocks: ['KTX 2 - Dãy 1', 'KTX 2 - Dãy 2'],
-      };
-      try {
-        localStorage.setItem('ktx_local_user', JSON.stringify(toanUser));
-      } catch {}
-      setCurrentUserState(toanUser);
-      setLoading(false);
-      return;
-    }
-
-    if (isStaffMai) {
-      const maiUser: AppUser = {
-        id: 'staff-pvt-03',
-        email: 'maile@ktx.com',
-        name: 'Lê Thị Mai (Quản Lý Dãy)',
-        role: 'staff',
-        status: 'active',
-        assignedBlocks: ['KTX 3 - Dãy 1', 'KTX 3 - Dãy 2'],
-      };
-      try {
-        localStorage.setItem('ktx_local_user', JSON.stringify(maiUser));
-      } catch {}
-      setCurrentUserState(maiUser);
-      setLoading(false);
-      return;
-    }
-
-    throw new Error('Email hoặc mật khẩu không đúng. Vui lòng kiểm tra lại hoặc đăng nhập bằng tài khoản Quản trị: adminpvt@ktx.com (mật khẩu: admin123).');
   }, [supabase]);
 
   const signOut = useCallback(async () => {
@@ -378,7 +246,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const updateUser = useCallback((_id: string, _updates: Partial<AppUser>) => {}, []);
   const deleteUser = useCallback((_id: string) => {}, []);
   const toggleUserStatus = useCallback((_id: string) => {}, []);
-  const updateProfile = useCallback((_updates: { name?: string; email?: string }) => {}, []);
+  const updateProfile = useCallback(async (updates: { name?: string; email?: string }) => {
+    if (!currentUser) return;
+    const payload: { full_name?: string; email?: string } = {};
+    if (typeof updates.name === 'string') payload.full_name = updates.name;
+    if (typeof updates.email === 'string') payload.email = updates.email;
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .update(payload)
+      .eq('id', currentUser.id)
+      .select('id, email, full_name, role, assigned_blocks')
+      .single();
+
+    if (!error && data) {
+      setCurrentUserState(prev => prev ? {
+        ...prev,
+        name: data.full_name ?? prev.name,
+        email: data.email ?? prev.email,
+      } : prev);
+    }
+  }, [currentUser, supabase]);
+
+  const changePassword = useCallback(async (password: string) => {
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) throw new Error(error.message);
+  }, [supabase]);
+
   const setCurrentUser = useCallback((user: AppUser) => { setCurrentUserState(user); }, []);
 
   return (
@@ -404,6 +298,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       deleteUser,
       toggleUserStatus,
       updateProfile,
+      changePassword,
       setCurrentUser,
     }}>
       {children}

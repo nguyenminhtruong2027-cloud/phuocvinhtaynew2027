@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ROOM_CAPACITY } from '@/data/workers';
+import { DEFAULT_ROOM_CAPACITY } from '@/data/workers';
+import { fetchRoomCapacities, getRoomCapacity, RoomCapacityMap } from '@/lib/facilityCapacity';
 import { useWorkers } from '@/context/WorkerContext';
 import { Users } from 'lucide-react';
 import dynamic from 'next/dynamic';
@@ -44,6 +45,7 @@ export default function RoomOccupancyGrid() {
   const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null);
   const [drawerRoom, setDrawerRoom] = useState<{ ktx: string; building: string; room: string } | null>(null);
   const [roomUnitAssignments, setRoomUnitAssignments] = useState<RoomUnitAssignment[]>([]);
+  const [capacities, setCapacities] = useState<RoomCapacityMap>({});
 
   // Fetch admin-assigned unit labels from Supabase
   const fetchRoomUnitAssignments = useCallback(async () => {
@@ -66,6 +68,25 @@ export default function RoomOccupancyGrid() {
   useEffect(() => {
     fetchRoomUnitAssignments();
   }, [fetchRoomUnitAssignments]);
+
+  const fetchCapacities = useCallback(async () => {
+    const map = await fetchRoomCapacities();
+    setCapacities(map);
+  }, []);
+
+  useEffect(() => {
+    fetchCapacities();
+    const supabase = createClient();
+    const channel = supabase
+      .channel('facilities_realtime_capacity')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, () => {
+        fetchCapacities();
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchCapacities]);
 
   // Build unique KTX list
   const ktxList = useMemo(() => {
@@ -249,7 +270,10 @@ export default function RoomOccupancyGrid() {
           {filteredGroups.map((group) => {
             const groupWorkers = workers.filter(w => w.ktx === group.ktx && w.day === group.building);
             const rooms = getRoomsForGroup(group.ktx, group.building);
-            const totalCapacity = rooms.length * ROOM_CAPACITY;
+            const totalCapacity = rooms.reduce(
+              (sum, room) => sum + (getRoomCapacity(capacities, group.ktx, group.building, room) || DEFAULT_ROOM_CAPACITY),
+              0
+            );
             const occupancyPct = totalCapacity > 0 ? groupWorkers.length / totalCapacity : 0;
 
             return (
@@ -278,7 +302,8 @@ export default function RoomOccupancyGrid() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {rooms.map((room) => {
                     const count = workers.filter(w => w.ktx === group.ktx && w.day === group.building && w.phongSo === room).length;
-                    const pct = count / ROOM_CAPACITY;
+                    const roomCap = getRoomCapacity(capacities, group.ktx, group.building, room) || DEFAULT_ROOM_CAPACITY;
+                    const pct = count / roomCap;
                     const roomClass = getRoomClass(pct);
                     const barColor = getRoomBarColor(pct);
                     const unitLabel = getRoomUnitLabel(group.ktx, group.building, room);
@@ -296,7 +321,7 @@ export default function RoomOccupancyGrid() {
                       >
                         <div className="flex items-center justify-between mb-2">
                           <span className="text-xs font-bold text-foreground">Phòng {room}</span>
-                          <span className="text-xs font-tabular font-semibold text-foreground">{count}/{ROOM_CAPACITY}</span>
+                          <span className="text-xs font-tabular font-semibold text-foreground">{count}/{roomCap}</span>
                         </div>
                         <div className="w-full h-1.5 bg-white/50 rounded-full overflow-hidden">
                           <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${Math.min(pct * 100, 100)}%` }} />

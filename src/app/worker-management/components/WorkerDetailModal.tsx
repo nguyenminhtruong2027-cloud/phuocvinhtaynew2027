@@ -15,7 +15,7 @@ interface Props {
   canEdit?: boolean;
 }
 
-function DetailRow({ label, value, icon: Icon, mono }: { label: string; value: string; icon?: React.ComponentType<{ size?: number; className?: string }>; mono?: boolean }) {
+function DetailRow({ label, value, icon: Icon, mono }: { label: string; value: string | undefined; icon?: React.ComponentType<{ size?: number; className?: string }>; mono?: boolean }) {
   return (
     <div className="flex items-start gap-3 py-2.5 border-b border-border last:border-0">
       {Icon && <Icon size={14} className="text-muted-foreground mt-0.5 flex-shrink-0" />}

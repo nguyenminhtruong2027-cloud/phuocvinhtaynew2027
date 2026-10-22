@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { compareKtxNames, WORKERS } from '@/data/workers';
+import { compareKtxNames } from '@/data/workers';
 
 export interface KtxBlockGroup {
   ktx: string;

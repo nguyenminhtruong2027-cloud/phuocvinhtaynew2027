@@ -278,6 +278,16 @@ export default function CheckoutApprovalPanel({
     fetchCheckouts();
   }, [fetchCheckouts]);
 
+  useEffect(() => {
+    const channel = supabase
+      .channel('worker_registrations_checkout_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_registrations' }, () => {
+        fetchCheckouts(true);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchCheckouts, supabase]);
+
   // Phân quyền Staff (Requirement 5)
   const scopedCheckouts = useMemo(() => {
     return checkouts.filter(c => isAdmin || canWriteBlock(c.day, c.ktx));

@@ -24,19 +24,6 @@ let cachedData: WorkerHierarchyData | null = null;
 let lastFetchTime = 0;
 const CACHE_TTL_MS = 15000; // 15s
 
-const DEFAULT_UNITS = [
-  'XD',
-  'ME',
-  'Vin Alpha',
-  'Trắc đạc',
-  'DVVS',
-  'QC',
-  'Ép cọc',
-  'QLVTTB',
-  'Lái xe',
-  'Tuyển dụng',
-];
-
 /** Natural sort comparator for Vietnamese text and numbers (e.g. "KTX 1" < "KTX 2", "Dãy 2" < "Dãy 10") */
 export function naturalCompare(a: string, b: string): number {
   return a.localeCompare(b, 'vi', { numeric: true, sensitivity: 'base' });
@@ -111,8 +98,6 @@ export async function fetchWorkerHierarchy(forceRefresh = false): Promise<Worker
 
   // Deduplicate units case-insensitively while preserving nice casing
   const unitMap = new Map<string, string>();
-  // Pre-seed known common defaults
-  DEFAULT_UNITS.forEach(u => unitMap.set(u.toLowerCase(), u));
   rawUnitsSet.forEach(u => {
     const lower = u.toLowerCase();
     if (!unitMap.has(lower)) {

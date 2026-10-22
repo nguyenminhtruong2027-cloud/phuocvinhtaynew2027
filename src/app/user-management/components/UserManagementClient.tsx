@@ -47,59 +47,18 @@ function Toast({ message, type, onClose }: { message: string; type: 'success' | 
   );
 }
 
-const DEFAULT_PROFILES: ProfileRecord[] = [
-  {
-    id: 'admin-pvt-master',
-    email: 'adminpvt@ktx.com',
-    full_name: 'Quản Trị Viên Phước Vĩnh Tây',
-    role: 'admin',
-    assigned_blocks: [],
-    created_at: '2026-10-01T08:00:00.000Z',
-  },
-  {
-    id: 'staff-pvt-01',
-    email: 'staffpvt@ktx.com',
-    full_name: 'Nguyễn Văn Hùng (Bảo Vệ / Quản Lý)',
-    role: 'staff',
-    assigned_blocks: ['KTX 1 - Dãy 1', 'KTX 1 - Dãy 2', 'KTX 1 - Dãy 3'],
-    created_at: '2026-10-05T09:30:00.000Z',
-  },
-  {
-    id: 'staff-pvt-02',
-    email: 'toantran@ktx.com',
-    full_name: 'Trần Văn Toàn (Quản Lý Dãy)',
-    role: 'staff',
-    assigned_blocks: ['KTX 2 - Dãy 1', 'KTX 2 - Dãy 2'],
-    created_at: '2026-10-10T14:15:00.000Z',
-  },
-  {
-    id: 'staff-pvt-03',
-    email: 'maile@ktx.com',
-    full_name: 'Lê Thị Mai (Quản Lý Dãy)',
-    role: 'staff',
-    assigned_blocks: ['KTX 3 - Dãy 1', 'KTX 3 - Dãy 2'],
-    created_at: '2026-10-12T10:00:00.000Z',
-  },
-];
-
 function getLocalProfiles(): ProfileRecord[] {
-  if (typeof window === 'undefined') return DEFAULT_PROFILES;
+  if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem('ktx_local_profiles');
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        // Merge with defaults to ensure core accounts are never missing
-        const map = new Map<string, ProfileRecord>();
-        DEFAULT_PROFILES.forEach(p => map.set(p.email.toLowerCase(), p));
-        parsed.forEach(p => {
-          if (p?.email) map.set(p.email.toLowerCase(), { ...p, assigned_blocks: p.assigned_blocks ?? [] });
-        });
-        return Array.from(map.values());
+        return parsed.map((p: any) => ({ ...p, assigned_blocks: p.assigned_blocks ?? [] }));
       }
     }
   } catch {}
-  return DEFAULT_PROFILES;
+  return [];
 }
 
 function saveLocalProfiles(profs: ProfileRecord[]) {

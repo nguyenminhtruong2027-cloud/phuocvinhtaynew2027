@@ -43,7 +43,7 @@ export default function PlatoonBarChart() {
   const buildings = useMemo(() => getUniqueBuildings(workers), [workers]);
 
   const data = useMemo(() => {
-    const platoonList = platoons.length > 0 ? platoons : ['8', '111', '113'];
+    const platoonList = platoons;
     return platoonList.map(td => {
       const entry: Record<string, string | number> = { name: `Tiểu Đoàn ${td}` };
       buildings.forEach(b => {
@@ -53,7 +53,7 @@ export default function PlatoonBarChart() {
     });
   }, [workers, platoons, buildings]);
 
-  const displayBuildings = buildings.length > 0 ? buildings : ['Dãy 3', 'Dãy 4'];
+  const displayBuildings = buildings;
 
   return (
     <div className="bg-[#1F2937] border border-gray-700/60 rounded-2xl shadow-xl p-5 transition-all duration-200 hover:border-gray-600/80">

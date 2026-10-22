@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { User, Lock, Save, CheckCircle, Shield, ShieldCheck } from 'lucide-react';
 
 export default function ProfileClient() {
-  const { currentUser, updateProfile } = useAuth();
+  const { currentUser, updateProfile, changePassword } = useAuth();
 
   const [name, setName] = useState(currentUser?.name ?? '');
   const [email, setEmail] = useState(currentUser?.email ?? '');
@@ -28,14 +28,10 @@ export default function ProfileClient() {
     setTimeout(() => setNameSuccess(false), 2500);
   };
 
-  const handleSavePassword = () => {
+  const handleSavePassword = async () => {
     setPwError('');
     if (!currentPassword || !newPassword || !confirmPassword) {
       setPwError('Vui lòng điền đầy đủ các trường mật khẩu.');
-      return;
-    }
-    if (currentPassword !== currentUser?.password) {
-      setPwError('Mật khẩu hiện tại không đúng.');
       return;
     }
     if (newPassword?.length < 6) {
@@ -46,12 +42,17 @@ export default function ProfileClient() {
       setPwError('Mật khẩu xác nhận không khớp.');
       return;
     }
-    updateProfile({ password: newPassword });
-    setCurrentPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
-    setPwSuccess(true);
-    setTimeout(() => setPwSuccess(false), 2500);
+    try {
+      await changePassword(newPassword);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPwSuccess(true);
+      setTimeout(() => setPwSuccess(false), 2500);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setPwError(msg || 'Không thể đổi mật khẩu.');
+    }
   };
 
   return (

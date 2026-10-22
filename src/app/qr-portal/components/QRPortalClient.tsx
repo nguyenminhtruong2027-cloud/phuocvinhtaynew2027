@@ -752,6 +752,16 @@ export default function QRPortalClient() {
 
   useEffect(() => { fetchRegistrations(); }, [fetchRegistrations]);
 
+  useEffect(() => {
+    const channel = supabase
+      .channel('worker_registrations_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_registrations' }, () => {
+        fetchRegistrations(true);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchRegistrations, supabase]);
+
   // Phân quyền Staff (Requirement 5)
   const scopedRegistrations = useMemo(() => {
     return registrations.filter(r => isAdmin || canWriteBlock(r.day, r.ktx));

@@ -415,6 +415,19 @@ export default function FacilitiesClient() {
 
   useEffect(() => { fetchFacilities(); }, [fetchFacilities]);
 
+  // Realtime: keep facilities list in sync across devices.
+  useEffect(() => {
+    const channel = supabase
+      .channel('facilities_realtime_list')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, () => {
+        fetchFacilities();
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchFacilities, supabase]);
+
   // ─── Derived KTX tabs from actual DB data ────────────────────────────────
   const allKtxTabs = Array.from(new Set(rows.map(r => r.ktx).filter(Boolean))).sort();
 
