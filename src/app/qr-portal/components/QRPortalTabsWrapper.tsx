@@ -5,20 +5,31 @@ import QRPortalClient from './QRPortalClient';
 import AttendancePortalClient from './AttendancePortalClient';
 import CheckoutPortalClient from './CheckoutPortalClient';
 import CheckoutApprovalPanel from './CheckoutApprovalPanel';
+import BedInspectClient from './BedInspectClient';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
-import { QrCode, ClipboardList, LogOut, UserCheck } from 'lucide-react';
+import { QrCode, ClipboardList, LogOut, UserCheck, ScanLine } from 'lucide-react';
+
+type PortalTab = 'attendance' | 'registration' | 'checkout_approval' | 'checkout' | 'bed_inspect';
 
 export default function QRPortalTabsWrapper() {
   const [isMounted, setIsMounted] = useState(false);
-  const [activeTab, setActiveTab] = useState<'attendance' | 'registration' | 'checkout_approval' | 'checkout'>('attendance');
+  const [activeTab, setActiveTab] = useState<PortalTab>('attendance');
   const [pendingCheckoutCount, setPendingCheckoutCount] = useState<number>(0);
   const { isAdmin, canWriteBlock } = useAuth();
 
   const supabase = createClient();
 
+  // QR scan links land with ?tab=bed_inspect&bed_qr=... — open the right tab directly.
   useEffect(() => {
     setIsMounted(true);
+    try {
+      const tab = new URLSearchParams(window.location.search).get('tab');
+      if (tab === 'bed_inspect') setActiveTab('bed_inspect');
+    } catch {}
+  }, []);
+
+  useEffect(() => {
     const fetchPendingCount = async () => {
       try {
         const { data } = await supabase
@@ -68,6 +79,7 @@ export default function QRPortalTabsWrapper() {
             {[
               { key: 'attendance', label: 'QR Điểm Danh', icon: <ClipboardList size={15} /> },
               { key: 'registration', label: 'Đăng ký cư trú', icon: <QrCode size={15} /> },
+              { key: 'bed_inspect', label: 'Kiểm Tra Giường', icon: <ScanLine size={15} /> },
               {
                 key: 'checkout_approval',
                 label: 'Duyệt Check-out',
@@ -111,6 +123,7 @@ export default function QRPortalTabsWrapper() {
       <main className="max-w-7xl mx-auto">
         {activeTab === 'attendance' && <AttendancePortalClient />}
         {activeTab === 'registration' && <QRPortalClient />}
+        {activeTab === 'bed_inspect' && <BedInspectClient />}
         {activeTab === 'checkout_approval' && (
           <CheckoutApprovalPanel onCountChange={setPendingCheckoutCount} />
         )}
