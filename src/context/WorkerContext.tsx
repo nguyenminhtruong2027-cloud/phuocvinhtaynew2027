@@ -290,25 +290,46 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
 
   const deleteAllWorkers = useCallback(async () => {
     const now = new Date().toISOString();
-    if (workers.length > 0) {
-      const BATCH = 200;
-      for (let i = 0; i < workers.length; i += BATCH) {
-        const batch = workers.slice(i, i + BATCH).map(w => ({
-          worker_id: w.id,
-          ho_va_ten: w.hoVaTen || null,
-          ma_nv: w.maNV || null,
-          ktx: w.ktx || null,
-          day: w.day || null,
+    const ids = (workers || []).map(w => w?.id).filter(Boolean) as string[];
+    if (ids.length === 0) {
+      setWorkers([]);
+      setTotalWorkerCount(0);
+      return;
+    }
+
+    // Log deletions in batches before removing rows.
+    const LOG_BATCH = 200;
+    for (let i = 0; i < ids.length; i += LOG_BATCH) {
+      const batch = ids.slice(i, i + LOG_BATCH).map(id => {
+        const w = workers.find(wk => wk.id === id);
+        return {
+          worker_id: id,
+          ho_va_ten: w?.hoVaTen || null,
+          ma_nv: w?.maNV || null,
+          ktx: w?.ktx || null,
+          day: w?.day || null,
           deleted_at: now,
-        }));
+        };
+      });
+      try {
         await supabase.from('worker_deletion_log').insert(batch);
+      } catch (logErr) {
+        console.warn('[WorkerContext] Deletion log insert failed:', logErr);
       }
     }
-    const { error } = await supabase
-      .from('workers')
-      .delete()
-      .neq('id', '___never___');
-    if (error) throw new Error(error.message);
+
+    // Delete by explicit id chunks — never rely on `.neq('id', ...)` sentinel
+    // (avoids uuid/text cast errors and oversized URL filters).
+    const BATCH = 200;
+    for (let i = 0; i < ids.length; i += BATCH) {
+      const chunk = ids.slice(i, i + BATCH);
+      const { error } = await supabase
+        .from('workers')
+        .delete()
+        .in('id', chunk);
+      if (error) throw new Error(error.message);
+    }
+
     setWorkers([]);
     setTotalWorkerCount(0);
   }, [workers]);
