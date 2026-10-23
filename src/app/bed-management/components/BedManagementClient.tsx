@@ -13,6 +13,7 @@ import { createClient } from '@/lib/supabase/client';
 import { compareKtxNames, DEFAULT_ROOM_CAPACITY } from '@/data/workers';
 import { fetchRoomCapacities, getRoomCapacity, RoomCapacityMap } from '@/lib/facilityCapacity';
 import BedQrPrintModal from './BedQrPrintModal';
+import BedTransferModal from './BedTransferModal';
 
 type BedStatus = 'empty' | 'occupied' | 'maintenance';
 type ViewMode = 'grid' | 'table' | 'analytics';
@@ -100,8 +101,7 @@ export default function BedManagementClient() {
   const [assignTarget, setAssignTarget] = useState<BedRow | null>(null);
   const [candidateSearch, setCandidateSearch] = useState('');
   const [drawerBed, setDrawerBed] = useState<BedRow | null>(null);
-  const [transferMode, setTransferMode] = useState(false);
-  const [transferSearch, setTransferSearch] = useState('');
+  const [showTransferModal, setShowTransferModal] = useState(false);
   const [busy, setBusy] = useState(false);
   const [showQrPrint, setShowQrPrint] = useState(false);
 
@@ -357,16 +357,6 @@ export default function BedManagementClient() {
     return set;
   }, [beds]);
 
-  const emptyBedsForTransfer = useMemo(() => {
-    const q = transferSearch.trim().toLowerCase();
-    return (beds || []).filter(b => {
-      if (!b || b.status !== 'empty') return false;
-      if (drawerBed && b.id === drawerBed.id) return false;
-      if (!q) return true;
-      return [b.ktx, b.day, b.phong_so, b.giuong].some(v => String(v ?? '').toLowerCase().includes(q));
-    });
-  }, [beds, drawerBed, transferSearch]);
-
   // ─── Mutations ─────────────────────────────────────────────────────────────
   const applyWorkerBed = useCallback(
     async (workerId: string, bed: { ktx: string; day: string; phong_so: string; giuong: string }) => {
@@ -460,7 +450,6 @@ export default function BedManagementClient() {
       await freeBedAndWorker(bed, wid);
       toast.success('Đã gửi yêu cầu check-out sang QR Portal để duyệt!');
       setDrawerBed(null);
-      setTransferMode(false);
       loadBeds(true);
     } catch (err: any) {
       console.error('[bed-management] checkout request failed:', err);
@@ -507,7 +496,6 @@ export default function BedManagementClient() {
 
       toast.success('Đã làm thủ tục trả phòng thành công!');
       setDrawerBed(null);
-      setTransferMode(false);
       loadBeds(true);
     } catch (err: any) {
       console.error('[bed-management] hard delete failed:', err);
@@ -516,26 +504,6 @@ export default function BedManagementClient() {
       setBusy(false);
     }
   }, [drawerBed, workerById, supabase, loadBeds]);
-
-  const handleTransfer = useCallback(
-    async (targetBed: BedRow) => {
-      const wid = drawerBed?.worker_id ?? '';
-      if (!wid || !targetBed) return;
-      const ok = await applyWorkerBed(wid, {
-        ktx: targetBed.ktx || '',
-        day: targetBed.day || '',
-        phong_so: targetBed.phong_so || '',
-        giuong: targetBed.giuong || '',
-      });
-      if (ok) {
-        setDrawerBed(null);
-        setTransferMode(false);
-        setTransferSearch('');
-        loadBeds(true);
-      }
-    },
-    [drawerBed, applyWorkerBed, loadBeds]
-  );
 
   const setBedStatus = useCallback(
     async (bed: BedRow, status: BedStatus) => {
@@ -877,10 +845,8 @@ export default function BedManagementClient() {
                                 onClick={() => {
                                   if (occupied) {
                                     setDrawerBed(bed);
-                                    setTransferMode(false);
                                   } else if (maintenance) {
                                     setDrawerBed(bed);
-                                    setTransferMode(false);
                                   } else {
                                     setAssignTarget(bed);
                                     setCandidateSearch('');
@@ -972,7 +938,7 @@ export default function BedManagementClient() {
                               {bed?.status === 'occupied' && (
                                 <button
                                   type="button"
-                                  onClick={() => { setDrawerBed(bed); setTransferMode(false); }}
+                                  onClick={() => { setDrawerBed(bed); }}
                                   className="p-1.5 rounded-lg text-emerald-300 hover:bg-emerald-500/20 border border-emerald-500/30"
                                   title="Chi tiết / thao tác"
                                 >
@@ -1150,7 +1116,7 @@ export default function BedManagementClient() {
       {/* ─── Quick Drawer (right side) ─── */}
       {drawerBed && (
         <>
-          <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm animate-fade-in" onClick={() => { setDrawerBed(null); setTransferMode(false); }} />
+          <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm animate-fade-in" onClick={() => { setDrawerBed(null); setShowTransferModal(false); }} />
           <div
             className="fixed z-50 animate-slide-in-right bottom-0 inset-x-0 max-h-[85vh] sm:max-h-full sm:top-0 sm:right-0 sm:left-auto sm:inset-x-auto sm:h-full w-full sm:max-w-md bg-[#131B2E] border-t sm:border-t-0 sm:border-l border-slate-800/80 text-white shadow-2xl flex flex-col rounded-t-2xl sm:rounded-none overflow-hidden"
           >
@@ -1166,7 +1132,7 @@ export default function BedManagementClient() {
               {drawerBed?.status === 'maintenance' && (
                 <span className="hidden sm:inline-flex mx-2 items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0"><Wrench size={10} /> Bảo trì</span>
               )}
-              <button onClick={() => { setDrawerBed(null); setTransferMode(false); }} className="p-2 rounded-xl hover:bg-slate-900/80 text-gray-400 hover:text-white shrink-0"><X size={18} /></button>
+              <button onClick={() => { setDrawerBed(null); setShowTransferModal(false); }} className="p-2 rounded-xl hover:bg-slate-900/80 text-gray-400 hover:text-white shrink-0"><X size={18} /></button>
             </div>
 
             <div className="px-5 py-4 space-y-3 overflow-y-auto scrollbar-thin">
@@ -1200,51 +1166,16 @@ export default function BedManagementClient() {
                 );
               })()}
 
-              {transferMode ? (
-                <div className="space-y-2">
-                  <p className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5"><ArrowRightLeft size={12} className="text-blue-400" /> Chọn giường trống mới</p>
-                  <div className="relative">
-                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-                    <input
-                      autoFocus
-                      value={transferSearch}
-                      onChange={e => setTransferSearch(e.target.value)}
-                      placeholder="KTX / dãy / phòng / số giường…"
-                      className="w-full bg-slate-900/80 border border-slate-700 text-gray-100 placeholder-gray-500 rounded-xl pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                    />
-                  </div>
-                  <div className="max-h-64 overflow-y-auto space-y-1.5">
-                    {emptyBedsForTransfer.length === 0 ? (
-                      <p className="text-sm text-gray-500 italic text-center py-6">Không còn giường trống nào.</p>
-                    ) : (
-                      emptyBedsForTransfer.slice(0, 60).map(b => (
-                        <button
-                          key={b.id}
-                          type="button"
-                          disabled={busy}
-                          onClick={() => handleTransfer(b)}
-                          className="w-full text-left flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-slate-800/80 hover:border-blue-500/50 hover:bg-slate-900/80 transition-colors text-sm disabled:opacity-60"
-                        >
-                          <span className="text-gray-200 font-tabular truncate">
-                            <b>{b?.ktx || '—'}</b> · {b?.day || '—'} · P{b?.phong_so || '—'} · G{b?.giuong || '—'}
-                          </span>
-                          <ArrowRightLeft size={14} className="text-blue-400 shrink-0" />
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-2">
+              <div className="grid grid-cols-1 gap-2">
                   {drawerBed?.status === 'occupied' && (
                     <>
                       <button
                         type="button"
                         disabled={!drawerBed?.worker_id || busy}
-                        onClick={() => { setTransferMode(true); setTransferSearch(''); }}
+                        onClick={() => setShowTransferModal(true)}
                         className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50 transition-colors"
                       >
-                        <ArrowRightLeft size={14} /> Chuyển giường nhanh
+                        <ArrowRightLeft size={14} /> ⇄ Chuyển / Đổi giường
                       </button>
 
                       {/* Trả phòng — chọn cách xử lý */}
@@ -1285,9 +1216,8 @@ export default function BedManagementClient() {
                     </button>
                   )}
                 </div>
-              )}
 
-              {busy && !transferMode && (
+              {busy && (
                 <p className="text-xs text-gray-300 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Đang xử lý…</p>
               )}
 
@@ -1302,6 +1232,23 @@ export default function BedManagementClient() {
           </div>
         </>
       )}
+
+      {/* ─── Transfer modal (cascade KTX → Dãy → Phòng → Giường trống) ─── */}
+      <BedTransferModal
+        open={showTransferModal}
+        onClose={() => setShowTransferModal(false)}
+        workerId={drawerBed?.worker_id ?? null}
+        sourceBed={drawerBed
+          ? {
+              id: drawerBed.id || '',
+              ktx: drawerBed.ktx || '',
+              day: drawerBed.day || '',
+              phong_so: drawerBed.phong_so || '',
+              giuong: drawerBed.giuong || '',
+            }
+          : null}
+        onTransferred={() => { setDrawerBed(null); loadBeds(true); }}
+      />
     </div>
   );
 }

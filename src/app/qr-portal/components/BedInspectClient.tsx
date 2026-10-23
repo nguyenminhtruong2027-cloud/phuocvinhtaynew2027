@@ -4,10 +4,12 @@ import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import {
   BedDouble, RefreshCw, Search, X, User, UserCheck, UserX, Loader2,
   Wrench, DoorOpen, Phone, Briefcase, VenusAndMars, Calendar,
-  CheckCircle2, AlertCircle, ScanLine, Printer,
+  CheckCircle2, AlertCircle, ScanLine, Printer, ArrowRightLeft,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { toast } from 'sonner';
 import BedQrPrintModal from '@/app/bed-management/components/BedQrPrintModal';
+import BedTransferModal from '@/app/bed-management/components/BedTransferModal';
 
 interface BedRow {
   id: string;
@@ -61,6 +63,7 @@ export default function BedInspectClient() {
   const [workers, setWorkers] = useState<WorkerLite[]>([]);
   const [busy, setBusy] = useState(false);
   const [showQrPrint, setShowQrPrint] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
 
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
   if (!supabaseRef.current) supabaseRef.current = createClient();
@@ -456,6 +459,14 @@ export default function BedInspectClient() {
                     <button
                       type="button"
                       disabled={busy}
+                      onClick={() => setShowTransfer(true)}
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-extrabold transition-colors disabled:opacity-50"
+                    >
+                      {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowRightLeft size={15} />} ⇄ Chuyển / Đổi Giường
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
                       onClick={() => setBedStatus('maintenance')}
                       className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0F17] text-sm font-extrabold transition-colors disabled:opacity-50"
                     >
@@ -525,6 +536,20 @@ export default function BedInspectClient() {
               ho_va_ten: bed.ho_va_ten,
             }
           : null}
+      />
+
+      {/* ─── Transfer modal ─── */}
+      <BedTransferModal
+        open={showTransfer}
+        onClose={() => setShowTransfer(false)}
+        workerId={bed?.worker_id ?? null}
+        sourceBed={bed
+          ? { id: bed.id || '', ktx: bed.ktx || '', day: bed.day || '', phong_so: bed.phong_so || '', giuong: bed.giuong || '' }
+          : null}
+        onTransferred={() => {
+          loadBedData(false);
+          setMessage('✓ Card dữ liệu đã được cập nhật sau khi chuyển giường.');
+        }}
       />
 
       {/* ─── Quick Assign Modal ─── */}
