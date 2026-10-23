@@ -8,6 +8,7 @@ import {
   ExternalLink, UserPlus, CheckCircle2, Printer,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
 import { compareKtxNames, DEFAULT_ROOM_CAPACITY } from '@/data/workers';
 import { fetchRoomCapacities, getRoomCapacity, RoomCapacityMap } from '@/lib/facilityCapacity';
@@ -32,6 +33,7 @@ interface WorkerLite {
   id: string;
   hoVaTen: string;
   maNV: string;
+  cccd: string;
   donVi: string;
   gioiTinh: string;
   soDienThoai: string;
@@ -140,12 +142,13 @@ export default function BedManagementClient() {
       const rows = await fetchAllRows<Record<string, unknown>>(
         supabase,
         'workers',
-        'id, ho_va_ten, ma_nv, don_vi, gioi_tinh, so_dien_thoai, ngay_vao_ktx, ktx, day, phong_so, giuong'
+        'id, ho_va_ten, ma_nv, cccd, don_vi, gioi_tinh, so_dien_thoai, ngay_vao_ktx, ktx, day, phong_so, giuong'
       );
       const mapped: WorkerLite[] = (rows || []).map((r, i) => ({
         id: String(r?.id ?? `w-${i}`),
         hoVaTen: String(r?.ho_va_ten ?? ''),
         maNV: String(r?.ma_nv ?? ''),
+        cccd: String(r?.cccd ?? ''),
         donVi: String(r?.don_vi ?? ''),
         gioiTinh: String(r?.gioi_tinh ?? ''),
         soDienThoai: String(r?.so_dien_thoai ?? ''),
@@ -405,16 +408,114 @@ export default function BedManagementClient() {
     [assignTarget, applyWorkerBed, loadBeds]
   );
 
-  const handleRelease = useCallback(async () => {
-    const wid = drawerBed?.worker_id ?? '';
-    if (!wid) return;
-    const ok = await applyWorkerBed(wid, { ktx: '', day: '', phong_so: '', giuong: '' });
-    if (ok) {
+  /** Giải phóng giường: xóa vị trí trong `workers` và set `beds` về empty (chống nhiễu trigger nếu beds row bị xóa sự cố). */
+  const freeBedAndWorker = useCallback(
+    async (bed: BedRow, workerId: string) => {
+      try {
+        await supabase
+          .from('workers')
+          .update({ ktx: '', day: '', phong_so: '', giuong: '' })
+          .eq('id', workerId);
+      } catch (err) {
+        console.warn('[bed-management] clear worker location failed:', err);
+      }
+      try {
+        await supabase
+          .from('beds')
+          .update({ status: 'empty', worker_id: null, ma_nv: null, ho_va_ten: null })
+          .eq('id', bed.id);
+      } catch (err) {
+        console.warn('[bed-management] release bed row failed:', err);
+      }
+    },
+    [supabase]
+  );
+
+  /** Lựa chọn 1: gửi yêu cầu check-out sang QR Portal (status=pending) + giải phóng giường. */
+  const handleCheckoutRequest = useCallback(async () => {
+    const bed = drawerBed;
+    const wid = bed?.worker_id ?? '';
+    if (!bed || !wid) return;
+    setBusy(true);
+    setActionError('');
+    const workerRef = workerById.get(wid);
+    const now = new Date().toISOString();
+    try {
+      const { error } = await supabase.from('worker_registrations').insert({
+        type: 'CHECKOUT',
+        worker_id: wid,
+        ho_va_ten: bed.ho_va_ten || workerRef?.hoVaTen || '',
+        ma_nv: bed.ma_nv || workerRef?.maNV || '',
+        so_cccd: workerRef?.cccd || '',
+        so_dien_thoai: workerRef?.soDienThoai || '',
+        ktx: bed.ktx || '',
+        day: bed.day || '',
+        phong_so: bed.phong_so || '',
+        giuong: bed.giuong || '',
+        status: 'pending',
+        ghi_chu: `[CHECKOUT] Yêu cầu trả phòng từ Quản Lý Giường | Ngày: ${now.split('T')[0]}`,
+      });
+      if (error) throw new Error(error.message);
+
+      await freeBedAndWorker(bed, wid);
+      toast.success('Đã gửi yêu cầu check-out sang QR Portal để duyệt!');
       setDrawerBed(null);
       setTransferMode(false);
       loadBeds(true);
+    } catch (err: any) {
+      console.error('[bed-management] checkout request failed:', err);
+      setActionError(err?.message || 'Không thể gửi yêu cầu check-out.');
+    } finally {
+      setBusy(false);
     }
-  }, [drawerBed, applyWorkerBed, loadBeds]);
+  }, [drawerBed, workerById, supabase, freeBedAndWorker, loadBeds]);
+
+  /** Lựa chọn 2: xóa vĩnh viễn công nhân khỏi KTX (worker += log, beds → empty via trigger). */
+  const handleHardDelete = useCallback(async () => {
+    const bed = drawerBed;
+    const wid = bed?.worker_id ?? '';
+    if (!bed || !wid) return;
+    setBusy(true);
+    setActionError('');
+    const workerRef = workerById.get(wid);
+    const now = new Date().toISOString();
+    try {
+      try {
+        await supabase.from('worker_deletion_log').insert({
+          worker_id: wid,
+          ho_va_ten: bed.ho_va_ten || workerRef?.hoVaTen || null,
+          ma_nv: bed.ma_nv || workerRef?.maNV || null,
+          ktx: bed.ktx || null,
+          day: bed.day || null,
+          deleted_at: now,
+        });
+      } catch (logErr) {
+        console.warn('[bed-management] deletion log failed:', logErr);
+      }
+
+      const { error } = await supabase.from('workers').delete().eq('id', wid);
+      if (error) throw new Error(error.message);
+
+      try {
+        await supabase
+          .from('beds')
+          .update({ status: 'empty', worker_id: null, ma_nv: null, ho_va_ten: null })
+          .eq('id', bed.id);
+      } catch (bedErr) {
+        console.warn('[bed-management] release bed after delete failed:', bedErr);
+      }
+
+      toast.success('Đã làm thủ tục trả phòng thành công!');
+      setDrawerBed(null);
+      setTransferMode(false);
+      loadBeds(true);
+    } catch (err: any) {
+      console.error('[bed-management] hard delete failed:', err);
+      setActionError(err?.message || 'Không thể xóa công nhân khỏi KTX.');
+    } finally {
+      setBusy(false);
+    }
+  }, [drawerBed, workerById, supabase, loadBeds]);
 
   const handleTransfer = useCallback(
     async (targetBed: BedRow) => {
@@ -1145,14 +1246,32 @@ export default function BedManagementClient() {
                       >
                         <ArrowRightLeft size={14} /> Chuyển giường nhanh
                       </button>
-                      <button
-                        type="button"
-                        disabled={!drawerBed?.worker_id || busy}
-                        onClick={handleRelease}
-                        className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold disabled:opacity-50 transition-colors"
-                      >
-                        {busy ? <Loader2 size={14} className="animate-spin" /> : <DoorOpen size={14} />} Trả phòng / Yêu cầu check-out
-                      </button>
+
+                      {/* Trả phòng — chọn cách xử lý */}
+                      <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3 space-y-2">
+                        <p className="text-[11px] font-extrabold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                          <DoorOpen size={12} className="text-rose-400" /> Trả phòng / Yêu cầu check-out
+                        </p>
+                        <button
+                          type="button"
+                          disabled={!drawerBed?.worker_id || busy}
+                          onClick={handleCheckoutRequest}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0F17] text-sm font-extrabold disabled:opacity-50 transition-colors"
+                        >
+                          {busy ? <Loader2 size={14} className="animate-spin" /> : <DoorOpen size={14} />} 📤 Gửi yêu cầu check-out để duyệt
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!drawerBed?.worker_id || busy}
+                          onClick={handleHardDelete}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-extrabold disabled:opacity-50 transition-colors"
+                        >
+                          {busy ? <Loader2 size={14} className="animate-spin" /> : <UserX size={14} />} 🗑️ Xóa vĩnh viễn khỏi KTX
+                        </button>
+                        <p className="text-[10px] text-slate-400 leading-snug">
+                          Gửi yêu cầu → chờ quản lý duyệt ở tab <b>Duyệt Check-out</b> (QR Portal). Xóa vĩnh viễn → công nhân bị gỡ ngay khỏi hệ thống.
+                        </p>
+                      </div>
                     </>
                   )}
                   {drawerBed?.status === 'maintenance' && (

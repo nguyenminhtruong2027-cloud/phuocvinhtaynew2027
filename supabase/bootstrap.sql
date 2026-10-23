@@ -1315,3 +1315,14 @@ ALTER TABLE public.beds
   ADD CONSTRAINT beds_status_check
   CHECK (status IN ('empty', 'occupied', 'maintenance'));
 
+
+-- ============================================================
+-- Migration: 20261025000000_add_type_worker_id_to_worker_registrations.sql
+-- ============================================================
+-- Migration: support typed checkout requests from Bed Management
+-- Timestamp: 20261025000000
+
+ALTER TABLE public.worker_registrations
+  ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS worker_id TEXT DEFAULT '';
+
