@@ -496,7 +496,7 @@ export default function BedManagementClient() {
       className="pointer-events-none absolute left-1/2 bottom-full z-40 mb-2 hidden sm:block w-64 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
       role="tooltip"
     >
-      <div className="rounded-xl border border-gray-600 bg-gray-900/95 shadow-2xl p-3 backdrop-blur-sm">
+      <div className="rounded-xl border border-slate-700 bg-slate-950/95 shadow-2xl p-3 backdrop-blur-sm">
         {(() => {
           const w = bed?.worker_id ? (workerById.get(bed.worker_id) || worker) : worker;
           const name = bed?.ho_va_ten || w?.hoVaTen || null;
@@ -504,7 +504,7 @@ export default function BedManagementClient() {
           return (
             <>
               <div className="flex items-center gap-2.5 mb-2">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${name ? (female ? 'bg-pink-500/20 text-pink-300' : 'bg-emerald-500/20 text-emerald-300') : 'bg-gray-700 text-gray-400'}`}>
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${name ? (female ? 'bg-pink-500/20 text-pink-300' : 'bg-emerald-500/20 text-emerald-300') : 'bg-slate-800 text-slate-400'}`}>
                   {name ? name.charAt(0).toUpperCase() : <BedDouble size={16} />}
                 </div>
                 <div className="min-w-0">
@@ -534,12 +534,12 @@ export default function BedManagementClient() {
   );
 
   return (
-    <div className="p-4 md:p-6 space-y-5">
+    <div className="p-4 md:p-6 space-y-5 bg-[#0B0F17] min-h-screen">
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
-            <BedDouble size={20} className="text-primary" />
+            <BedDouble size={20} className="text-cyan-400" />
             Sơ Đồ Mặt Bằng — Quản Lý Giường
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
@@ -585,14 +585,14 @@ export default function BedManagementClient() {
       )}
 
       {/* ─── Top Bar Controls ─── */}
-      <div className="bg-[#1F2937] border border-gray-700/60 rounded-2xl p-4 sm:p-5 shadow-xl space-y-4">
+      <div className="bg-[#131B2E] border border-slate-800/80 rounded-2xl p-4 sm:p-5 shadow-xl space-y-4">
         <div className="flex flex-wrap gap-3 items-end">
           <div className="flex flex-col gap-1">
             <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">KTX</label>
             <select
               value={filterKtx}
               onChange={e => { setFilterKtx(e.target.value); setFilterDay(''); setFilterRoom(''); }}
-              className="bg-gray-800 border border-gray-700 text-gray-100 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/50 min-w-[130px] cursor-pointer"
+              className="bg-slate-900/80 border border-slate-700 text-gray-100 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/50 min-w-[130px] cursor-pointer"
             >
               <option value="">Tất cả KTX</option>
               {ktxList.map(k => <option key={k} value={k}>{k}</option>)}
@@ -604,7 +604,7 @@ export default function BedManagementClient() {
               <select
                 value={filterDay}
                 onChange={e => { setFilterDay(e.target.value); setFilterRoom(''); }}
-                className="bg-gray-800 border border-gray-700 text-gray-100 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/50 min-w-[110px] cursor-pointer"
+                className="bg-slate-900/80 border border-slate-700 text-gray-100 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/50 min-w-[110px] cursor-pointer"
               >
                 <option value="">Tất cả dãy</option>
                 {dayList.map(d => <option key={d} value={d}>{d}</option>)}
@@ -617,7 +617,7 @@ export default function BedManagementClient() {
               <select
                 value={filterRoom}
                 onChange={e => setFilterRoom(e.target.value)}
-                className="bg-gray-800 border border-gray-700 text-gray-100 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/50 min-w-[110px] cursor-pointer"
+                className="bg-slate-900/80 border border-slate-700 text-gray-100 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/50 min-w-[110px] cursor-pointer"
               >
                 <option value="">Tất cả phòng</option>
                 {roomList.map(r => <option key={r} value={r}>Phòng {r}</option>)}
@@ -632,7 +632,7 @@ export default function BedManagementClient() {
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder="Tên công nhân, mã NV, số giường (G1), đơn vị…"
-                className="w-full bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 rounded-xl pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                className="w-full bg-slate-900/80 border border-slate-700 text-gray-100 placeholder-gray-500 rounded-xl pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
               />
               {searchQuery && (
                 <button
@@ -814,11 +814,11 @@ export default function BedManagementClient() {
 
           {/* ─── TABLE VIEW ─── */}
           {view === 'table' && (
-            <div className="bg-[#1F2937] border border-gray-700/60 rounded-2xl shadow-xl overflow-hidden">
+            <div className="bg-[#131B2E] border border-slate-800/80 rounded-2xl shadow-xl overflow-hidden">
               <div className="overflow-x-auto scrollbar-thin">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-gray-700/60 text-left">
+                    <tr className="border-b border-slate-800/80 text-left">
                       {['KTX', 'Dãy', 'Phòng', 'Giường', 'Trạng thái', 'Họ tên', 'Mã NV', 'Đơn vị', 'SĐT', 'Ngày vào', 'Thao tác'].map(h => (
                         <th key={h} className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-gray-400 whitespace-nowrap">{h}</th>
                       ))}
@@ -829,7 +829,7 @@ export default function BedManagementClient() {
                       const worker = bed?.worker_id ? (workerById.get(bed.worker_id) || null) : null;
                       const female = isFemale(worker, bed?.ho_va_ten);
                       return (
-                        <tr key={bed?.id} className="hover:bg-gray-800/60 transition-colors">
+                        <tr key={bed?.id} className="hover:bg-slate-900/80 transition-colors">
                           <td className="px-3 py-2 text-xs font-bold text-gray-200 whitespace-nowrap">{bed?.ktx || '—'}</td>
                           <td className="px-3 py-2 text-xs text-gray-300 whitespace-nowrap">{bed?.day || '—'}</td>
                           <td className="px-3 py-2 text-xs text-gray-300 font-tabular whitespace-nowrap">P{bed?.phong_so || '—'}</td>
@@ -910,13 +910,13 @@ export default function BedManagementClient() {
             <div className="space-y-4">
               <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
                 {[
-                  { label: 'Tổng giường', value: bedsFiltered.length, color: 'text-gray-100 border-gray-700' },
+                  { label: 'Tổng giường', value: bedsFiltered.length, color: 'text-gray-100 border-slate-800/80' },
                   { label: 'Đã ở', value: occupiedCount, color: 'text-emerald-400 border-emerald-500/30' },
                   { label: 'Trống', value: emptyCount, color: 'text-blue-400 border-blue-500/30' },
                   { label: 'Bảo trì', value: maintenanceCount, color: 'text-amber-400 border-amber-500/30' },
                   { label: 'Tỷ lệ lấp đầy', value: `${fillRateInView}%`, color: 'text-indigo-400 border-indigo-500/30' },
                 ].map(s => (
-                  <div key={s.label} className={`rounded-2xl border bg-[#1F2937] p-4 shadow-xl ${s.color}`}>
+                  <div key={s.label} className={`rounded-2xl border bg-[#131B2E] p-4 shadow-xl ${s.color}`}>
                     <p className="text-xs text-slate-300 font-semibold">{s.label}</p>
                     <p className={`text-2xl font-bold font-tabular mt-1 ${s.color}`}>
                       {typeof s.value === 'number' ? s.value.toLocaleString('vi-VN') : s.value}
@@ -925,7 +925,7 @@ export default function BedManagementClient() {
                 ))}
               </div>
 
-              <div className="bg-[#1F2937] border border-gray-700/60 rounded-2xl p-5 shadow-xl space-y-4">
+              <div className="bg-[#131B2E] border border-slate-800/80 rounded-2xl p-5 shadow-xl space-y-4">
                 <h3 className="text-sm font-bold text-white flex items-center gap-2"><BarChart3 size={15} className="text-indigo-400" /> Lấp đầy theo KTX</h3>
                 {perKtxStats.length === 0 ? (
                   <p className="text-xs text-gray-500 italic">Không có dữ liệu.</p>
@@ -940,7 +940,7 @@ export default function BedManagementClient() {
                             {s.occupied}/{s.total} · Trống {s.empty} · BT {s.maintenance} · <b className="text-indigo-300">{Math.round(rate * 100)}%</b>
                           </span>
                         </div>
-                        <div className="w-full h-2 bg-gray-700/60 rounded-full overflow-hidden flex" aria-hidden="true">
+                        <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden flex" aria-hidden="true">
                           <div className="h-full bg-emerald-400" style={{ width: `${(s.occupied / Math.max(s.total, 1)) * 100}%` }} />
                           <div className="h-full bg-amber-400" style={{ width: `${(s.maintenance / Math.max(s.total, 1)) * 100}%` }} />
                           <div className="h-full bg-blue-500/60" style={{ width: `${(s.empty / Math.max(s.total, 1)) * 100}%` }} />
@@ -956,7 +956,7 @@ export default function BedManagementClient() {
                 </p>
               </div>
 
-              <div className="bg-[#1F2937] border border-rose-500/40 rounded-2xl p-5 shadow-xl space-y-3">
+              <div className="bg-[#131B2E] border border-rose-500/40 rounded-2xl p-5 shadow-xl space-y-3">
                 <h3 className="text-sm font-bold text-white flex items-center gap-2"><AlertCircle size={15} className="text-rose-400" /> Phòng cần hỗ trợ (Quá tải)</h3>
                 {overloadedRooms.length === 0 ? (
                   <p className="text-xs text-gray-500 italic">Không có phòng nào quá tải.</p>
@@ -979,15 +979,15 @@ export default function BedManagementClient() {
       {/* ─── Assign Modal ─── */}
       {assignTarget && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setAssignTarget(null)}>
-          <div className="bg-[#1F2937] border border-gray-700 rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700">
+          <div className="bg-[#131B2E] border border-slate-700 rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800/80">
               <div>
                 <h3 className="font-bold text-white flex items-center gap-2"><UserCheck size={16} className="text-emerald-400" /> Gán công nhân vào giường</h3>
                 <p className="text-xs text-gray-400 mt-0.5">
                   {assignTarget.ktx || '(KTX)'} · {assignTarget.day || '(Dãy)'} · Phòng {assignTarget.phong_so || '?'} · Giường {assignTarget.giuong || '?'}
                 </p>
               </div>
-              <button onClick={() => { setAssignTarget(null); setActionError(''); }} className="p-2 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white"><X size={16} /></button>
+              <button onClick={() => { setAssignTarget(null); setActionError(''); }} className="p-2 rounded-lg hover:bg-slate-900/80 text-gray-400 hover:text-white"><X size={16} /></button>
             </div>
             <div className="px-5 pt-4">
               <div className="relative">
@@ -997,7 +997,7 @@ export default function BedManagementClient() {
                   value={candidateSearch}
                   onChange={e => setCandidateSearch(e.target.value)}
                   placeholder="Tìm công nhân theo tên / mã NV / đơn vị…"
-                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 rounded-xl pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                  className="w-full bg-slate-900/80 border border-slate-700 text-gray-100 placeholder-gray-500 rounded-xl pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                 />
               </div>
             </div>
@@ -1011,7 +1011,7 @@ export default function BedManagementClient() {
                     type="button"
                     disabled={busy}
                     onClick={() => handleAssign(w)}
-                    className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl border border-gray-700/60 hover:border-blue-500/50 hover:bg-gray-800/80 transition-colors disabled:opacity-60"
+                    className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl border border-slate-800/80 hover:border-blue-500/50 hover:bg-slate-900/80 transition-colors disabled:opacity-60"
                   >
                     <div className="w-8 h-8 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-300 text-xs font-bold shrink-0">
                       {String(w?.hoVaTen || '?').charAt(0).toUpperCase()}
@@ -1026,7 +1026,7 @@ export default function BedManagementClient() {
               )}
             </div>
             {busy && (
-              <div className="px-5 py-3 border-t border-gray-700 flex items-center gap-2 text-xs text-gray-300">
+              <div className="px-5 py-3 border-t border-slate-800/80 flex items-center gap-2 text-xs text-gray-300">
                 <Loader2 size={13} className="animate-spin" /> Đang gán giường…
               </div>
             )}
@@ -1039,12 +1039,12 @@ export default function BedManagementClient() {
         <>
           <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm animate-fade-in" onClick={() => { setDrawerBed(null); setTransferMode(false); }} />
           <div
-            className="fixed z-50 animate-slide-in-right bottom-0 inset-x-0 max-h-[85vh] sm:max-h-full sm:top-0 sm:right-0 sm:left-auto sm:inset-x-auto sm:h-full w-full sm:max-w-md bg-[#1F2937] border-t sm:border-t-0 sm:border-l border-gray-700/80 text-white shadow-2xl flex flex-col rounded-t-2xl sm:rounded-none overflow-hidden"
+            className="fixed z-50 animate-slide-in-right bottom-0 inset-x-0 max-h-[85vh] sm:max-h-full sm:top-0 sm:right-0 sm:left-auto sm:inset-x-auto sm:h-full w-full sm:max-w-md bg-[#131B2E] border-t sm:border-t-0 sm:border-l border-slate-800/80 text-white shadow-2xl flex flex-col rounded-t-2xl sm:rounded-none overflow-hidden"
           >
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700/80 bg-gray-900/60">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800/80 bg-slate-900/60">
               <div className="min-w-0">
                 <h3 className="font-bold text-white flex items-center gap-2">
-                  <BedDouble size={16} className="text-primary" /> Giường {drawerBed?.giuong || '?'}
+                  <BedDouble size={16} className="text-cyan-400" /> Giường {drawerBed?.giuong || '?'}
                 </h3>
                 <p className="text-xs text-gray-400 mt-0.5 font-tabular truncate">
                   {[drawerBed?.ktx, drawerBed?.day, `Phòng ${drawerBed?.phong_so || '?'}`].filter(Boolean).join(' · ')}
@@ -1053,7 +1053,7 @@ export default function BedManagementClient() {
               {drawerBed?.status === 'maintenance' && (
                 <span className="hidden sm:inline-flex mx-2 items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0"><Wrench size={10} /> Bảo trì</span>
               )}
-              <button onClick={() => { setDrawerBed(null); setTransferMode(false); }} className="p-2 rounded-xl hover:bg-gray-800 text-gray-400 hover:text-white shrink-0"><X size={18} /></button>
+              <button onClick={() => { setDrawerBed(null); setTransferMode(false); }} className="p-2 rounded-xl hover:bg-slate-900/80 text-gray-400 hover:text-white shrink-0"><X size={18} /></button>
             </div>
 
             <div className="px-5 py-4 space-y-3 overflow-y-auto scrollbar-thin">
@@ -1069,7 +1069,7 @@ export default function BedManagementClient() {
                   );
                 }
                 return (
-                  <div className="flex items-center gap-4 rounded-xl border border-gray-700/60 bg-gray-800/60 p-4">
+                  <div className="flex items-center gap-4 rounded-xl border border-slate-800/80 bg-slate-900/80 p-4">
                     <div className={`w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold shrink-0 ${female ? 'bg-pink-500/20 text-pink-300 border border-pink-500/40' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'}`}>
                       {name.charAt(0).toUpperCase()}
                     </div>
@@ -1097,7 +1097,7 @@ export default function BedManagementClient() {
                       value={transferSearch}
                       onChange={e => setTransferSearch(e.target.value)}
                       placeholder="KTX / dãy / phòng / số giường…"
-                      className="w-full bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 rounded-xl pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      className="w-full bg-slate-900/80 border border-slate-700 text-gray-100 placeholder-gray-500 rounded-xl pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                     />
                   </div>
                   <div className="max-h-64 overflow-y-auto space-y-1.5">
@@ -1110,7 +1110,7 @@ export default function BedManagementClient() {
                           type="button"
                           disabled={busy}
                           onClick={() => handleTransfer(b)}
-                          className="w-full text-left flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-gray-700/60 hover:border-blue-500/50 hover:bg-gray-800/80 transition-colors text-sm disabled:opacity-60"
+                          className="w-full text-left flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-slate-800/80 hover:border-blue-500/50 hover:bg-slate-900/80 transition-colors text-sm disabled:opacity-60"
                         >
                           <span className="text-gray-200 font-tabular truncate">
                             <b>{b?.ktx || '—'}</b> · {b?.day || '—'} · P{b?.phong_so || '—'} · G{b?.giuong || '—'}
