@@ -1301,3 +1301,17 @@ CREATE TRIGGER facilities_seed_beds_trigger
   FOR EACH ROW
   EXECUTE FUNCTION public.seed_beds_for_facility();
 
+
+-- ============================================================
+-- Migration: 20261024000000_add_beds_maintenance_status.sql
+-- ============================================================
+-- Migration: allow beds.status = 'maintenance'
+-- Timestamp: 20261024000000
+
+ALTER TABLE public.beds
+  DROP CONSTRAINT IF EXISTS beds_status_check;
+
+ALTER TABLE public.beds
+  ADD CONSTRAINT beds_status_check
+  CHECK (status IN ('empty', 'occupied', 'maintenance'));
+
