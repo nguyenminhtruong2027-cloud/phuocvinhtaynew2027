@@ -211,16 +211,22 @@ export default function BedManagementClient() {
     const room = (filterRoom || '').trim();
     const q = searchQuery.trim().toLowerCase();
     return (beds || []).filter(b => {
-      if (ktx && (b?.ktx || '').trim() !== ktx) return false;
-      if (day && (b?.day || '').trim() !== day) return false;
-      if (room && (b?.phong_so || '').trim() !== room) return false;
+      // Only real KTX/Dãy/Phòng/Giường rows — no placeholder placeholders ever.
+      const ktx = String(b?.ktx ?? '').trim();
+      const day = String(b?.day ?? '').trim();
+      const room = String(b?.phong_so ?? '').trim();
+      const bedNo = String(b?.giuong ?? '').trim();
+      if (!ktx || !day || !room || !bedNo) return false;
+      if (filterKtx && ktx !== filterKtx.trim()) return false;
+      if (filterDay && day !== filterDay.trim()) return false;
+      if (filterRoom && room !== filterRoom.trim()) return false;
       if (!q) return true;
       const w = b?.worker_id ? workerById.get(b.worker_id) : null;
       const haystack = [
         b?.ktx, b?.day, b?.phong_so, b?.giuong, b?.ho_va_ten, b?.ma_nv,
         w?.donVi, w?.soDienThoai,
       ].map(v => String(v ?? '').toLowerCase());
-      return haystack.some(v => v.includes(q)) || `g${String(b?.giuong ?? '').toLowerCase().replace(/[^0-9a-z]/g, '')}`.includes(q);
+      return haystack.some(v => v.includes(q)) || `g${bedNo.toLowerCase().replace(/[^0-9a-z]/g, '')}`.includes(q);
     });
   }, [beds, filterKtx, filterDay, filterRoom, searchQuery, workerById]);
 
@@ -271,9 +277,11 @@ export default function BedManagementClient() {
   const roomGroups = useMemo((): RoomGroup[] => {
     const map = new Map<string, RoomGroup>();
     bedsFiltered.forEach(b => {
-      const ktx = String(b?.ktx ?? '').trim() || '(Chưa phân KTX)';
-      const day = String(b?.day ?? '').trim() || '(Chưa phân dãy)';
-      const room = String(b?.phong_so ?? '').trim() || '(Chưa phân phòng)';
+      const ktx = String(b?.ktx ?? '').trim();
+      const day = String(b?.day ?? '').trim();
+      const room = String(b?.phong_so ?? '').trim();
+      // Chỉ dữ liệu thật: bỏ hẳn các mục rác (Chưa phân …) khỏi ma trận.
+      if (!ktx || !day || !room) return;
       const key = `${ktx}||${day}||${room}`;
       if (!map.has(key)) {
         map.set(key, {
@@ -324,7 +332,8 @@ export default function BedManagementClient() {
   const perKtxStats = useMemo(() => {
     const map = new Map<string, { occupied: number; empty: number; maintenance: number; total: number }>();
     bedsFiltered.forEach(b => {
-      const ktx = String(b?.ktx ?? '').trim() || '(Chưa phân KTX)';
+      const ktx = String(b?.ktx ?? '').trim();
+      if (!ktx) return;
       if (!map.has(ktx)) map.set(ktx, { occupied: 0, empty: 0, maintenance: 0, total: 0 });
       const s = map.get(ktx)!;
       s.total++;
@@ -465,20 +474,21 @@ export default function BedManagementClient() {
   // ─── Small building blocks ─────────────────────────────────────────────────
   const statusBadge = (status: BedStatus, female: boolean) => {
     if (status === 'occupied')
-      return <span className={`inline-flex items-center gap-1 text-[10px] font-bold ${female ? 'text-pink-300' : 'text-emerald-300'}`}><UserCheck size={10} /> Đã ở</span>;
+      return <span className={`inline-flex items-center gap-1 text-[10px] font-extrabold ${female ? 'text-pink-300' : 'text-emerald-300'}`}><UserCheck size={10} /> Đã ở</span>;
     if (status === 'maintenance')
-      return <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-300"><Wrench size={10} /> Bảo trì</span>;
-    return <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-400"><UserX size={10} /> Trống</span>;
+      return <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-amber-300"><Wrench size={10} /> Đang bảo trì</span>;
+    return <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-blue-300"><UserX size={10} /> Còn trống</span>;
   };
 
   const bedCellClasses = (status: BedStatus, female: boolean) => {
+    // Base: viền sáng nét + nền tối tương phản cao (bg-slate-900/90)
     if (status === 'occupied')
       return female
-        ? 'border-pink-500/40 bg-pink-500/10 hover:border-pink-400/70'
-        : 'border-emerald-500/30 bg-emerald-500/10 hover:border-emerald-400/60';
+        ? 'bg-slate-900/90 border border-pink-400 hover:border-pink-300 hover:bg-pink-500/20'
+        : 'bg-slate-900/90 border border-emerald-400 hover:border-emerald-300 hover:bg-emerald-500/20';
     if (status === 'maintenance')
-      return 'border-amber-500/40 bg-amber-500/10 hover:border-amber-400/70';
-    return 'border-dashed border-blue-500/40 bg-blue-500/5 hover:border-blue-400/80';
+      return 'bg-slate-900/90 border border-amber-400 hover:border-amber-300 hover:bg-amber-500/20';
+    return 'bg-slate-900/90 border border-dashed border-blue-400 hover:border-blue-300 hover:bg-blue-500/20';
   };
 
   const BedTooltip = ({ bed, worker }: { bed: BedRow; worker?: WorkerLite | null }) => (
@@ -639,14 +649,14 @@ export default function BedManagementClient() {
         {/* Stats strip */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
           {[
-            { label: 'Tổng giường', value: bedsFiltered.length, color: 'text-gray-100' },
-            { label: 'Đã ở', value: occupiedCount, color: 'text-emerald-400' },
-            { label: 'Trống', value: emptyCount, color: 'text-blue-400' },
-            { label: 'Bảo trì', value: maintenanceCount, color: 'text-amber-400' },
-            { label: 'Tỷ lệ lấp đầy', value: `${fillRateInView}%`, color: 'text-indigo-400' },
+            { label: 'Tổng giường', value: bedsFiltered.length, color: 'text-white' },
+            { label: 'Đã ở', value: occupiedCount, color: 'text-emerald-300' },
+            { label: 'Trống', value: emptyCount, color: 'text-blue-300' },
+            { label: 'Bảo trì', value: maintenanceCount, color: 'text-amber-300' },
+            { label: 'Tỷ lệ lấp đầy', value: `${fillRateInView}%`, color: 'text-indigo-300' },
           ].map(s => (
-            <div key={s.label} className="rounded-xl border border-gray-700/60 bg-gray-800/60 p-2.5">
-              <p className="text-[11px] text-gray-400 font-medium">{s.label}</p>
+            <div key={s.label} className="rounded-xl border border-slate-700 bg-slate-900/90 p-2.5">
+              <p className="text-[11px] text-slate-300 font-semibold">{s.label}</p>
               <p className={`text-xl font-bold font-tabular mt-0.5 ${s.color}`}>
                 {typeof s.value === 'number' ? s.value.toLocaleString('vi-VN') : s.value}
               </p>
@@ -655,19 +665,19 @@ export default function BedManagementClient() {
         </div>
 
         {/* Legend */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1 border-t border-gray-700/60">
-          <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Chú thích:</span>
-          <span className="inline-flex items-center gap-1.5 text-xs text-gray-300">
-            <span className="w-3.5 h-3.5 rounded bg-emerald-500/30 border border-emerald-500/60" /> Đã ở (Occupied)
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1 border-t border-slate-700">
+          <span className="text-[11px] font-extrabold text-white uppercase tracking-wider">Chú thích:</span>
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-100">
+            <span className="w-3.5 h-3.5 rounded bg-emerald-500/40 border border-emerald-400" /> Đã ở (Occupied)
           </span>
-          <span className="inline-flex items-center gap-1.5 text-xs text-gray-300">
-            <span className="w-3.5 h-3.5 rounded border-dashed border border-blue-500/70 bg-blue-500/10" /> Còn trống (Available)
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-100">
+            <span className="w-3.5 h-3.5 rounded border border-dashed border-blue-400 bg-blue-500/20" /> Còn trống (Available)
           </span>
-          <span className="inline-flex items-center gap-1.5 text-xs text-gray-300">
-            <span className="w-3.5 h-3.5 rounded bg-amber-500/30 border border-amber-500/60" /> Bảo trì (Maintenance)
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-100">
+            <span className="w-3.5 h-3.5 rounded bg-amber-500/40 border border-amber-400" /> Bảo trì (Maintenance)
           </span>
-          <span className="inline-flex items-center gap-1.5 text-xs text-gray-300">
-            <span className="w-3.5 h-3.5 rounded bg-rose-500/40 border border-rose-500/70" /> Phòng quá tải
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-100">
+            <span className="w-3.5 h-3.5 rounded bg-rose-500/50 border border-rose-400" /> Phòng quá tải
           </span>
         </div>
       </div>
@@ -702,44 +712,44 @@ export default function BedManagementClient() {
                     <React.Fragment key={`${g.ktx}-${g.day}-${g.room}`}>
                       {showKtx && (
                         <div className="flex items-center gap-2.5 pt-2">
-                          <span className="text-xs font-bold px-3 py-1 rounded-lg border bg-blue-500/15 text-blue-300 border-blue-500/30">
+                          <span className="text-sm font-extrabold px-3 py-1.5 rounded-xl border bg-slate-800/80 border-slate-700 text-white shadow-lg">
                             {g.ktx}
                           </span>
-                          <span className="text-xs text-gray-400 font-medium">Sơ đồ mặt bằng</span>
-                          <div className="flex-1 h-px bg-gray-700/60" />
+                          <span className="text-[11px] font-extrabold uppercase tracking-wider text-amber-300">Sơ đồ mặt bằng</span>
+                          <div className="flex-1 h-px bg-slate-700" />
                         </div>
                       )}
                       {showDay && (
                         <div className="flex items-center gap-2">
-                          <Building2 size={14} className="text-indigo-400 shrink-0" />
-                          <h3 className="text-sm font-bold text-white">{g.day}</h3>
+                          <Building2 size={15} className="text-blue-300 shrink-0" />
+                          <h3 className="text-base font-extrabold text-slate-100">{g.day}</h3>
                         </div>
                       )}
                       {/* Room Card */}
                       <div className={`rounded-2xl border p-3.5 shadow-xl transition-all hover:shadow-2xl ${
-                        g.overloaded ? 'border-rose-500/50 bg-rose-500/5' : 'border-gray-700/60 bg-[#1F2937]'
+                        g.overloaded ? 'border-rose-500/70 bg-rose-950/40' : 'border-slate-700 bg-slate-900/90'
                       }`}>
                         <div className="flex items-center justify-between gap-2 mb-2.5">
                           <div className="flex items-center gap-2 min-w-0">
-                            <span className="text-xs font-extrabold text-white bg-gray-800/80 border border-gray-600/60 px-2 py-0.5 rounded-lg">
+                            <span className="text-sm font-extrabold text-white bg-slate-800/80 border border-slate-700 px-2.5 py-1 rounded-xl">
                               Phòng {g.room}
                             </span>
                             {g.overloaded && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-rose-500/25 text-rose-300 border border-rose-500/50">
                                 <AlertCircle size={9} /> Quá tải
                               </span>
                             )}
                             {g.maintenance > 0 && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-500/25 text-amber-300 border border-amber-500/50">
                                 <Wrench size={9} /> {g.maintenance} bảo trì
                               </span>
                             )}
                           </div>
-                          <span className="text-[11px] font-tabular font-bold text-gray-300 shrink-0">
+                          <span className="text-xs font-tabular font-extrabold text-slate-100 shrink-0">
                             {g.occupied}/{g.cap} giường
                           </span>
                         </div>
-                        <div className="w-full h-1.5 bg-gray-700/60 rounded-full overflow-hidden mb-3">
+                        <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden mb-3">
                           <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${Math.min(pct * 100, 100)}%` }} />
                         </div>
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
@@ -769,25 +779,25 @@ export default function BedManagementClient() {
                                 className={`group relative text-left rounded-xl border p-2.5 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/40 overflow-visible ${bedCellClasses(bed?.status ?? 'empty', female)}`}
                               >
                                 <div className="flex items-center justify-between mb-1">
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-gray-300 font-tabular">
-                                    <BedDouble size={11} /> {bedLabel}
+                                  <span className="inline-flex items-center gap-1 text-xs font-extrabold text-blue-300 font-tabular">
+                                    <BedDouble size={12} /> {bedLabel}
                                   </span>
                                   {statusBadge(bed?.status ?? 'empty', female)}
                                 </div>
                                 {occupied ? (
                                   <div className="space-y-0.5 min-w-0">
-                                    <p className="text-xs font-bold text-white truncate">{shortName(bed?.ho_va_ten) || shortName(worker?.hoVaTen) || '?'}</p>
-                                    <p className="text-[10px] text-gray-400 font-tabular truncate">MNV {bed?.ma_nv || worker?.maNV || '—'}</p>
+                                    <p className="text-sm font-extrabold text-white truncate">{shortName(bed?.ho_va_ten) || shortName(worker?.hoVaTen) || '?'}</p>
+                                    <p className="text-[10px] font-bold text-slate-100 font-tabular truncate">MNV {bed?.ma_nv || worker?.maNV || '—'}</p>
                                     {unit && (
-                                      <span className="inline-flex max-w-full items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-500/20 text-indigo-200 border border-indigo-500/30 truncate">
+                                      <span className="inline-flex max-w-full items-center px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-slate-800 text-blue-300 border border-blue-400/50 truncate">
                                         {unit}
                                       </span>
                                     )}
                                   </div>
                                 ) : maintenance ? (
-                                  <p className="text-[11px] font-semibold text-amber-300">Đang kiểm tra / sửa</p>
+                                  <p className="text-xs font-bold text-amber-300">Đang kiểm tra / sửa</p>
                                 ) : (
-                                  <p className="text-[11px] text-blue-300/80 italic">Bấm để gán…</p>
+                                  <p className="text-[11px] font-bold text-blue-300">Bấm để gán…</p>
                                 )}
                                 {occupied && <BedTooltip bed={bed} worker={worker} />}
                               </button>
@@ -907,7 +917,7 @@ export default function BedManagementClient() {
                   { label: 'Tỷ lệ lấp đầy', value: `${fillRateInView}%`, color: 'text-indigo-400 border-indigo-500/30' },
                 ].map(s => (
                   <div key={s.label} className={`rounded-2xl border bg-[#1F2937] p-4 shadow-xl ${s.color}`}>
-                    <p className="text-xs text-gray-400 font-medium">{s.label}</p>
+                    <p className="text-xs text-slate-300 font-semibold">{s.label}</p>
                     <p className={`text-2xl font-bold font-tabular mt-1 ${s.color}`}>
                       {typeof s.value === 'number' ? s.value.toLocaleString('vi-VN') : s.value}
                     </p>
