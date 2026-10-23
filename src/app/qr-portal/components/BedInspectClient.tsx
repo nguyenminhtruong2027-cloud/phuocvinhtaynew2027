@@ -4,9 +4,10 @@ import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import {
   BedDouble, RefreshCw, Search, X, User, UserCheck, UserX, Loader2,
   Wrench, DoorOpen, Phone, Briefcase, VenusAndMars, Calendar,
-  CheckCircle2, AlertCircle, ScanLine,
+  CheckCircle2, AlertCircle, ScanLine, Printer,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import BedQrPrintModal from '@/app/bed-management/components/BedQrPrintModal';
 
 interface BedRow {
   id: string;
@@ -59,6 +60,7 @@ export default function BedInspectClient() {
   const [assignSearch, setAssignSearch] = useState('');
   const [workers, setWorkers] = useState<WorkerLite[]>([]);
   const [busy, setBusy] = useState(false);
+  const [showQrPrint, setShowQrPrint] = useState(false);
 
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
   if (!supabaseRef.current) supabaseRef.current = createClient();
@@ -359,6 +361,14 @@ export default function BedInspectClient() {
             </p>
           </div>
           <button
+            onClick={() => setShowQrPrint(true)}
+            disabled={!bed}
+            className="p-2 rounded-xl border border-cyan-500/40 bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 disabled:opacity-40"
+            title="🖨️ In Tem QR Giường"
+          >
+            <Printer size={14} />
+          </button>
+          <button
             onClick={() => loadBedData()}
             disabled={loading}
             className="p-2 rounded-xl border border-slate-800/80 bg-slate-900/80 text-slate-300 hover:text-white disabled:opacity-50"
@@ -498,6 +508,24 @@ export default function BedInspectClient() {
           );
         })()}
       </div>
+
+      {/* ─── Print QR Modal ─── */}
+      <BedQrPrintModal
+        open={showQrPrint}
+        onClose={() => setShowQrPrint(false)}
+        lockedBed={bed
+          ? {
+              id: bed.id || '',
+              ktx: bed.ktx || '',
+              day: bed.day || '',
+              phong_so: bed.phong_so || '',
+              giuong: bed.giuong || '',
+              status: bed.status || 'empty',
+              ma_nv: bed.ma_nv,
+              ho_va_ten: bed.ho_va_ten,
+            }
+          : null}
+      />
 
       {/* ─── Quick Assign Modal ─── */}
       {showAssign && bed && (

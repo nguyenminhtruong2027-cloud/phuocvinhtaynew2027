@@ -5,12 +5,13 @@ import {
   BedDouble, RefreshCw, Search, X, User, UserCheck, UserX,
   ArrowRightLeft, Loader2, Building2, Phone, Briefcase, VenusAndMars,
   AlertCircle, LayoutGrid, Table2, BarChart3, Wrench, DoorOpen, Calendar,
-  ExternalLink, UserPlus, CheckCircle2,
+  ExternalLink, UserPlus, CheckCircle2, Printer,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { compareKtxNames, DEFAULT_ROOM_CAPACITY } from '@/data/workers';
 import { fetchRoomCapacities, getRoomCapacity, RoomCapacityMap } from '@/lib/facilityCapacity';
+import BedQrPrintModal from './BedQrPrintModal';
 
 type BedStatus = 'empty' | 'occupied' | 'maintenance';
 type ViewMode = 'grid' | 'table' | 'analytics';
@@ -100,6 +101,7 @@ export default function BedManagementClient() {
   const [transferMode, setTransferMode] = useState(false);
   const [transferSearch, setTransferSearch] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showQrPrint, setShowQrPrint] = useState(false);
 
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
   if (!supabaseRef.current) supabaseRef.current = createClient();
@@ -566,6 +568,13 @@ export default function BedManagementClient() {
             ))}
           </div>
           <button
+            onClick={() => setShowQrPrint(true)}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/25 text-sm font-bold transition-colors"
+            title="In tem QR cho giường ở phạm vi đang chọn"
+          >
+            <Printer size={14} /> 🖨️ Xuất Danh Sách QR
+          </button>
+          <button
             onClick={() => { loadBeds(); loadWorkers(); loadCapacities(); }}
             disabled={refreshing || loading}
             className="flex items-center gap-2 px-3 py-2 border border-border rounded-lg text-sm text-muted-foreground hover:bg-muted transition-colors disabled:opacity-60"
@@ -975,6 +984,9 @@ export default function BedManagementClient() {
           )}
         </>
       )}
+
+      {/* Print QR labels modal */}
+      <BedQrPrintModal open={showQrPrint} onClose={() => setShowQrPrint(false)} lockedBed={null} />
 
       {/* ─── Assign Modal ─── */}
       {assignTarget && (
