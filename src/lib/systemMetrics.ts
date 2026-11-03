@@ -114,6 +114,7 @@ export function computeSystemMetrics(
 
   // Buildings and rooms for filtered selection
   const buildingSet = new Set<string>();
+  const buildingPairSet = new Set<string>();
   const roomSet = new Set<string>();
   const roomOccupancyMap = new Map<string, Worker[]>();
   let workersWithRoom = 0;
@@ -124,6 +125,7 @@ export function computeSystemMetrics(
     const k = (w.ktx ?? '').trim();
 
     if (b) buildingSet.add(b);
+    if (b && k) buildingPairSet.add(`${k}||${b}`);
 
     if (b && r) {
       workersWithRoom++;
@@ -150,7 +152,7 @@ export function computeSystemMetrics(
   });
 
   const uniqueBuildings = Array.from(buildingSet).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }));
-  const buildingCount = uniqueBuildings.length;
+  const buildingCount = buildingPairSet.size;
   const uniqueRooms = Array.from(roomSet);
   const roomCount = uniqueRooms.length;
   let capacity = 0;
