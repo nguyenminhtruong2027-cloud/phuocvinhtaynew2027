@@ -56,9 +56,9 @@ interface AbsenceAlert {
 }
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  present:  { label: 'Có mặt',        color: 'bg-[#eaf6ef] text-[#1f7a45] border-[#1f7a45]/30' },
-  absent:   { label: 'Vắng không phép', color: 'bg-[#fbebe9] text-[#b3362b] border-[#b3362b]/30' },
-  excused:  { label: 'Có phép',        color: 'bg-blue-50 text-blue-700 border-blue-200' },
+  present:  { label: 'Có mặt',        color: 'bg-okbg text-ok border-[#1f7a45]/30' },
+  absent:   { label: 'Vắng không phép', color: 'bg-dgrbg text-dgr border-dgr/30' },
+  excused:  { label: 'Có phép',        color: 'bg-bdg text-lnk border-bdr2' },
 };
 
 function getZoneLabel(s: AttendanceSession): string {
@@ -92,34 +92,34 @@ function QRCodeDisplay({ url, sessionDate, zoneLabel }: { url: string; sessionDa
   };
 
   return (
-    <div className="bg-[#f3f4f6] dark:bg-[#11151a] border border-[#dde1e6] dark:border-[#2a333e] rounded-md p-4">
+    <div className="bg-act border border-bdr rounded-md p-4">
       <div className="flex flex-col sm:flex-row items-center gap-5">
         <div className="shrink-0 flex flex-col items-center gap-2.5">
-          <div className="p-2 border border-[#dde1e6] dark:border-[#2a333e] bg-white rounded">
+          <div className="p-2 border border-bdr bg-surf rounded">
             <img src={qrApiUrl} alt={`QR điểm danh ngày ${sessionDate} - ${zoneLabel}`} width={160} height={160} className="w-36 h-36" />
           </div>
           <button onClick={handleDownload}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-[#1b2430] text-white rounded text-xs font-semibold hover:bg-[#2a3749] transition-colors cursor-pointer">
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-side text-tx rounded text-xs font-semibold hover:bg-act transition-colors cursor-pointer">
             <Download size={13} /> Tải QR xuống
           </button>
         </div>
         <div className="flex-1 text-center sm:text-left space-y-2">
           <div>
-            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-[#eaf6ef] text-[#1f7a45] border border-[#1f7a45]/30 rounded text-xs font-semibold mb-1">
-              <span className="w-2 h-2 bg-[#1f7a45] rounded-full animate-pulse" />
+            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-okbg text-ok border border-[#1f7a45]/30 rounded text-xs font-semibold mb-1">
+              <span className="w-2 h-2 bg-ok2 rounded-full animate-pulse" />
               Phiên đang mở — Hợp lệ cả ngày
             </div>
-            <h3 className="font-bold text-[#1b2430] dark:text-white text-base">QR Điểm Danh Công Nhân</h3>
-            <p className="text-xs text-[#4b5563] dark:text-[#9ca3af] mt-0.5">Ngày: <strong className="text-[#1b2430] dark:text-white">{sessionDate}</strong> · Khu vực: <strong className="text-[#c9690f]">{zoneLabel}</strong></p>
+            <h3 className="font-bold text-tx text-base">QR Điểm Danh Công Nhân</h3>
+            <p className="text-xs text-mu mt-0.5">Ngày: <strong className="text-tx">{sessionDate}</strong> · Khu vực: <strong className="text-wn">{zoneLabel}</strong></p>
           </div>
-          <div className="bg-white dark:bg-[#181d24] rounded border border-[#dde1e6] dark:border-[#2a333e] p-2.5 space-y-1">
-            <p className="text-[11px] text-gray-500 font-semibold">Đường dẫn quét:</p>
-            <code className="text-xs bg-[#f3f4f6] dark:bg-[#11151a] px-2 py-1 rounded font-mono text-[#1b2430] dark:text-gray-200 break-all block border border-[#dde1e6] dark:border-[#2a333e]">{url}</code>
+          <div className="bg-surf rounded border border-bdr p-2.5 space-y-1">
+            <p className="text-[11px] text-ic font-semibold">Đường dẫn quét:</p>
+            <code className="text-xs bg-act px-2 py-1 rounded font-mono text-tx break-all block border border-bdr">{url}</code>
           </div>
           <div className="flex flex-wrap gap-1.5 text-xs">
-            <span className="px-2 py-0.5 rounded bg-white dark:bg-[#181d24] text-[#1f7a45] border border-[#1f7a45]/30">✓ Không hết hạn trong ngày</span>
-            <span className="px-2 py-0.5 rounded bg-white dark:bg-[#181d24] text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-900">✓ Xác nhận tức thì</span>
-            <span className="px-2 py-0.5 rounded bg-white dark:bg-[#181d24] text-[#c9690f] border border-[#c9690f]/30">✓ Hiển thị phòng/dãy</span>
+            <span className="px-2 py-0.5 rounded bg-surf text-ok border border-[#1f7a45]/30">✓ Không hết hạn trong ngày</span>
+            <span className="px-2 py-0.5 rounded bg-bdg text-lnk border border-bdr2">✓ Xác nhận tức thì</span>
+            <span className="px-2 py-0.5 rounded bg-surf text-wn border border-wn/30">✓ Hiển thị phòng/dãy</span>
           </div>
         </div>
       </div>
@@ -779,8 +779,8 @@ export default function AttendancePortalClient() {
         </div>
         <div className="flex items-center gap-2">
           {activeSession && (
-            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border ${realtimeConnected ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>
-              <div className={`w-2 h-2 rounded-full ${realtimeConnected ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'}`} />
+            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border ${realtimeConnected ? 'bg-okbg text-ok border-bdr2' : 'bg-act text-ic border-bdr'}`}>
+              <div className={`w-2 h-2 rounded-full ${realtimeConnected ? 'bg-ok2 animate-pulse' : 'bg-gray-400'}`} />
               {realtimeConnected ? 'Realtime' : 'Đang kết nối...'}
             </div>
           )}
@@ -796,7 +796,7 @@ export default function AttendancePortalClient() {
 
       {/* New check-in flash notification */}
       {newCheckInFlash && (
-        <div className="flex items-center gap-3 px-4 py-3 bg-emerald-600 text-white rounded-xl shadow-lg animate-pulse">
+        <div className="flex items-center gap-3 px-4 py-3 bg-ok2 text-tx rounded-xl shadow-lg animate-pulse">
           <BellRing size={18} className="flex-shrink-0" />
           <span className="text-sm font-semibold">✓ Có công nhân vừa điểm danh thành công!</span>
         </div>
@@ -810,7 +810,7 @@ export default function AttendancePortalClient() {
           { key: 'alerts', label: `Cảnh báo vắng${absenceAlerts.length > 0 ? ` (${absenceAlerts.length})` : ''}`, icon: <Bell size={14} /> },
         ].map(t => (
           <button key={t.key} onClick={() => setActiveTab(t.key as any)}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-semibold transition-all ${activeTab === t.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'} ${t.key === 'alerts' && absenceAlerts.length > 0 ? 'text-amber-600' : ''}`}>
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-semibold transition-all ${activeTab === t.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'} ${t.key === 'alerts' && absenceAlerts.length > 0 ? 'text-wn' : ''}`}>
             {t.icon} {t.label}
           </button>
         ))}
@@ -948,7 +948,7 @@ export default function AttendancePortalClient() {
                 </div>
               ) : (
                 <button onClick={handleOpenSession} disabled={openingSession || !selectedDate}
-                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-60 transition-colors">
+                  className="flex items-center gap-2 px-4 py-2 bg-ok2 text-tx rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-60 transition-colors">
                   {openingSession ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
                   Mở phiên điểm danh
                 </button>
@@ -972,19 +972,19 @@ export default function AttendancePortalClient() {
                       {activeSession?.id === s.id && <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">Đang xem</span>}
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${s.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-muted text-muted-foreground'}`}>
-                        <div className={`w-1.5 h-1.5 rounded-full ${s.is_active ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'}`} />
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${s.is_active ? 'bg-okbg text-ok' : 'bg-muted text-muted-foreground'}`}>
+                        <div className={`w-1.5 h-1.5 rounded-full ${s.is_active ? 'bg-ok2 animate-pulse' : 'bg-gray-400'}`} />
                         {s.is_active ? 'Đang mở' : 'Đã đóng'}
                       </span>
                       {s.is_active ? (
                         <button onClick={e => { e.stopPropagation(); setActiveSession(s); handleCloseSession(); }} disabled={closingSession}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-medium hover:bg-red-700 disabled:opacity-60 transition-colors">
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-dgr text-tx rounded-lg text-xs font-medium hover:bg-dgr disabled:opacity-60 transition-colors">
                           {closingSession && activeSession?.id === s.id ? <Loader2 size={12} className="animate-spin" /> : <Square size={12} />}
                           Đóng phiên
                         </button>
                       ) : null}
                       <button onClick={e => { e.stopPropagation(); setActiveSession(s); setShowDeleteConfirm(true); }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 border border-red-300 text-red-600 rounded-lg text-xs font-medium hover:bg-red-50 transition-colors">
+                        className="flex items-center gap-1.5 px-3 py-1.5 border border-dgr text-dgr rounded-lg text-xs font-medium hover:bg-dgrbg transition-colors">
                         <Trash2 size={12} /> Xóa
                       </button>
                     </div>
@@ -998,7 +998,7 @@ export default function AttendancePortalClient() {
           )}
 
           {!sessionLoading && sessions.length === 0 && (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm border bg-amber-50 border-amber-200 text-amber-800">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm border bg-okbg border-bdr2 text-ok">
               <AlertCircle size={14} /> Chưa có phiên điểm danh cho ngày này. Chọn khu vực và bấm &quot;Mở phiên điểm danh&quot; để bắt đầu.
             </div>
           )}
@@ -1007,9 +1007,9 @@ export default function AttendancePortalClient() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {[
                 { label: `Tổng (${activeSessionZoneLabel})`, value: totalZoneWorkers.toLocaleString('vi-VN'), color: 'text-foreground bg-card border-border', icon: <Users size={18} /> },
-                { label: 'Đã điểm danh', value: presentCount + excusedCount, color: 'text-emerald-700 bg-emerald-50 border-emerald-200', icon: <UserCheck size={18} /> },
-                { label: 'Vắng mặt', value: absentCount, color: 'text-red-700 bg-red-50 border-red-200', icon: <UserX size={18} /> },
-                { label: 'Tỷ lệ có mặt', value: totalZoneWorkers > 0 ? `${Math.round(((presentCount + excusedCount) / totalZoneWorkers) * 100)}%` : '—', color: 'text-blue-700 bg-blue-50 border-blue-200', icon: <CheckCircle2 size={18} /> },
+                { label: 'Đã điểm danh', value: presentCount + excusedCount, color: 'text-ok bg-okbg border-bdr2', icon: <UserCheck size={18} /> },
+                { label: 'Vắng mặt', value: absentCount, color: 'text-dgr bg-dgrbg border-dgr', icon: <UserX size={18} /> },
+                { label: 'Tỷ lệ có mặt', value: totalZoneWorkers > 0 ? `${Math.round(((presentCount + excusedCount) / totalZoneWorkers) * 100)}%` : '—', color: 'text-lnk bg-bdg border-bdr2', icon: <CheckCircle2 size={18} /> },
               ].map(s => (
                 <div key={s.label} className={`p-4 rounded-xl border flex items-center gap-3 ${s.color}`}>
                   <div className="opacity-70">{s.icon}</div>
@@ -1034,7 +1034,7 @@ export default function AttendancePortalClient() {
                 <button key={s.id} onClick={() => setActiveSession(s)}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${activeSession?.id === s.id ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted'}`}>
                   <MapPin size={11} /> {getZoneLabel(s)}
-                  {s.is_active && <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />}
+                  {s.is_active && <div className="w-1.5 h-1.5 bg-ok2 rounded-full animate-pulse" />}
                 </button>
               ))}
             </div>
@@ -1051,9 +1051,9 @@ export default function AttendancePortalClient() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {[
                   { label: `Tổng (${activeSessionZoneLabel})`, value: totalZoneWorkers.toLocaleString('vi-VN'), color: 'text-foreground bg-card border-border' },
-                  { label: 'Đã điểm danh', value: presentCount + excusedCount, color: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
-                  { label: 'Vắng mặt', value: absentCount, color: 'text-red-700 bg-red-50 border-red-200' },
-                  { label: 'Có phép', value: excusedCount, color: 'text-blue-700 bg-blue-50 border-blue-200' },
+                  { label: 'Đã điểm danh', value: presentCount + excusedCount, color: 'text-ok bg-okbg border-bdr2' },
+                  { label: 'Vắng mặt', value: absentCount, color: 'text-dgr bg-dgrbg border-dgr' },
+                  { label: 'Có phép', value: excusedCount, color: 'text-lnk bg-bdg border-bdr2' },
                 ].map(s => (
                   <div key={s.label} className={`p-3 rounded-xl border text-center ${s.color}`}>
                     <p className="text-2xl font-bold">{s.value}</p>
@@ -1110,11 +1110,11 @@ export default function AttendancePortalClient() {
                   </div>
                   {/* Feature 3: Export checked-in button */}
                   <button onClick={handleExportCheckedIn} disabled={filteredRecords.length === 0}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+                    className="flex items-center gap-2 px-3 py-1.5 bg-ok2 text-tx rounded-lg text-xs font-medium hover:opacity-90 disabled:opacity-50 transition-colors">
                     <Download size={13} /> Xuất đã ĐD ({filteredRecords.length})
                   </button>
                   <button onClick={handleExportAbsent} disabled={filteredAbsent.length === 0}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700 disabled:opacity-50 transition-colors">
+                    className="flex items-center gap-2 px-3 py-1.5 bg-wn text-tx rounded-lg text-xs font-medium hover:opacity-90 disabled:opacity-50 transition-colors">
                     <Download size={13} /> Xuất vắng ({filteredAbsent.length})
                   </button>
                 </div>
@@ -1124,11 +1124,11 @@ export default function AttendancePortalClient() {
               {(filterStatus === 'all' || filterStatus === 'present' || filterStatus === 'excused') && (
                 <div className="bg-card border border-border rounded-xl overflow-hidden">
                   <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-                    <UserCheck size={16} className="text-emerald-600" />
+                    <UserCheck size={16} className="text-ok" />
                     <span className="text-sm font-semibold text-foreground">Đã điểm danh ({filteredRecords.length})</span>
                     {realtimeConnected && activeSession?.is_active && (
-                      <span className="ml-auto flex items-center gap-1 text-xs text-emerald-600 font-medium">
-                        <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                      <span className="ml-auto flex items-center gap-1 text-xs text-ok font-medium">
+                        <div className="w-1.5 h-1.5 bg-ok2 rounded-full animate-pulse" />
                         Tự động cập nhật
                       </span>
                     )}
@@ -1157,7 +1157,7 @@ export default function AttendancePortalClient() {
                         return (
                           <div key={rec.id} className="px-4 py-3 hover:bg-muted/30 transition-colors">
                             <div className="flex items-start gap-3">
-                              <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0 text-emerald-700 font-bold text-sm">
+                              <div className="w-8 h-8 rounded-full bg-okbg flex items-center justify-center flex-shrink-0 text-ok font-bold text-sm">
                                 {idx + 1}
                               </div>
                               <div className="flex-1 min-w-0">
@@ -1173,7 +1173,7 @@ export default function AttendancePortalClient() {
                                   {!isEditingLoc ? (
                                     <button
                                       onClick={() => startEditLocation(rec, workerInfo?.ktx || '', workerInfo?.day || '', workerInfo?.phong_so || '')}
-                                      className={`text-xs font-medium text-left w-fit rounded px-1 -ml-1 py-0.5 transition-colors ${hasLocation ? 'text-emerald-700 hover:bg-emerald-50' : 'text-amber-600 hover:bg-amber-50 border border-dashed border-amber-300'}`}
+                                      className={`text-xs font-medium text-left w-fit rounded px-1 -ml-1 py-0.5 transition-colors ${hasLocation ? 'text-ok hover:bg-okbg' : 'text-wn hover:bg-okbg border border-dashed border-wn'}`}
                                       title="Bấm để chỉnh sửa vị trí phòng"
                                     >
                                       {locationLabel || '⚠ Chưa có thông tin phòng — Bấm để nhập'}
@@ -1232,7 +1232,7 @@ export default function AttendancePortalClient() {
                                         );
                                       })()}
                                       <button onClick={() => saveLocation(rec.id)} disabled={savingLocation}
-                                        className="flex items-center gap-1 px-2 py-1 bg-emerald-600 text-white rounded text-xs font-medium hover:opacity-90 disabled:opacity-50">
+                                        className="flex items-center gap-1 px-2 py-1 bg-ok2 text-tx rounded text-xs font-medium hover:opacity-90 disabled:opacity-50">
                                         {savingLocation ? <Loader2 size={10} className="animate-spin" /> : <Save size={10} />} Lưu
                                       </button>
                                       <button onClick={() => setEditingLocationId(null)}
@@ -1276,7 +1276,7 @@ export default function AttendancePortalClient() {
                                     <Edit3 size={13} />
                                   </button>
                                   <button onClick={() => { if (confirm(`Xóa bản ghi điểm danh của ${rec.ho_va_ten}?`)) handleDeleteRecord(rec.id); }} disabled={deletingRecordId === rec.id} title="Xóa bản ghi"
-                                    className="p-1.5 rounded-lg text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-50">
+                                    className="p-1.5 rounded-lg text-muted-foreground hover:bg-dgrbg hover:text-dgr transition-colors disabled:opacity-50">
                                     {deletingRecordId === rec.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
                                   </button>
                                 </div>
@@ -1292,18 +1292,18 @@ export default function AttendancePortalClient() {
 
               {/* Absent workers */}
               {(filterStatus === 'all' || filterStatus === 'absent') && (
-                <div className="bg-card border border-red-200 rounded-xl overflow-hidden">
-                  <div className="px-4 py-3 border-b border-red-200 bg-red-50 flex items-center justify-between">
+                <div className="bg-card border border-dgr rounded-xl overflow-hidden">
+                  <div className="px-4 py-3 border-b border-dgr bg-dgrbg flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <UserX size={16} className="text-red-600" />
-                      <span className="text-sm font-semibold text-red-800">Chưa điểm danh / Vắng mặt ({filteredAbsent.length})</span>
+                      <UserX size={16} className="text-dgr" />
+                      <span className="text-sm font-semibold text-dgr">Chưa điểm danh / Vắng mặt ({filteredAbsent.length})</span>
                     </div>
                   </div>
                   {recordsLoading ? (
                     <div className="flex items-center justify-center py-10"><Loader2 size={22} className="animate-spin text-primary" /></div>
                   ) : filteredAbsent.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
-                      <CheckCircle2 size={32} className="mb-2 opacity-30 text-emerald-500" />
+                      <CheckCircle2 size={32} className="mb-2 opacity-30 text-ok" />
                       <p className="text-sm">Tất cả đã điểm danh!</p>
                     </div>
                   ) : (
@@ -1311,16 +1311,16 @@ export default function AttendancePortalClient() {
                       {filteredAbsent.map((w, idx) => {
                         const isEditingAbsent = editingAbsentId === w.id;
                         return (
-                          <div key={w.id} className="px-4 py-3 hover:bg-red-50/50 transition-colors">
+                          <div key={w.id} className="px-4 py-3 hover:bg-dgrbg/50 transition-colors">
                             <div className="flex items-start gap-3">
-                              <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0 text-red-600 font-bold text-sm">
+                              <div className="w-8 h-8 rounded-full bg-dgrbg flex items-center justify-center flex-shrink-0 text-dgr font-bold text-sm">
                                 {idx + 1}
                               </div>
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <span className="font-semibold text-foreground text-sm">{w.ho_va_ten}</span>
                                   {w.ma_nv && <span className="text-xs text-muted-foreground font-mono bg-muted px-1.5 py-0.5 rounded">{w.ma_nv}</span>}
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border bg-red-100 text-red-700 border-red-200">Chưa điểm danh</span>
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border bg-dgrbg text-dgr border-dgr">Chưa điểm danh</span>
                                 </div>
                                 {!isEditingAbsent ? (
                                   <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-muted-foreground">
@@ -1328,7 +1328,7 @@ export default function AttendancePortalClient() {
                                     {w.day && <span>Dãy {w.day}</span>}
                                     {w.phong_so && <span>Phòng {w.phong_so}</span>}
                                     {!w.ktx && !w.day && !w.phong_so && (
-                                      <span className="text-amber-600 italic">Chưa có thông tin phòng</span>
+                                      <span className="text-wn italic">Chưa có thông tin phòng</span>
                                     )}
                                   </div>
                                 ) : (
@@ -1403,7 +1403,7 @@ export default function AttendancePortalClient() {
                                     onClick={() => handleProxyCheckIn(w)}
                                     disabled={proxyCheckingIn === w.id}
                                     title="Điểm danh hộ"
-                                    className="flex items-center gap-1 px-2 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+                                    className="flex items-center gap-1 px-2 py-1.5 bg-ok2 text-tx rounded-lg text-xs font-semibold hover:opacity-90 disabled:opacity-50 transition-colors">
                                     {proxyCheckingIn === w.id ? <Loader2 size={11} className="animate-spin" /> : <UserPlus size={11} />}
                                     Điểm danh hộ
                                   </button>
@@ -1430,11 +1430,11 @@ export default function AttendancePortalClient() {
       {/* ─── TAB: Absence Alerts ─── */}
       {activeTab === 'alerts' && (
         <div className="space-y-4">
-          <div className="flex items-start gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
-            <BellRing size={18} className="flex-shrink-0 mt-0.5 text-amber-600" />
+          <div className="flex items-start gap-3 px-4 py-3 bg-okbg border border-wn rounded-xl text-sm text-wn">
+            <BellRing size={18} className="flex-shrink-0 mt-0.5 text-wn" />
             <div>
               <p className="font-semibold">Cảnh báo vắng mặt liên tiếp</p>
-              <p className="text-xs mt-0.5 text-amber-700">Hệ thống tự động quét dữ liệu điểm danh 14 ngày gần nhất và cảnh báo những công nhân vắng liên tiếp từ {absenceThreshold} ngày trở lên. Dữ liệu được liên kết trực tiếp từ module Điểm danh QR.</p>
+              <p className="text-xs mt-0.5 text-wn">Hệ thống tự động quét dữ liệu điểm danh 14 ngày gần nhất và cảnh báo những công nhân vắng liên tiếp từ {absenceThreshold} ngày trở lên. Dữ liệu được liên kết trực tiếp từ module Điểm danh QR.</p>
             </div>
           </div>
 
@@ -1455,13 +1455,13 @@ export default function AttendancePortalClient() {
               </select>
             </div>
             <button onClick={computeAbsenceAlerts} disabled={alertsLoading}
-              className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-60 transition-colors">
+              className="flex items-center gap-2 px-4 py-2 bg-wn text-tx rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-60 transition-colors">
               {alertsLoading ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
               Quét lại
             </button>
             {absenceAlerts.length > 0 && (
               <button onClick={handleExportAlerts}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-700 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors ml-auto">
+                className="flex items-center gap-2 px-4 py-2 bg-gray-700 text-tx rounded-lg text-sm font-medium hover:bg-act transition-colors ml-auto">
                 <Download size={15} /> Xuất Excel ({absenceAlerts.length})
               </button>
             )}
@@ -1470,36 +1470,36 @@ export default function AttendancePortalClient() {
           {alertsLoading ? (
             <div className="flex items-center justify-center py-16">
               <div className="flex flex-col items-center gap-3">
-                <Loader2 size={28} className="animate-spin text-amber-600" />
+                <Loader2 size={28} className="animate-spin text-wn" />
                 <p className="text-sm text-muted-foreground">Đang phân tích dữ liệu điểm danh...</p>
               </div>
             </div>
           ) : absenceAlerts.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-              <CheckCircle2 size={40} className="mb-3 opacity-30 text-emerald-500" />
+              <CheckCircle2 size={40} className="mb-3 opacity-30 text-ok" />
               <p className="text-base font-medium">Không có cảnh báo vắng mặt</p>
               <p className="text-sm mt-1">Không có công nhân nào vắng liên tiếp ≥ {absenceThreshold} ngày trong 14 ngày qua.</p>
             </div>
           ) : (
-            <div className="bg-card border border-amber-200 rounded-xl overflow-hidden">
-              <div className="px-4 py-3 border-b border-amber-200 bg-amber-50 flex items-center gap-2">
-                <AlertCircle size={16} className="text-amber-600" />
-                <span className="text-sm font-semibold text-amber-800">
+            <div className="bg-card border border-wn rounded-xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-wn bg-okbg flex items-center gap-2">
+                <AlertCircle size={16} className="text-wn" />
+                <span className="text-sm font-semibold text-wn">
                   {absenceAlerts.length} công nhân vắng liên tiếp ≥ {absenceThreshold} ngày
                 </span>
               </div>
               <div className="divide-y divide-border">
                 {absenceAlerts.map((alert, idx) => (
-                  <div key={alert.ma_nv} className={`px-4 py-3 hover:bg-amber-50/30 transition-colors ${alert.absent_days >= 7 ? 'bg-red-50/30' : ''}`}>
+                  <div key={alert.ma_nv} className={`px-4 py-3 hover:bg-okbg/30 transition-colors ${alert.absent_days >= 7 ? 'bg-dgrbg/30' : ''}`}>
                     <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 font-bold text-sm ${alert.absent_days >= 7 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 font-bold text-sm ${alert.absent_days >= 7 ? 'bg-dgrbg text-dgr' : 'bg-okbg text-ok'}`}>
                         {idx + 1}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-semibold text-foreground text-sm">{alert.ho_va_ten}</span>
                           {alert.ma_nv && <span className="text-xs text-muted-foreground font-mono bg-muted px-1.5 py-0.5 rounded">{alert.ma_nv}</span>}
-                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold border ${alert.absent_days >= 7 ? 'bg-red-100 text-red-700 border-red-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold border ${alert.absent_days >= 7 ? 'bg-dgrbg text-dgr border-dgr' : 'bg-okbg text-ok border-wn'}`}>
                             <AlertCircle size={10} />
                             Vắng {alert.absent_days} ngày liên tiếp
                           </span>
@@ -1509,10 +1509,10 @@ export default function AttendancePortalClient() {
                           {alert.day && <span>Dãy {alert.day}</span>}
                           {alert.phong_so && <span>Phòng {alert.phong_so}</span>}
                           {alert.last_seen_date && (
-                            <span className="text-emerald-600">Lần cuối có mặt: {alert.last_seen_date}</span>
+                            <span className="text-ok">Lần cuối có mặt: {alert.last_seen_date}</span>
                           )}
                           {!alert.last_seen_date && (
-                            <span className="text-red-500">Chưa từng điểm danh trong 14 ngày qua</span>
+                            <span className="text-dgr">Chưa từng điểm danh trong 14 ngày qua</span>
                           )}
                         </div>
                       </div>
@@ -1530,8 +1530,8 @@ export default function AttendancePortalClient() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-card border border-border rounded-2xl shadow-2xl p-6 max-w-sm w-full space-y-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
-                <Trash2 size={20} className="text-red-600" />
+              <div className="w-10 h-10 bg-dgrbg rounded-full flex items-center justify-center flex-shrink-0">
+                <Trash2 size={20} className="text-dgr" />
               </div>
               <div>
                 <h3 className="font-bold text-foreground">Xóa / Reset phiên điểm danh?</h3>
@@ -1545,7 +1545,7 @@ export default function AttendancePortalClient() {
                 Hủy
               </button>
               <button onClick={handleDeleteSession} disabled={deletingSession}
-                className="flex-1 py-2.5 bg-red-600 text-white rounded-xl text-sm font-medium hover:bg-red-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2">
+                className="flex-1 py-2.5 bg-dgr text-tx rounded-xl text-sm font-medium hover:bg-dgr disabled:opacity-60 transition-colors flex items-center justify-center gap-2">
                 {deletingSession ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
                 Xóa toàn bộ
               </button>

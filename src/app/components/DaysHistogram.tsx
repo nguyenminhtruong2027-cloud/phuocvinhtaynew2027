@@ -10,9 +10,9 @@ import { Clock } from 'lucide-react';
 const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: { value: number }[]; label?: string }) => {
   if (active && payload && payload.length) {
     return (
-      <div className="bg-gray-800/95 backdrop-blur-md border border-gray-700 rounded-xl shadow-xl px-3 py-2 text-xs">
-        <p className="font-bold text-white">{label} ngày</p>
-        <p className="text-gray-300 mt-0.5">Số công nhân: <span className="font-tabular font-bold text-emerald-400">{payload[0].value}</span></p>
+      <div className="bg-surf border border-bdr2 rounded-xl shadow-modal px-3 py-2 text-xs">
+        <p className="font-bold text-tx">{label} ngày</p>
+        <p className="text-mu mt-0.5">Số công nhân: <span className="font-tabular font-bold text-ok">{payload[0].value}</span></p>
       </div>
     );
   }
@@ -40,24 +40,24 @@ export default function DaysHistogram() {
   }));
 
   return (
-    <div className="bg-[#1F2937] border border-gray-700/60 rounded-2xl shadow-xl p-5 transition-all duration-200 hover:border-gray-600/80">
+    <div className="bg-surf border border-bdr rounded-2xl shadow-xl p-5 transition-all duration-200 hover:border-bdr2">
       <div className="flex items-center gap-2.5 mb-4">
-        <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+        <div className="w-9 h-9 rounded-xl bg-okbg border border-bdr2 flex items-center justify-center text-ok">
           <Clock size={18} />
         </div>
         <div>
-          <h2 className="text-base font-bold text-white tracking-tight">Số Ngày Lưu Trú</h2>
-          <p className="text-xs text-gray-400">Phân bổ công nhân theo số ngày đã ở KTX</p>
+          <h2 className="text-base font-bold text-tx tracking-tight">Số Ngày Lưu Trú</h2>
+          <p className="text-xs text-mu">Phân bổ công nhân theo số ngày đã ở KTX</p>
         </div>
       </div>
 
       <ResponsiveContainer width="100%" height={165}>
         <BarChart data={data} barCategoryGap="30%">
-          <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} opacity={0.6} />
-          <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#9CA3AF' }} axisLine={false} tickLine={false} />
-          <YAxis tick={{ fontSize: 11, fill: '#9CA3AF' }} axisLine={false} tickLine={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--bdr2)" vertical={false} opacity={0.6} />
+          <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'var(--mu)' }} axisLine={false} tickLine={false} />
+          <YAxis tick={{ fontSize: 11, fill: 'var(--mu)' }} axisLine={false} tickLine={false} />
           <Tooltip content={<CustomTooltip />} />
-          <Bar dataKey="count" fill="#10B981" radius={[4, 4, 0, 0]} maxBarSize={36} />
+          <Bar dataKey="count" fill="var(--ok2)" radius={[4, 4, 0, 0]} maxBarSize={36} />
         </BarChart>
       </ResponsiveContainer>
     </div>

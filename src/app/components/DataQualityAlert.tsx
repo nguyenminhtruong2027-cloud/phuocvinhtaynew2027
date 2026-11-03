@@ -12,15 +12,15 @@ export default function DataQualityAlert() {
   const noRoom = workers?.filter(w => getProfileStatus(w) === 'no_room')?.length;
 
   return (
-    <div className="mb-5 flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
-      <AlertTriangle size={16} className="text-amber-600 mt-0.5 flex-shrink-0" />
+    <div className="mb-5 flex items-start gap-3 bg-okbg border border-wn rounded-lg px-4 py-3">
+      <AlertTriangle size={16} className="text-wn mt-0.5 flex-shrink-0" />
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-amber-800">Dữ liệu cần bổ sung</p>
-        <p className="text-xs text-amber-700 mt-0.5">
+        <p className="text-sm font-semibold text-wn">Dữ liệu cần bổ sung</p>
+        <p className="text-xs text-wn mt-0.5">
           {missingCCCD} thiếu CCCD · {missingEntry} thiếu ngày vào · {pendingCode} chờ mã NV · {noRoom} chưa phân phòng
         </p>
       </div>
-      <a href="/worker-management" className="text-xs font-semibold text-amber-700 hover:text-amber-900 underline flex-shrink-0">
+      <a href="/worker-management" className="text-xs font-semibold text-wn hover:text-wn underline flex-shrink-0">
         Xem danh sách
       </a>
     </div>

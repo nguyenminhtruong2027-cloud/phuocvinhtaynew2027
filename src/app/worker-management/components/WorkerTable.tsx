@@ -39,48 +39,47 @@ const COLUMNS: { key: keyof Worker; label: string; width?: string }[] = [
 ];
 
 function PlatoonBadge({ value }: { value: string }) {
-  if (!value) return <span className="text-xs text-gray-500">—</span>;
+  if (!value) return <span className="text-xs text-mu">—</span>;
   return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 whitespace-nowrap shrink-0">
+    <span className="badge">
       TD {value}
     </span>
   );
 }
 
 function MaNVCell({ value }: { value: string }) {
-  if (!value) return <span className="text-xs text-gray-500 italic whitespace-nowrap">Chưa có</span>;
+  if (!value) return <span className="text-xs text-mu italic whitespace-nowrap">Chưa có</span>;
   if (value.toLowerCase().startsWith('chờ')) {
     return (
-      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 font-tabular whitespace-nowrap shrink-0">
+      <span className="badge tint-wn !text-wn !border-wn font-tabular">
         {value}
       </span>
     );
   }
-  return <span className="text-xs font-tabular font-bold text-gray-200 whitespace-nowrap">{value}</span>;
+  return <span className="text-xs font-tabular font-bold text-tx whitespace-nowrap">{value}</span>;
 }
 
 function CCCDCell({ value }: { value: string | undefined }) {
   if (!value) {
     return (
-      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30 whitespace-nowrap shrink-0">
+      <span className="badge !bg-dgrbg !text-dgr !border-dgr">
         Thiếu CCCD
       </span>
     );
   }
-  const masked = value.slice(0, 3) + '****' + value.slice(-3);
-  return <span className="text-xs font-tabular text-gray-400 whitespace-nowrap">{masked}</span>;
+  return <span className="text-xs font-tabular text-tx whitespace-nowrap">{value}</span>;
 }
 
 function ProfileStatusTag({ worker }: { worker: Worker }) {
   const status = getProfileStatus(worker);
   if (status === 'full') return (
-    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 whitespace-nowrap shrink-0">
-      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />Đủ hồ sơ
+    <span className="badge bg-okbg !text-ok !border-bdr2">
+      <span className="w-1.5 h-1.5 rounded-full bg-ok2 shrink-0" />Đủ hồ sơ
     </span>
   );
   if (status === 'missing_cccd_sdt') return (
-    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30 whitespace-nowrap shrink-0">
-      <span className="w-1.5 h-1.5 rounded-full bg-rose-400 shrink-0" />Thiếu CCCD/SĐT
+    <span className="badge bg-dgrbg !text-dgr !border-dgr">
+      <span className="w-1.5 h-1.5 rounded-full bg-dgr shrink-0" />Thiếu CCCD/SĐT
     </span>
   );
   const missing: string[] = [];
@@ -97,10 +96,10 @@ function ProfileStatusTag({ worker }: { worker: Worker }) {
 
   return (
     <span
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 whitespace-nowrap shrink-0"
+      className="badge tint-wn !text-wn !border-wn"
       title={missing.length > 0 ? `Thiếu thông tin: ${missing.join(', ')}` : 'Chưa phân bổ đầy đủ'}
     >
-      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />{label}
+      <span className="w-1.5 h-1.5 rounded-full bg-wn shrink-0" />{label}
     </span>
   );
 }
@@ -113,11 +112,11 @@ function TamTruTag({ worker, onToggle }: { worker: Worker; onToggle?: (w: Worker
       title={`Click để đổi → ${isRegistered ? 'Chưa đăng ký' : 'Đã đăng ký'}`}
       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-all whitespace-nowrap shrink-0 ${
         isRegistered
-          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/30'
-          : 'bg-orange-500/20 text-orange-300 border-orange-500/30 hover:bg-orange-500/30'
+          ? 'bg-okbg text-ok border-bdr2 hover:opacity-90'
+          : 'tint-wn text-wn border-wn hover:opacity-90'
       }`}
     >
-      <span className={`w-1.5 h-1.5 rounded-full ${isRegistered ? 'bg-emerald-400' : 'bg-orange-400'}`} />
+      <span className={`w-1.5 h-1.5 rounded-full ${isRegistered ? 'bg-ok2' : 'bg-wn'}`} />
       {isRegistered ? 'Đã ĐK' : 'Chưa ĐK'}
     </button>
   );
@@ -153,35 +152,35 @@ export default function WorkerTable({
 
   if (workers.length === 0) {
     return (
-      <div className="bg-[#1F2937] border border-gray-700/60 rounded-2xl p-16 flex flex-col items-center justify-center text-center shadow-xl">
-        <div className="w-14 h-14 rounded-2xl bg-gray-800 border border-gray-700 flex items-center justify-center mb-3">
-          <Eye size={24} className="text-gray-500" />
+      <div className="bg-surf border border-bdr rounded-2xl p-16 flex flex-col items-center justify-center text-center shadow-xl">
+        <div className="w-14 h-14 rounded-2xl bg-act border border-bdr flex items-center justify-center mb-3">
+          <Eye size={24} className="text-ic" />
         </div>
-        <p className="text-base font-bold text-white">Không tìm thấy công nhân</p>
-        <p className="text-xs text-gray-400 mt-1">Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm bên trên</p>
+        <p className="text-base font-bold text-tx">Không tìm thấy công nhân</p>
+        <p className="text-xs text-mu mt-1">Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm bên trên</p>
       </div>
     );
   }
 
   return (
-    <div className="bg-[#1F2937] border border-gray-700/60 rounded-2xl shadow-xl overflow-hidden">
+    <div className="bg-surf border border-bdr rounded-2xl shadow-xl overflow-hidden">
       <div className="overflow-x-auto scrollbar-thin">
         <table className="w-full border-collapse min-w-[1250px] text-left table-auto">
           <thead>
-            <tr className="bg-gray-800/90 border-b border-gray-700">
-              <th className="px-3 py-3 w-10 text-center">
+            <tr className="bg-act border-b border-bdr sticky top-0 z-20">
+              <th className="px-3 py-3 w-10 text-center bg-act z-20">
                 <input
                   type="checkbox"
                   checked={allSelected}
                   ref={el => { if (el) el.indeterminate = someSelected; }}
                   onChange={toggleAll}
-                  className="rounded border-gray-600 bg-gray-800 text-blue-600 focus:ring-blue-500"
+                  className="rounded border-bdr2 bg-surf text-pri focus:ring-pri2"
                 />
               </th>
               {COLUMNS.map((col, i) => (
                 <th
                   key={`th-${col.key}-${i}`}
-                  className={`px-3 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap cursor-pointer select-none hover:text-white transition-colors ${col.width || ''}`}
+                  className={`px-3 py-3 text-xs font-bold text-mu uppercase tracking-wider whitespace-nowrap cursor-pointer select-none hover:text-tx transition-colors bg-act z-20 ${col.width || ''} ${i === 1 ? 'sticky left-[88px] z-30' : ''}`}
                   onClick={() => onSort(col.key)}
                 >
                   <div className="flex items-center gap-1.5 whitespace-nowrap">
@@ -190,11 +189,11 @@ export default function WorkerTable({
                   </div>
                 </th>
               ))}
-              <th className="px-3 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider w-24 whitespace-nowrap">Tạm trú</th>
-              <th className="px-3 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider w-28 text-right pr-4 whitespace-nowrap">Thao tác</th>
+              <th className="px-3 py-3 text-xs font-bold text-mu uppercase tracking-wider w-24 whitespace-nowrap bg-act z-20">Tạm trú</th>
+              <th className="px-3 py-3 text-xs font-bold text-mu uppercase tracking-wider w-28 text-right pr-4 whitespace-nowrap bg-act z-20">Thao tác</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-750">
+          <tbody className="divide-y divide-bdr">
             {workers.map((w, idx) => {
               const isSelected = selectedIds.has(w.id);
               const soNgay = calcSoNgay(w.ngayVaoKTX, w.ngayRaKTX);
@@ -204,11 +203,11 @@ export default function WorkerTable({
                   key={w.id}
                   className={`transition-colors cursor-pointer group ${
                     isSelected
-                      ? 'bg-blue-500/15 border-l-2 border-l-blue-400'
+                      ? 'bg-bdg border-l-2 border-l-pri2'
                       : idx % 2 === 0
-                      ? 'bg-[#1F2937]'
-                      : 'bg-gray-800/40'
-                  } hover:bg-gray-700/60`}
+                      ? 'bg-surf'
+                      : 'bg-act'
+                  } hover:bg-act`}
                   onClick={() => onView(w)}
                 >
                   <td className="px-3 py-3 text-center" onClick={e => e.stopPropagation()}>
@@ -216,19 +215,19 @@ export default function WorkerTable({
                       type="checkbox"
                       checked={isSelected}
                       onChange={() => toggleOne(w.id)}
-                      className="rounded border-gray-600 bg-gray-800 text-blue-600 focus:ring-blue-500"
+                      className="rounded border-bdr2 bg-surf text-pri focus:ring-pri2"
                     />
                   </td>
-                  <td className="px-3 py-3 whitespace-nowrap">
-                    <span className="text-xs font-tabular text-gray-400 font-semibold">{displayStt}</span>
+                  <td className={`px-3 py-3 whitespace-nowrap sticky left-0 z-10 transition-colors ${isSelected ? 'bg-bdg' : 'bg-surf group-hover:bg-act'}`} onClick={e => e.stopPropagation()}>
+                    <span className="text-xs font-tabular text-mu font-semibold">{displayStt}</span>
                   </td>
-                  <td className="px-3.5 py-3 whitespace-nowrap min-w-[240px]">
+                  <td className={`px-3.5 py-3 whitespace-nowrap min-w-[240px] sticky left-[52px] z-10 transition-colors ${isSelected ? 'bg-bdg' : 'bg-surf group-hover:bg-act'}`}>
                     <div className="flex flex-col gap-1">
                       <div className="flex items-center gap-2 flex-nowrap whitespace-nowrap">
-                        <div className="w-7 h-7 rounded-lg bg-blue-500/20 border border-blue-500/30 flex items-center justify-center text-blue-400 text-xs font-bold shrink-0">
+                        <div className="w-7 h-7 rounded-lg bg-bdg border border-bdr2 flex items-center justify-center text-lnk text-xs font-bold shrink-0">
                           {w.hoVaTen.split(' ').pop()?.charAt(0) ?? '?'}
                         </div>
-                        <p className="text-sm font-bold text-white whitespace-nowrap group-hover:text-blue-300 transition-colors">
+                        <p className="text-sm font-bold text-tx whitespace-nowrap group-hover:text-lnk transition-colors">
                           {w.hoVaTen}
                         </p>
                       </div>
@@ -239,25 +238,25 @@ export default function WorkerTable({
                   </td>
                   <td className="px-3 py-3"><MaNVCell value={w.maNV} /></td>
                   <td className="px-3 py-3"><PlatoonBadge value={w.tieuDoan} /></td>
-                  <td className="px-3 py-3"><span className="text-xs text-gray-300 font-medium">{w.ktx || '—'}</span></td>
-                  <td className="px-3 py-3"><span className="text-xs font-bold text-gray-200">{w.day}</span></td>
+                  <td className="px-3 py-3"><span className="text-xs text-mu font-medium">{w.ktx || '—'}</span></td>
+                  <td className="px-3 py-3"><span className="text-xs font-bold text-tx">{w.day}</span></td>
                   <td className="px-3 py-3">
-                    <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-blue-500/20 border border-blue-500/30 text-blue-300 text-xs font-extrabold font-tabular">
+                    <span className="badge font-tabular">
                       {w.phongSo}
                     </span>
                   </td>
-                  <td className="px-3 py-3"><span className="text-xs font-tabular text-gray-400">{w.giuong || '—'}</span></td>
-                  <td className="px-3 py-3"><span className="text-xs font-tabular text-gray-300">{w.soDienThoai || '—'}</span></td>
+                  <td className="px-3 py-3"><span className="text-xs font-tabular text-mu">{w.giuong || '—'}</span></td>
+                  <td className="px-3 py-3"><span className="text-xs font-tabular text-mu">{w.soDienThoai || '—'}</span></td>
                   <td className="px-3 py-3"><CCCDCell value={w.cccd} /></td>
-                  <td className="px-3 py-3"><span className="text-xs text-gray-300 truncate max-w-[120px] block">{w.hoKhauTinh || '—'}</span></td>
-                  <td className="px-3 py-3"><span className="text-xs text-gray-300 truncate max-w-[130px] block">{w.toTruong || '—'}</span></td>
-                  <td className="px-3 py-3"><span className="text-xs font-tabular text-gray-300">{w.ngayVaoKTX || '—'}</span></td>
+                  <td className="px-3 py-3"><span className="text-xs text-mu truncate max-w-[120px] block">{w.hoKhauTinh || '—'}</span></td>
+                  <td className="px-3 py-3"><span className="text-xs text-mu truncate max-w-[130px] block">{w.toTruong || '—'}</span></td>
+                  <td className="px-3 py-3"><span className="text-xs font-tabular text-mu">{w.ngayVaoKTX || '—'}</span></td>
                   <td className="px-3 py-3">
                     {soNgay !== null ? (
-                      <span className={`text-xs font-tabular font-bold ${soNgay <= 7 ? 'text-emerald-400' : 'text-gray-300'}`}>
+                      <span className={`text-xs font-tabular font-bold ${soNgay <= 7 ? 'text-ok' : 'text-mu'}`}>
                         {soNgay}n
                       </span>
-                    ) : <span className="text-gray-500 text-xs">—</span>}
+                    ) : <span className="text-ic text-xs">—</span>}
                   </td>
                   <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
                     <TamTruTag worker={w} onToggle={onToggleTamTru} />
@@ -267,7 +266,7 @@ export default function WorkerTable({
                       <button
                         onClick={() => onView(w)}
                         title="Xem chi tiết"
-                        className="p-1.5 rounded-lg text-blue-400 hover:text-blue-300 hover:bg-blue-500/20 transition-colors"
+                        className="p-1.5 rounded-lg text-lnk hover:text-pri2 hover:bg-bdg transition-colors"
                       >
                         <Eye size={15} />
                       </button>
@@ -275,12 +274,12 @@ export default function WorkerTable({
                         <button
                           onClick={() => onEdit(w)}
                           title="Sửa"
-                          className="p-1.5 rounded-lg text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/20 transition-colors"
+                          className="p-1.5 rounded-lg text-lnk hover:text-pri2 hover:bg-bdg transition-colors"
                         >
                           <Pencil size={15} />
                         </button>
                       ) : (
-                        <button disabled title="Không có quyền sửa" className="p-1.5 rounded-lg text-gray-600 cursor-not-allowed">
+                        <button disabled title="Không có quyền sửa" className="p-1.5 rounded-lg text-ic cursor-not-allowed">
                           <Pencil size={15} />
                         </button>
                       )}
@@ -289,12 +288,12 @@ export default function WorkerTable({
                           <button
                             onClick={() => onDelete(w)}
                             title="Xóa"
-                            className="p-1.5 rounded-lg text-rose-400 hover:text-rose-300 hover:bg-rose-500/20 transition-colors"
+                            className="p-1.5 rounded-lg text-dgr hover:opacity-80 hover:bg-dgrbg transition-colors"
                           >
                             <Trash2 size={15} />
                           </button>
                         ) : (
-                          <button disabled title="Không có quyền xóa" className="p-1.5 rounded-lg text-gray-600 cursor-not-allowed">
+                          <button disabled title="Không có quyền xóa" className="p-1.5 rounded-lg text-ic cursor-not-allowed">
                             <Trash2 size={15} />
                           </button>
                         )

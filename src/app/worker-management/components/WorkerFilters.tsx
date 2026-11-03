@@ -138,13 +138,13 @@ function ToTruongCombobox({
           }}
           onKeyDown={handleKeyDown}
           placeholder="Tìm tổ trưởng..."
-          className="w-full bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-400 rounded-xl pl-2.5 pr-7 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+          className="w-full bg-act border border-bdr text-tx placeholder-mu rounded-xl pl-2.5 pr-7 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50"
         />
         {(inputValue || value) && (
           <button
             type="button"
             onClick={handleClear}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white p-0.5 rounded cursor-pointer transition-colors"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-mu hover:text-white p-0.5 rounded cursor-pointer transition-colors"
             title="Xóa bộ lọc Tổ Trưởng"
           >
             <X size={13} />
@@ -155,7 +155,7 @@ function ToTruongCombobox({
       {isOpen && (
         <ul
           ref={listRef}
-          className="absolute z-50 left-0 right-0 mt-1.5 max-h-60 overflow-y-auto bg-gray-800 border border-gray-700 rounded-xl shadow-2xl py-1 text-xs text-gray-100 divide-y divide-gray-750/60"
+          className="absolute z-50 left-0 right-0 mt-1.5 max-h-60 overflow-y-auto bg-surf border border-bdr rounded-xl shadow-modal py-1 text-xs text-tx divide-y divide-bdr"
         >
           {/* Top option: Tất cả Tổ Trưởng */}
           <li
@@ -163,12 +163,12 @@ function ToTruongCombobox({
             onMouseEnter={() => setHighlightedIndex(0)}
             className={`px-3 py-2 cursor-pointer font-bold flex items-center justify-between transition-colors ${
               !value && highlightedIndex === 0
-                ? 'bg-blue-600 text-white'
+                ? 'bg-pri text-white'
                 : !value
-                ? 'text-blue-400 bg-blue-500/10'
+                ? 'text-lnk bg-act'
                 : highlightedIndex === 0
-                ? 'bg-gray-700 text-white'
-                : 'text-gray-300 hover:bg-gray-700/80'
+                ? 'bg-act text-tx'
+                : 'text-mu hover:bg-act'
             }`}
           >
             <span>Tất cả Tổ Trưởng</span>
@@ -177,7 +177,7 @@ function ToTruongCombobox({
 
           {/* Dynamic options */}
           {filteredOptions.length === 0 ? (
-            <li className="px-3 py-2.5 text-gray-400 text-center italic">
+            <li className="px-3 py-2.5 text-mu text-center italic">
               Không tìm thấy tổ trưởng nào
             </li>
           ) : (
@@ -237,26 +237,26 @@ export default function WorkerFilters({ filters, onChange, workers }: Props) {
     filters.tamTruStatus;
 
   return (
-    <div className="bg-[#1F2937] border border-gray-700/60 rounded-2xl p-4 sm:p-5 shadow-xl mb-5 space-y-4">
+    <div className="bg-surf border border-bdr rounded-2xl p-4 sm:p-5 shadow-xl mb-5 space-y-4">
       {/* ── Spacious Top Search Bar ── */}
       <div className="relative w-full">
-        <label className="text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+        <label className="text-xs font-bold text-tx uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
           <Search size={14} className="text-blue-400" />
           <span>Tìm kiếm nhanh công nhân</span>
         </label>
         <div className="relative">
-          <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-mu pointer-events-none" />
           <input
             type="text"
             placeholder="Nhập họ tên, mã nhân viên, tổ trưởng, số CCCD, SĐT, số phòng..."
             value={filters.search}
             onChange={e => set('search', e.target.value)}
-            className="w-full pl-11 pr-10 py-3 text-sm bg-gray-800 border border-gray-700 text-white placeholder-gray-400 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 shadow-inner transition-all"
+            className="w-full pl-11 pr-10 py-3 text-sm bg-surf border border-bdr text-tx placeholder-mu rounded-xl focus:outline-none focus:ring-2 focus:ring-pri2/50 focus:border-pri2 transition-all"
           />
           {filters.search && (
             <button
               onClick={() => set('search', '')}
-              className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-white transition-colors cursor-pointer"
+              className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1 text-mu hover:text-white transition-colors cursor-pointer"
             >
               <X size={16} />
             </button>
@@ -265,14 +265,14 @@ export default function WorkerFilters({ filters, onChange, workers }: Props) {
       </div>
 
       {/* ── Multi-attribute Filter Grid ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-2.5 sm:gap-3 items-end pt-2 border-t border-gray-750">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-2.5 sm:gap-3 items-end pt-2 border-t border-bdr3">
         {/* KTX */}
         <div className="flex flex-col gap-1">
-          <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">KTX</label>
+          <label className="text-[11px] font-bold text-mu uppercase tracking-wider">KTX</label>
           <select
             value={filters.ktx}
             onChange={e => set('ktx', e.target.value)}
-            className="bg-gray-800 border border-gray-700 text-gray-100 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/50 w-full cursor-pointer"
+            className="bg-surf border border-bdr text-tx rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 w-full cursor-pointer"
           >
             <option value="">Tất cả KTX</option>
             {ktxList.map(k => <option key={k} value={k}>{k}</option>)}
@@ -281,11 +281,11 @@ export default function WorkerFilters({ filters, onChange, workers }: Props) {
 
         {/* Building/Dãy */}
         <div className="flex flex-col gap-1">
-          <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Dãy</label>
+          <label className="text-[11px] font-bold text-mu uppercase tracking-wider">Dãy</label>
           <select
             value={filters.building}
             onChange={e => { set('building', e.target.value); onChange({ ...filters, building: e.target.value, room: '' }); }}
-            className="bg-gray-800 border border-gray-700 text-gray-100 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/50 w-full cursor-pointer"
+            className="bg-surf border border-bdr text-tx rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 w-full cursor-pointer"
           >
             <option value="">Tất cả dãy</option>
             {buildingList.map(b => <option key={b} value={b}>{b}</option>)}
@@ -294,11 +294,11 @@ export default function WorkerFilters({ filters, onChange, workers }: Props) {
 
         {/* Room */}
         <div className="flex flex-col gap-1">
-          <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Phòng</label>
+          <label className="text-[11px] font-bold text-mu uppercase tracking-wider">Phòng</label>
           <select
             value={filters.room}
             onChange={e => set('room', e.target.value)}
-            className="bg-gray-800 border border-gray-700 text-gray-100 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/50 w-full cursor-pointer"
+            className="bg-surf border border-bdr text-tx rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 w-full cursor-pointer"
           >
             <option value="">Tất cả phòng</option>
             {roomList.map(r => <option key={r} value={r}>Phòng {r}</option>)}
@@ -307,11 +307,11 @@ export default function WorkerFilters({ filters, onChange, workers }: Props) {
 
         {/* Platoon */}
         <div className="flex flex-col gap-1">
-          <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Tiểu đoàn</label>
+          <label className="text-[11px] font-bold text-mu uppercase tracking-wider">Tiểu đoàn</label>
           <select
             value={filters.platoon}
             onChange={e => set('platoon', e.target.value)}
-            className="bg-gray-800 border border-gray-700 text-gray-100 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/50 w-full cursor-pointer"
+            className="bg-surf border border-bdr text-tx rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 w-full cursor-pointer"
           >
             <option value="">Tất cả TD</option>
             {platoonList.map(p => <option key={p} value={p}>TD {p}</option>)}
@@ -321,7 +321,7 @@ export default function WorkerFilters({ filters, onChange, workers }: Props) {
 
         {/* Tổ Trưởng filter — Combobox with search & suggestions */}
         <div className="flex flex-col gap-1">
-          <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Tổ Trưởng</label>
+          <label className="text-[11px] font-bold text-mu uppercase tracking-wider">Tổ Trưởng</label>
           <ToTruongCombobox
             value={filters.toTruong}
             onChange={val => set('toTruong', val)}
@@ -331,11 +331,11 @@ export default function WorkerFilters({ filters, onChange, workers }: Props) {
 
         {/* Profile status */}
         <div className="flex flex-col gap-1">
-          <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Hồ sơ</label>
+          <label className="text-[11px] font-bold text-mu uppercase tracking-wider">Hồ sơ</label>
           <select
             value={filters.profileStatus}
             onChange={e => set('profileStatus', e.target.value)}
-            className="bg-gray-800 border border-gray-700 text-gray-100 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/50 w-full cursor-pointer"
+            className="bg-surf border border-bdr text-tx rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 w-full cursor-pointer"
           >
             <option value="">Tất cả</option>
             <option value="full">✅ Đủ hồ sơ</option>
@@ -346,11 +346,11 @@ export default function WorkerFilters({ filters, onChange, workers }: Props) {
 
         {/* Tạm trú status */}
         <div className="flex flex-col gap-1">
-          <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Tạm trú</label>
+          <label className="text-[11px] font-bold text-mu uppercase tracking-wider">Tạm trú</label>
           <select
             value={filters.tamTruStatus}
             onChange={e => set('tamTruStatus', e.target.value)}
-            className="bg-gray-800 border border-gray-700 text-gray-100 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/50 w-full cursor-pointer"
+            className="bg-surf border border-bdr text-tx rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 w-full cursor-pointer"
           >
             <option value="">Tất cả</option>
             <option value="registered">🟢 Đã ĐK</option>
@@ -373,7 +373,7 @@ export default function WorkerFilters({ filters, onChange, workers }: Props) {
               placeholder="Tỉnh/TP..."
               value={filters.province}
               onChange={e => set('province', e.target.value)}
-              className="bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-400 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/50 w-full"
+              className="bg-surf border border-bdr text-tx placeholder-gray-400 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 w-full"
             />
           )}
         </div>

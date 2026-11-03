@@ -3,25 +3,104 @@
 @tailwind utilities;
 
 :root {
-  --background: #f4f6f9;
-  --foreground: #0f1923;
-  --primary: #1d6fa4;
-  --primary-foreground: #ffffff;
-  --secondary: #e8f0f7;
-  --secondary-foreground: #1d6fa4;
-  --accent: #f59e0b;
-  --accent-foreground: #ffffff;
-  --muted: #e9ecf0;
-  --muted-foreground: #6b7280;
-  --card: #ffffff;
-  --card-foreground: #0f1923;
-  --border: #dde1e7;
-  --input: #f0f2f5;
-  --ring: #1d6fa4;
+  /* ─── Semantic design tokens (6 themes) — mặc định: Midnight ─── */
+  --bg: #0B1020;
+  --side: #0E1528;
+  --surf: #121A30;
+  --bdr: #1F2A44;
+  --bdr2: #26334F;
+  --bdr3: #2F3F66;
+  --act: #16213F;
+  --tx: #E8ECF6;
+  --mu: #93A0BC;
+  --nav: #B4BFD6;
+  --ic: #5B6A8A;
+  --pri: #3B66F0;
+  --pri-fg: #ffffff;
+  --pri2: #4F7CFF;
+  --lnk: #9DB4FF;
+  --bdg: #1B2A55;
+  --ok: #5EEAD4;
+  --okbg: #0F2B2A;
+  --ok2: #2DD4BF;
+  --wn: #F5B83D;
+  --dgr: #DC2626;
+  --dgrbg: rgba(220, 38, 38, 0.12);
+  --sh: rgba(0, 0, 0, 0.25);
+  color-scheme: dark;
+
+  /* ─── Legacy tokens (map sang semantic để toàn app tự đổi theme) ─── */
+  --background: var(--bg);
+  --foreground: var(--tx);
+  --primary: var(--pri);
+  --primary-foreground: var(--pri-fg);
+  --secondary: var(--act);
+  --secondary-foreground: var(--nav);
+  --accent: var(--pri2);
+  --accent-foreground: var(--bg);
+  --muted: var(--act);
+  --muted-foreground: var(--mu);
+  --card: var(--surf);
+  --card-foreground: var(--tx);
+  --border: var(--bdr);
+  --input: var(--surf);
+  --ring: var(--pri2);
   --radius: 10px;
   --font-sans: 'Inter', sans-serif;
   --sidebar-width: 240px;
   --sidebar-collapsed: 64px;
+}
+
+:root[data-theme='emerald'] {
+  --bg: #07130F; --side: #0A1B15; --surf: #0E241C;
+  --bdr: #1B3A2E; --bdr2: #24493A; --bdr3: #2F5D49;
+  --act: #123A2C; --tx: #E6F4EE; --mu: #8FB3A3; --nav: #B5D3C5; --ic: #5E8A77;
+  --pri: #047857; --pri2: #34D399; --lnk: #6EE7B7; --bdg: #12402F;
+  --ok: #6EE7B7; --okbg: #0F3A2B; --ok2: #34D399; --wn: #FBBF24;
+  --sh: rgba(0, 0, 0, 0.3);
+  color-scheme: dark;
+}
+
+:root[data-theme='violet'] {
+  --bg: #0E0B1F; --side: #130F2B; --surf: #1A1538;
+  --bdr: #2B2457; --bdr2: #3A3270; --bdr3: #4A4190;
+  --act: #261F55; --tx: #EEEAFB; --mu: #A59CCB; --nav: #C9C2E8; --ic: #7A70B0;
+  --pri: #6D4AE0; --pri2: #A78BFA; --lnk: #C4B5FD; --bdg: #2E2566;
+  --ok: #5EEAD4; --okbg: #0F2B2A; --ok2: #2DD4BF; --wn: #F5B83D;
+  --sh: rgba(0, 0, 0, 0.3);
+  color-scheme: dark;
+}
+
+:root[data-theme='ocean'] {
+  --bg: #06151C; --side: #081D27; --surf: #0C2733;
+  --bdr: #17404F; --bdr2: #1F5366; --bdr3: #2A6A82;
+  --act: #0F3A4B; --tx: #E4F4F8; --mu: #8DB5C2; --nav: #B3D4DE; --ic: #5B8C9C;
+  --pri: #0A7EA4; --pri2: #38BDF8; --lnk: #7DD3FC; --bdg: #0F3A4B;
+  --ok: #5EEAD4; --okbg: #0F2B2A; --ok2: #2DD4BF; --wn: #FBBF24;
+  --sh: rgba(0, 0, 0, 0.3);
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --bg: #F4F6FB; --side: #FFFFFF; --surf: #FFFFFF;
+  --bdr: #E3E8F2; --bdr2: #D5DCEA; --bdr3: #C5CFE3;
+  --act: #E8EEFF; --tx: #0F172A; --mu: #5B6780; --nav: #334155; --ic: #94A3B8;
+  --pri: #2F5BEA; --pri2: #2F5BEA; --lnk: #2F5BEA; --bdg: #E0E8FF;
+  --ok: #0F766E; --okbg: #DDF7F1; --ok2: #14B8A6; --wn: #B45309;
+  --dgr: #DC2626; --dgrbg: rgba(220, 38, 38, 0.08);
+  --sh: rgba(15, 23, 42, 0.08);
+  color-scheme: light;
+}
+
+:root[data-theme='sunrise'] {
+  --bg: #FBF7F2; --side: #FFFFFF; --surf: #FFFFFF;
+  --bdr: #EBE3D8; --bdr2: #DCD0C0; --bdr3: #CDBFAA;
+  --act: #FFEBD9; --tx: #1C1917; --mu: #6B5F55; --nav: #44392F; --ic: #A8998A;
+  --pri: #C2410C; --pri2: #EA580C; --lnk: #C2410C; --bdg: #FFE4D0;
+  --ok: #0F766E; --okbg: #DDF7F1; --ok2: #14B8A6; --wn: #B45309;
+  --dgr: #DC2626; --dgrbg: rgba(220, 38, 38, 0.08);
+  --sh: rgba(60, 40, 20, 0.08);
+  color-scheme: light;
 }
 
 @layer base {
@@ -36,6 +115,7 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    transition: background-color 200ms ease, color 200ms ease;
   }
 
   html {
@@ -48,6 +128,20 @@
 
   input, textarea, select {
     font-family: var(--font-sans);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--pri2);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
@@ -154,6 +248,13 @@
   .highlight-update {
     animation: highlightPulse 600ms ease;
   }
+
+  /* Tint utilities (theme-aware, dùng cho badge/chip nền nhạt) */
+  .tint-info { background: color-mix(in srgb, var(--pri2) 14%, transparent); }
+  .tint-wn { background: color-mix(in srgb, var(--wn) 14%, transparent); }
+  .tint-ok { background: var(--okbg); }
+  .tint-dgr { background: var(--dgrbg); }
+  .border-ok-30 { border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
 }
 
 @layer components {
@@ -219,7 +320,13 @@
 
   .badge-missing {
     @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold
-           bg-red-100 text-red-700 border border-red-200;
+           bg-dgrbg text-dgr border border-dgr;
+  }
+
+  /* Badge trạng thái dùng chung (nền --bdg, viền mảnh) */
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold
+           bg-bdg text-lnk border border-bdr2 whitespace-nowrap;
   }
 
   .nav-item {

@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client';
 import {
   Search, Edit2, Check, X, Plus, Loader2, BedDouble, Wind, Package, Fan,
   Zap, Tv, Lightbulb, UtensilsCrossed, ChevronDown, ChevronUp, Upload,
-  AlertCircle, CheckCircle2, Download, Trash2, Filter
+  AlertCircle, CheckCircle2, Download, Trash2, Filter, Snowflake
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { exportToExcel } from '@/lib/exportExcel';
@@ -57,15 +57,15 @@ interface ImportResult {
 }
 
 const METRIC_CARDS: MetricCard[] = [
-  { label: 'Giường', key: 'giuong', icon: <BedDouble size={18} />, color: 'text-blue-600 bg-blue-50' },
-  { label: 'Điều hòa', key: 'dieu_hoa', icon: <Wind size={18} />, color: 'text-cyan-600 bg-cyan-50' },
-  { label: 'Tủ', key: 'tu', icon: <Package size={18} />, color: 'text-amber-600 bg-amber-50' },
-  { label: 'Quạt', key: 'quat', icon: <Fan size={18} />, color: 'text-green-600 bg-green-50' },
-  { label: 'Ổ cắm điện', key: 'o_cam_dien', icon: <Zap size={18} />, color: 'text-yellow-600 bg-yellow-50' },
-  { label: 'Remote', key: 'remote', icon: <Tv size={18} />, color: 'text-purple-600 bg-purple-50' },
-  { label: 'Bóng tuýp', key: 'bong_tuyp', icon: <Lightbulb size={18} />, color: 'text-orange-600 bg-orange-50' },
-  { label: 'Bàn ăn', key: 'ban_an', icon: <UtensilsCrossed size={18} />, color: 'text-rose-600 bg-rose-50' },
-  { label: 'Ghế ăn', key: 'ghe_an', icon: <UtensilsCrossed size={18} />, color: 'text-pink-600 bg-pink-50' },
+  { label: 'Giường', key: 'giuong', icon: <BedDouble size={18} />, color: 'text-lnk bg-bdg' },
+  { label: 'Điều hòa', key: 'dieu_hoa', icon: <Snowflake size={18} />, color: 'text-ok bg-okbg' },
+  { label: 'Tủ', key: 'tu', icon: <Package size={18} />, color: 'text-wn tint-wn' },
+  { label: 'Quạt', key: 'quat', icon: <Fan size={18} />, color: 'text-ok bg-okbg' },
+  { label: 'Ổ cắm điện', key: 'o_cam_dien', icon: <Zap size={18} />, color: 'text-wn tint-wn' },
+  { label: 'Remote', key: 'remote', icon: <Tv size={18} />, color: 'text-lnk bg-bdg' },
+  { label: 'Bóng tuýp', key: 'bong_tuyp', icon: <Lightbulb size={18} />, color: 'text-pri2 bg-bdg' },
+  { label: 'Bàn ăn', key: 'ban_an', icon: <UtensilsCrossed size={18} />, color: 'text-ok bg-okbg' },
+  { label: 'Ghế ăn', key: 'ghe_an', icon: <UtensilsCrossed size={18} />, color: 'text-mu bg-act' },
 ];
 
 const NUMERIC_FIELDS: (keyof EditingRow)[] = ['giuong', 'dieu_hoa', 'tu', 'quat', 'o_cam_dien', 'remote', 'bong_tuyp', 'ban_an', 'ghe_an'];
@@ -233,8 +233,8 @@ function DeleteConfirmModal({ row, onConfirm, onCancel, deleting }: {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
-            <Trash2 size={18} className="text-red-600" />
+          <div className="w-10 h-10 rounded-full bg-dgrbg flex items-center justify-center flex-shrink-0">
+            <Trash2 size={18} className="text-dgr" />
           </div>
           <div>
             <h3 className="font-semibold text-foreground">Xóa phòng/khu vực</h3>
@@ -251,7 +251,7 @@ function DeleteConfirmModal({ row, onConfirm, onCancel, deleting }: {
             Hủy
           </button>
           <button onClick={onConfirm} disabled={deleting}
-            className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50 transition-colors">
+            className="flex items-center gap-2 px-4 py-2 bg-dgr hover:opacity-90 text-white rounded-lg text-sm font-medium disabled:opacity-50 transition-opacity">
             {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
             Xóa
           </button>
@@ -688,7 +688,7 @@ export default function FacilitiesClient() {
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={importing}
-            className="flex items-center justify-center gap-2 px-3 py-2 bg-emerald-600 text-white rounded-lg text-xs sm:text-sm font-medium hover:bg-emerald-700 disabled:opacity-60 transition-colors flex-1 sm:flex-initial"
+            className="flex items-center justify-center gap-2 px-3 py-2 border border-bdr3 bg-transparent text-tx rounded-lg text-xs sm:text-sm font-medium hover:bg-act disabled:opacity-60 transition-colors flex-1 sm:flex-initial"
           >
             {importing ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
             {importing ? 'Đang import...' : 'Import Excel'}
@@ -696,7 +696,7 @@ export default function FacilitiesClient() {
           <button
             onClick={handleExportExcel}
             disabled={loading || sortedRows.length === 0}
-            className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-xs sm:text-sm font-medium hover:bg-blue-700 disabled:opacity-60 transition-colors flex-1 sm:flex-initial"
+            className="flex items-center justify-center gap-2 px-3 py-2 border border-bdr3 bg-transparent text-tx rounded-lg text-xs sm:text-sm font-medium hover:bg-act disabled:opacity-60 transition-colors flex-1 sm:flex-initial"
           >
             <Download size={15} />
             Xuất Excel
@@ -713,11 +713,11 @@ export default function FacilitiesClient() {
 
       {/* Import Result Banner */}
       {importResult && (
-        <div className={`flex items-start gap-3 p-3 rounded-lg border text-sm ${importResult.success ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
-          {importResult.success ? <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-emerald-600" /> : <AlertCircle size={18} className="mt-0.5 shrink-0 text-red-500" />}
+        <div className={`flex items-start gap-3 p-3 rounded-lg border text-sm ${importResult.success ? 'bg-okbg border-bdr2 text-ok' : 'bg-dgrbg border-dgr text-dgr'}`}>
+          {importResult.success ? <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-ok" /> : <AlertCircle size={18} className="mt-0.5 shrink-0 text-dgr" />}
           <div className="flex-1">
             <p className="font-medium">{importResult.message}</p>
-            {importResult.success && <p className="text-xs mt-0.5 text-emerald-700">Thêm mới: {importResult.inserted} dòng &nbsp;|&nbsp; Cập nhật: {importResult.updated} dòng</p>}
+            {importResult.success && <p className="text-xs mt-0.5 text-ok">Thêm mới: {importResult.inserted} dòng &nbsp;|&nbsp; Cập nhật: {importResult.updated} dòng</p>}
           </div>
           <button onClick={() => setImportResult(null)} className="shrink-0 opacity-60 hover:opacity-100"><X size={16} /></button>
         </div>
@@ -803,9 +803,9 @@ export default function FacilitiesClient() {
         <div className="px-4 py-3 border-b border-border flex items-center justify-between flex-wrap gap-2">
           <span className="text-sm font-semibold text-foreground">
             {activeKtx} — {sortedRows.length} phòng/khu vực
-            {hasActiveFilters && <span className="ml-2 text-xs text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full">đang lọc</span>}
+            {hasActiveFilters && <span className="ml-2 text-xs tint-wn text-wn border border-wn px-1.5 py-0.5 rounded-full">đang lọc</span>}
           </span>
-          {saveError && <span className="text-xs text-red-500">{saveError}</span>}
+          {saveError && <span className="text-xs text-dgr">{saveError}</span>}
         </div>
 
         {loading ? (
@@ -861,7 +861,7 @@ export default function FacilitiesClient() {
                           <td className="px-3 py-2 text-right">
                             <div className="flex items-center justify-end gap-1">
                               <button onClick={saveEdit} disabled={saving}
-                                className="p-1.5 rounded-lg bg-green-100 text-green-700 hover:bg-green-200 transition-colors disabled:opacity-50">
+                                className="p-1.5 rounded-lg bg-okbg text-ok hover:opacity-90 transition-colors disabled:opacity-50">
                                 {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
                               </button>
                               <button onClick={cancelEdit} className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:bg-muted/80 transition-colors">
@@ -889,7 +889,7 @@ export default function FacilitiesClient() {
                                 <Edit2 size={14} />
                               </button>
                               <button onClick={() => setDeleteTarget(row)}
-                                className="p-1.5 rounded-lg text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors" title="Xóa">
+                                className="p-1.5 rounded-lg text-mu hover:bg-dgrbg hover:text-dgr transition-colors" title="Xóa">
                                 <Trash2 size={14} />
                               </button>
                             </div>

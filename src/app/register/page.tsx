@@ -155,11 +155,11 @@ function CCCDOCRScanner({ onConfirm, onClose }: {
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4" suppressHydrationWarning>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden max-h-[90vh] flex flex-col" suppressHydrationWarning>
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 flex-shrink-0" suppressHydrationWarning>
+      <div className="bg-surf rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden max-h-[90vh] flex flex-col" suppressHydrationWarning>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-bdr flex-shrink-0" suppressHydrationWarning>
           <div className="flex items-center gap-2" suppressHydrationWarning>
-            <Camera size={16} className="text-amber-500" />
-            <span className="text-sm font-semibold text-gray-900">Chụp mặt trước CCCD (OCR)</span>
+            <Camera size={16} className="text-wn" />
+            <span className="text-sm font-semibold text-tx">Chụp mặt trước CCCD (OCR)</span>
           </div>
           <button
             type="button"
@@ -175,61 +175,61 @@ function CCCDOCRScanner({ onConfirm, onClose }: {
             <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
             <canvas ref={canvasRef} className="hidden" />
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none" suppressHydrationWarning>
-              <div className="w-[85%] h-[55%] border-2 border-amber-400/80 rounded-xl relative" suppressHydrationWarning>
-                <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-amber-400 rounded-tl-lg" />
-                <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-amber-400 rounded-tr-lg" />
-                <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-amber-400 rounded-bl-lg" />
-                <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-amber-400 rounded-br-lg" />
+              <div className="w-[85%] h-[55%] border-2 border-wn/80 rounded-xl relative" suppressHydrationWarning>
+                <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-wn rounded-tl-lg" />
+                <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-wn rounded-tr-lg" />
+                <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-wn rounded-bl-lg" />
+                <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-wn rounded-br-lg" />
               </div>
             </div>
           </div>
         )}
         <div className="px-4 py-3 flex-1 overflow-y-auto" suppressHydrationWarning>
-          {status === 'starting' && <p className="text-xs text-gray-500 flex items-center justify-center gap-1.5 py-2"><Loader2 size={12} className="animate-spin" />Đang khởi động camera...</p>}
+          {status === 'starting' && <p className="text-xs text-mu flex items-center justify-center gap-1.5 py-2"><Loader2 size={12} className="animate-spin" />Đang khởi động camera...</p>}
           {status === 'ready' && (
             <div className="space-y-2" suppressHydrationWarning>
-              <p className="text-xs text-gray-500 text-center">Đặt mặt trước CCCD vào khung, giữ thẳng và rõ nét</p>
-              <div className="flex items-start gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-lg" suppressHydrationWarning>
-                <AlertTriangle size={13} className="text-amber-600 mt-0.5 flex-shrink-0" />
-                <p className="text-xs text-amber-700">Dữ liệu bóc tách cần xác nhận trước khi lưu.</p>
+              <p className="text-xs text-mu text-center">Đặt mặt trước CCCD vào khung, giữ thẳng và rõ nét</p>
+              <div className="flex items-start gap-2 p-2.5 bg-okbg border border-wn rounded-lg" suppressHydrationWarning>
+                <AlertTriangle size={13} className="text-wn mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-wn">Dữ liệu bóc tách cần xác nhận trước khi lưu.</p>
               </div>
               <button
                 type="button"
                 onClick={handleCapture}
-                className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2"
+                className="w-full py-2.5 bg-wn hover:bg-wn text-white rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2"
                 suppressHydrationWarning
               >
                 <Camera size={15} />Chụp ảnh CCCD
               </button>
             </div>
           )}
-          {status === 'capturing' && <p className="text-xs text-gray-500 flex items-center justify-center gap-1.5 py-2"><Loader2 size={12} className="animate-spin" />Đang bóc tách dữ liệu...</p>}
-          {status === 'error' && <p className="text-xs text-red-500 text-center py-2">{errorMsg}</p>}
+          {status === 'capturing' && <p className="text-xs text-mu flex items-center justify-center gap-1.5 py-2"><Loader2 size={12} className="animate-spin" />Đang bóc tách dữ liệu...</p>}
+          {status === 'error' && <p className="text-xs text-dgr text-center py-2">{errorMsg}</p>}
           {status === 'confirming' && (
             <div className="space-y-3" suppressHydrationWarning>
-              <div className="flex items-start gap-2 p-2.5 bg-blue-50 border border-blue-200 rounded-lg" suppressHydrationWarning>
-                <AlertTriangle size={13} className="text-blue-600 mt-0.5 flex-shrink-0" />
-                <p className="text-xs text-blue-700 font-medium">Kiểm tra và chỉnh sửa dữ liệu. Bắt buộc nhấn &quot;Xác nhận đúng&quot; để áp dụng.</p>
+              <div className="flex items-start gap-2 p-2.5 bg-blue-50 border border-bdr2 rounded-lg" suppressHydrationWarning>
+                <AlertTriangle size={13} className="text-pri2 mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-lnk font-medium">Kiểm tra và chỉnh sửa dữ liệu. Bắt buộc nhấn &quot;Xác nhận đúng&quot; để áp dụng.</p>
               </div>
               <div className="space-y-2" suppressHydrationWarning>
                 <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Họ và tên</label>
+                  <label className="text-xs text-mu mb-1 block">Họ và tên</label>
                   <input
                     type="text"
                     value={editData.hoVaTen || ''}
                     onChange={e => setEditData(d => ({ ...d, hoVaTen: e.target.value }))}
-                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300"
+                    className="w-full px-3 py-2 text-sm border border-bdr rounded-lg focus:outline-none focus:ring-2 focus:ring-pri2/50"
                     placeholder="Nhập họ tên"
                     suppressHydrationWarning
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Số CCCD</label>
+                  <label className="text-xs text-mu mb-1 block">Số CCCD</label>
                   <input
                     type="text"
                     value={editData.cccd || ''}
                     onChange={e => setEditData(d => ({ ...d, cccd: e.target.value }))}
-                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300 font-mono"
+                    className="w-full px-3 py-2 text-sm border border-bdr rounded-lg focus:outline-none focus:ring-2 focus:ring-pri2/50 font-mono"
                     placeholder="12 chữ số"
                     maxLength={12}
                     suppressHydrationWarning
@@ -237,22 +237,22 @@ function CCCDOCRScanner({ onConfirm, onClose }: {
                 </div>
                 <div className="grid grid-cols-2 gap-2" suppressHydrationWarning>
                   <div>
-                    <label className="text-xs text-gray-500 mb-1 block">Ngày sinh</label>
+                    <label className="text-xs text-mu mb-1 block">Ngày sinh</label>
                     <input
                       type="text"
                       value={editData.ngaySinh || ''}
                       onChange={e => setEditData(d => ({ ...d, ngaySinh: e.target.value }))}
-                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300"
+                      className="w-full px-3 py-2 text-sm border border-bdr rounded-lg focus:outline-none focus:ring-2 focus:ring-pri2/50"
                       placeholder="DD/MM/YYYY"
                       suppressHydrationWarning
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-gray-500 mb-1 block">Giới tính</label>
+                    <label className="text-xs text-mu mb-1 block">Giới tính</label>
                     <select
                       value={editData.gioiTinh || ''}
                       onChange={e => setEditData(d => ({ ...d, gioiTinh: e.target.value }))}
-                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300"
+                      className="w-full px-3 py-2 text-sm border border-bdr rounded-lg focus:outline-none focus:ring-2 focus:ring-pri2/50"
                       suppressHydrationWarning
                     >
                       <option value="">Chọn</option>
@@ -262,12 +262,12 @@ function CCCDOCRScanner({ onConfirm, onClose }: {
                   </div>
                 </div>
                 <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Địa chỉ thường trú / Hộ khẩu</label>
+                  <label className="text-xs text-mu mb-1 block">Địa chỉ thường trú / Hộ khẩu</label>
                   <input
                     type="text"
                     value={editData.hoKhauTinh || ''}
                     onChange={e => setEditData(d => ({ ...d, hoKhauTinh: e.target.value }))}
-                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300"
+                    className="w-full px-3 py-2 text-sm border border-bdr rounded-lg focus:outline-none focus:ring-2 focus:ring-pri2/50"
                     placeholder="VD: 123 Đường ABC, Phường XYZ, Quận 1, TP Hồ Chí Minh"
                     suppressHydrationWarning
                   />
@@ -277,7 +277,7 @@ function CCCDOCRScanner({ onConfirm, onClose }: {
                 <button
                   type="button"
                   onClick={handleRetake}
-                  className="flex-1 py-2 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-center gap-1.5"
+                  className="flex-1 py-2 border border-bdr rounded-xl text-sm font-medium text-tx hover:bg-act transition-colors flex items-center justify-center gap-1.5"
                   suppressHydrationWarning
                 >
                   <RefreshCw size={13} />Chụp lại
@@ -285,7 +285,7 @@ function CCCDOCRScanner({ onConfirm, onClose }: {
                 <button
                   type="button"
                   onClick={() => onConfirm(editData)}
-                  className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-1.5"
+                  className="flex-1 py-2 bg-ok2 hover:opacity-90 text-[#0B0F17] rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-1.5"
                   suppressHydrationWarning
                 >
                   <Check size={13} />Xác nhận đúng
@@ -381,11 +381,11 @@ function CCCDQRScanner({ onScanned, onClose, onSwitchOCR }: {
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4" suppressHydrationWarning>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" suppressHydrationWarning>
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200" suppressHydrationWarning>
+      <div className="bg-surf rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" suppressHydrationWarning>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-bdr" suppressHydrationWarning>
           <div className="flex items-center gap-2" suppressHydrationWarning>
-            <ScanLine size={16} className="text-blue-600" />
-            <span className="text-sm font-semibold text-gray-900">Quét QR mặt sau CCCD</span>
+            <ScanLine size={16} className="text-pri2" />
+            <span className="text-sm font-semibold text-tx">Quét QR mặt sau CCCD</span>
           </div>
           <button
             type="button"
@@ -401,21 +401,21 @@ function CCCDQRScanner({ onScanned, onClose, onSwitchOCR }: {
           <canvas ref={canvasRef} className="hidden" />
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none" suppressHydrationWarning>
             <div className="w-48 h-48 border-2 border-white/70 rounded-xl relative" suppressHydrationWarning>
-              <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-blue-400 rounded-tl-lg" />
-              <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-blue-400 rounded-tr-lg" />
-              <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-blue-400 rounded-bl-lg" />
-              <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-blue-400 rounded-br-lg" />
+              <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-pri2 rounded-tl-lg" />
+              <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-pri2 rounded-tr-lg" />
+              <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-pri2 rounded-bl-lg" />
+              <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-pri2 rounded-br-lg" />
             </div>
           </div>
         </div>
         <div className="px-4 py-3 space-y-2" suppressHydrationWarning>
-          {status === 'starting' && <p className="text-xs text-gray-500 flex items-center justify-center gap-1.5"><Loader2 size={12} className="animate-spin" />Đang khởi động camera...</p>}
-          {status === 'scanning' && <p className="text-xs text-gray-500 text-center">Hướng camera vào mã QR trên mặt sau CCCD gắn chip</p>}
-          {status === 'error' && <p className="text-xs text-red-500 text-center">{errorMsg || 'Không thể truy cập camera. Vui lòng nhập tay.'}</p>}
+          {status === 'starting' && <p className="text-xs text-mu flex items-center justify-center gap-1.5"><Loader2 size={12} className="animate-spin" />Đang khởi động camera...</p>}
+          {status === 'scanning' && <p className="text-xs text-mu text-center">Hướng camera vào mã QR trên mặt sau CCCD gắn chip</p>}
+          {status === 'error' && <p className="text-xs text-dgr text-center">{errorMsg || 'Không thể truy cập camera. Vui lòng nhập tay.'}</p>}
           <button
             type="button"
             onClick={onSwitchOCR}
-            className="w-full py-2 border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
+            className="w-full py-2 border border-wn bg-okbg hover:bg-act text-wn rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
             suppressHydrationWarning
           >
             <Camera size={12} />
@@ -573,7 +573,7 @@ export default function RegisterPage() {
   // from causing React Hydration Mismatch with fdprocessedid or injected attributes
   if (!isMounted) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-emerald-50 py-8 px-4 flex items-center justify-center" suppressHydrationWarning>
+      <div className="min-h-screen bg-page py-8 px-4 flex items-center justify-center" suppressHydrationWarning>
         <div className="max-w-lg w-full mx-auto space-y-6" suppressHydrationWarning>
           <div className="text-center space-y-2" suppressHydrationWarning>
             <div className="w-14 h-14 bg-primary/20 rounded-2xl flex items-center justify-center mx-auto shadow-sm animate-pulse">
@@ -582,7 +582,7 @@ export default function RegisterPage() {
             <h1 className="text-2xl font-bold text-foreground">Đăng Ký Cư Trú</h1>
             <p className="text-sm text-muted-foreground">Ký Túc Xá Phước Vĩnh Tây — Đang tải biểu mẫu an toàn...</p>
           </div>
-          <div className="bg-white rounded-2xl shadow-lg border border-border p-6 space-y-4 animate-pulse" suppressHydrationWarning>
+          <div className="bg-surf rounded-2xl shadow-lg border border-bdr p-6 space-y-4 animate-pulse" suppressHydrationWarning>
             <div className="h-5 w-40 bg-muted/60 rounded" />
             <div className="grid grid-cols-2 gap-3">
               <div className="h-10 bg-muted/30 rounded-xl" />
@@ -604,10 +604,10 @@ export default function RegisterPage() {
 
   if (submitted) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-emerald-50 flex items-center justify-center p-4" suppressHydrationWarning>
-        <div className="bg-white rounded-2xl shadow-xl border border-border p-8 max-w-md w-full text-center space-y-4" suppressHydrationWarning>
-          <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto">
-            <CheckCircle2 size={32} className="text-emerald-600" />
+      <div className="min-h-screen bg-page flex items-center justify-center p-4" suppressHydrationWarning>
+        <div className="bg-surf rounded-2xl shadow-xl border border-bdr p-8 max-w-md w-full text-center space-y-4" suppressHydrationWarning>
+          <div className="w-16 h-16 bg-okbg rounded-full flex items-center justify-center mx-auto">
+            <CheckCircle2 size={32} className="text-ok" />
           </div>
           <h2 className="text-xl font-bold text-foreground">Đăng ký thành công!</h2>
           <p className="text-muted-foreground text-sm leading-relaxed">
@@ -635,7 +635,7 @@ export default function RegisterPage() {
   return (
     <div suppressHydrationWarning>
       {showScanner && <CCCDScanner onScanned={handleScanned} onClose={() => setShowScanner(false)} />}
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-emerald-50 py-8 px-4" suppressHydrationWarning>
+      <div className="min-h-screen bg-page py-8 px-4" suppressHydrationWarning>
         <div className="max-w-lg mx-auto space-y-6" suppressHydrationWarning>
           {/* Header */}
           <div className="text-center space-y-2" suppressHydrationWarning>
@@ -648,7 +648,7 @@ export default function RegisterPage() {
 
           <form
             onSubmit={handleSubmit}
-            className="bg-white rounded-2xl shadow-lg border border-border p-6 space-y-5"
+            className="bg-surf rounded-2xl shadow-lg border border-bdr p-6 space-y-5"
             suppressHydrationWarning
           >
 
@@ -661,7 +661,7 @@ export default function RegisterPage() {
                 <button
                   type="button"
                   onClick={() => setShowScanner(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold transition-colors border border-blue-200 cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-bdg hover:bg-act text-lnk text-xs font-semibold transition-colors border border-bdr2 cursor-pointer"
                   suppressHydrationWarning
                 >
                   <ScanLine size={13} />
@@ -670,7 +670,7 @@ export default function RegisterPage() {
               </div>
 
               {scanSuccess && (
-                <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-700" suppressHydrationWarning>
+                <div className="flex items-center gap-2 px-3 py-2 bg-okbg border border-bdr2 rounded-xl text-xs text-ok" suppressHydrationWarning>
                   <CheckCircle size={13} />
                   Đã tự động điền thông tin từ CCCD gắn chip
                 </div>
@@ -689,7 +689,7 @@ export default function RegisterPage() {
                   />
                 </div>
                 <div>
-                  <label className={labelCls}>Giới tính <span className="text-red-500">*</span></label>
+                  <label className={labelCls}>Giới tính <span className="text-dgr">*</span></label>
                   <select
                     value={form.gioi_tinh}
                     onChange={handleField('gioi_tinh')}
@@ -704,7 +704,7 @@ export default function RegisterPage() {
               </div>
 
               <div>
-                <label className={labelCls}>Họ và tên <span className="text-red-500">*</span></label>
+                <label className={labelCls}>Họ và tên <span className="text-dgr">*</span></label>
                 <input
                   type="text"
                   value={form.ho_va_ten}
@@ -718,7 +718,7 @@ export default function RegisterPage() {
 
               <div className="grid grid-cols-2 gap-3" suppressHydrationWarning>
                 <div>
-                  <label className={labelCls}>Ngày sinh <span className="text-red-500">*</span></label>
+                  <label className={labelCls}>Ngày sinh <span className="text-dgr">*</span></label>
                   <input
                     type="text"
                     value={form.ngay_sinh}
@@ -729,7 +729,7 @@ export default function RegisterPage() {
                   />
                 </div>
                 <div>
-                  <label className={labelCls}>Số điện thoại <span className="text-red-500">*</span></label>
+                  <label className={labelCls}>Số điện thoại <span className="text-dgr">*</span></label>
                   <input
                     type="tel"
                     value={form.so_dien_thoai}
@@ -743,7 +743,7 @@ export default function RegisterPage() {
               </div>
 
               <div>
-                <label className={labelCls}>Số CCCD <span className="text-red-500">*</span></label>
+                <label className={labelCls}>Số CCCD <span className="text-dgr">*</span></label>
                 <input
                   type="text"
                   value={form.so_cccd}
@@ -756,7 +756,7 @@ export default function RegisterPage() {
               </div>
 
               <div>
-                <label className={labelCls}>Địa chỉ thường trú / Hộ khẩu <span className="text-red-500">*</span></label>
+                <label className={labelCls}>Địa chỉ thường trú / Hộ khẩu <span className="text-dgr">*</span></label>
                 <input
                   type="text"
                   value={form.ho_khau_tinh}
@@ -776,7 +776,7 @@ export default function RegisterPage() {
 
               <div className="grid grid-cols-2 gap-3" suppressHydrationWarning>
                 <div>
-                  <label className={labelCls}>Khu KTX <span className="text-red-500">*</span></label>
+                  <label className={labelCls}>Khu KTX <span className="text-dgr">*</span></label>
                   <input
                     type="text"
                     value={form.ktx}
@@ -807,7 +807,7 @@ export default function RegisterPage() {
 
               <div className="grid grid-cols-3 gap-3" suppressHydrationWarning>
                 <div>
-                  <label className={labelCls}>Dãy nhà <span className="text-red-500">*</span></label>
+                  <label className={labelCls}>Dãy nhà <span className="text-dgr">*</span></label>
                   <input
                     type="text"
                     value={form.day}
@@ -818,7 +818,7 @@ export default function RegisterPage() {
                   />
                 </div>
                 <div>
-                  <label className={labelCls}>Phòng số <span className="text-red-500">*</span></label>
+                  <label className={labelCls}>Phòng số <span className="text-dgr">*</span></label>
                   <input
                     type="text"
                     value={form.phong_so}
@@ -927,7 +927,7 @@ export default function RegisterPage() {
             </div>
 
             {error && (
-              <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700" suppressHydrationWarning>
+              <div className="flex items-start gap-2 p-3 bg-dgrbg border border-dgr rounded-xl text-sm text-dgr" suppressHydrationWarning>
                 <AlertCircle size={16} className="mt-0.5 shrink-0" />
                 <span>{error}</span>
               </div>
@@ -942,7 +942,7 @@ export default function RegisterPage() {
               {submitting ? <><Loader2 size={16} className="animate-spin" /> Đang gửi...</> : 'Gửi đăng ký'}
             </button>
             <p className="text-xs text-center text-muted-foreground" suppressHydrationWarning>
-              <span className="text-red-500">*</span> Trường bắt buộc · Thông tin của bạn được bảo mật và chỉ dùng cho mục đích quản lý cư trú.
+              <span className="text-dgr">*</span> Trường bắt buộc · Thông tin của bạn được bảo mật và chỉ dùng cho mục đích quản lý cư trú.
             </p>
           </form>
         </div>

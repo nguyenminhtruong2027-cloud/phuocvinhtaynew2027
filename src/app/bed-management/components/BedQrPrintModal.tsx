@@ -171,55 +171,55 @@ export default function BedQrPrintModal({ open, onClose, lockedBed = null }: Pro
       <style dangerouslySetInnerHTML={{ __html: PRINT_CSS }} />
       <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4" onClick={onClose}>
         <div
-          className="bg-[#131B2E] border border-slate-800/80 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-4xl flex flex-col max-h-[92vh]"
+          className="bg-surf border border-bdr rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-4xl flex flex-col max-h-[92vh]"
           onClick={e => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800/80 no-print">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-bdr no-print">
             <div className="min-w-0">
-              <h3 className="font-extrabold text-white flex items-center gap-2">
-                <QrCode size={17} className="text-cyan-400" /> 🖨️ In Tem Mã QR Giường
+              <h3 className="font-extrabold text-tx flex items-center gap-2">
+                <QrCode size={17} className="text-pri2" /> 🖨️ In Tem Mã QR Giường
               </h3>
-              <p className="text-xs text-slate-300 mt-0.5">
+              <p className="text-xs text-mu mt-0.5">
                 {lockedBed ? 'Tem cho giường đang xem trong Kiểm Tra Giường' : `Căn tem nhãn 5×8 cm — ${labelBeds.length} tem`}
               </p>
             </div>
-            <button onClick={onClose} className="p-2 rounded-lg hover:bg-slate-900/80 text-slate-400 hover:text-white shrink-0"><X size={16} /></button>
+            <button onClick={onClose} className="p-2 rounded-lg hover:bg-act text-mu hover:text-tx shrink-0"><X size={16} /></button>
           </div>
 
           {/* Scope pickers */}
           {!lockedBed && (
             <div className="px-5 pt-4 flex flex-wrap gap-3 items-end no-print">
               <div>
-                <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">KTX</label>
+                <label className="text-[11px] font-bold text-mu uppercase tracking-wider">KTX</label>
                 <select
                   value={scopeKtx}
                   onChange={e => { setScopeKtx(e.target.value); setScopeDay(''); setScopeRoom(''); }}
-                  className="mt-1 block bg-slate-900/80 border border-slate-700 text-gray-100 rounded-xl px-3 py-2 text-sm font-semibold min-w-[130px] cursor-pointer"
+                  className="mt-1 block bg-surf border border-bdr text-tx rounded-xl px-3 py-2 text-sm font-semibold min-w-[130px] cursor-pointer"
                 >
                   <option value="">Toàn bộ KTX</option>
                   {ktxList.map(k => <option key={k} value={k}>{k}</option>)}
                 </select>
               </div>
               <div>
-                <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">Dãy</label>
+                <label className="text-[11px] font-bold text-mu uppercase tracking-wider">Dãy</label>
                 <select
                   value={scopeDay}
                   onChange={e => { setScopeDay(e.target.value); setScopeRoom(''); }}
                   disabled={!scopeKtx}
-                  className="mt-1 block bg-slate-900/80 border border-slate-700 text-gray-100 rounded-xl px-3 py-2 text-sm font-semibold min-w-[120px] cursor-pointer disabled:opacity-40"
+                  className="mt-1 block bg-surf border border-bdr text-tx rounded-xl px-3 py-2 text-sm font-semibold min-w-[120px] cursor-pointer disabled:opacity-40"
                 >
                   <option value="">Tất cả dãy</option>
                   {dayList.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
               <div>
-                <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">In theo Phòng</label>
+                <label className="text-[11px] font-bold text-mu uppercase tracking-wider">In theo Phòng</label>
                 <select
                   value={scopeRoom}
                   onChange={e => setScopeRoom(e.target.value)}
                   disabled={!scopeKtx || !scopeDay}
-                  className="mt-1 block bg-slate-900/80 border border-slate-700 text-gray-100 rounded-xl px-3 py-2 text-sm font-semibold min-w-[120px] cursor-pointer disabled:opacity-40"
+                  className="mt-1 block bg-surf border border-bdr text-tx rounded-xl px-3 py-2 text-sm font-semibold min-w-[120px] cursor-pointer disabled:opacity-40"
                 >
                   <option value="">Tất cả phòng</option>
                   {roomList.map(r => <option key={r} value={r}>Phòng {r}</option>)}
@@ -227,7 +227,7 @@ export default function BedQrPrintModal({ open, onClose, lockedBed = null }: Pro
               </div>
               <button
                 onClick={() => window.print()}
-                className="ml-auto flex items-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-[#0B0F17] text-sm font-extrabold transition-colors"
+                className="ml-auto flex items-center gap-2 px-4 py-2.5 rounded-xl bg-pri2 hover:bg-pri2 text-[#0B0F17] text-sm font-extrabold transition-colors"
                 title="In ngay (Ctrl+P)"
               >
                 <Printer size={15} /> In ngay (Ctrl+P)
@@ -240,7 +240,7 @@ export default function BedQrPrintModal({ open, onClose, lockedBed = null }: Pro
             <div className="px-5 pt-4 flex justify-end no-print">
               <button
                 onClick={() => window.print()}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-[#0B0F17] text-sm font-extrabold transition-colors"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-pri2 hover:bg-pri2 text-[#0B0F17] text-sm font-extrabold transition-colors"
               >
                 <Printer size={15} /> In ngay (Ctrl+P)
               </button>
@@ -249,12 +249,12 @@ export default function BedQrPrintModal({ open, onClose, lockedBed = null }: Pro
 
           {loading ? (
             <div className="flex-1 flex items-center justify-center py-16">
-              <Loader2 size={24} className="animate-spin text-cyan-400" />
+              <Loader2 size={24} className="animate-spin text-pri2" />
             </div>
           ) : labelBeds.length === 0 ? (
-            <div className="m-5 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 flex items-center gap-2 no-print">
-              <AlertCircle size={15} className="text-amber-300 shrink-0" />
-              <p className="text-xs text-amber-200">Không có giường nào khớp phạm vi in. Kiểm tra dữ liệu bảng <code>beds</code>.</p>
+            <div className="m-5 rounded-xl border border-wn tint-wn p-4 flex items-center gap-2 no-print">
+              <AlertCircle size={15} className="text-wn shrink-0" />
+              <p className="text-xs text-wn">Không có giường nào khớp phạm vi in. Kiểm tra dữ liệu bảng <code>beds</code>.</p>
             </div>
           ) : (
             <>
@@ -262,25 +262,25 @@ export default function BedQrPrintModal({ open, onClose, lockedBed = null }: Pro
               <div className="flex-1 overflow-y-auto px-5 py-4 no-print">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {labelBeds.map(bed => (
-                    <label key={bed?.id} className="qr-label block rounded-xl border border-slate-700 bg-white p-2.5 text-[#0B0F17] shadow-lg aspect-[5/8] flex flex-col overflow-hidden">
-                      <p className="text-[9px] font-bold text-center text-slate-600 uppercase tracking-wider">KTX Phước Vĩnh Tây</p>
+                    <label key={bed?.id} className="qr-label block rounded-xl border border-bdr bg-white p-2.5 text-[#0B0F17] shadow-lg aspect-[5/8] flex flex-col overflow-hidden">
+                      <p className="text-[9px] font-bold text-center text-mu uppercase tracking-wider">KTX Phước Vĩnh Tây</p>
                       <div className="flex-1 min-h-0 flex items-center justify-center">
                         <img src={qrImageSrc(bed)} alt={`QR giường ${bed?.ktx} ${bed?.day} P${bed?.phong_so} G${bed?.giuong}`} className="w-full h-full object-contain" />
                       </div>
                       <div className="space-y-0.5 text-center">
                         <p className="text-[10px] font-extrabold truncate">{[bed?.ktx, bed?.day].filter(Boolean).join(' · ')}</p>
-                        <p className="text-[10px] font-extrabold truncate text-cyan-700">Phòng {bed?.phong_so || '—'} · Giường {bed?.giuong || '—'}</p>
+                        <p className="text-[10px] font-extrabold truncate text-pri">Phòng {bed?.phong_so || '—'} · Giường {bed?.giuong || '—'}</p>
                         <p className="text-[10px] font-bold truncate">
                           {bed?.status === 'occupied'
                             ? (bed?.ho_va_ten || bed?.ma_nv || 'Đã ở')
                             : (bed?.status === 'maintenance' ? 'Đang bảo trì' : '(Giường trống)')}
                         </p>
-                        <p className="text-[7px] text-slate-500 font-mono truncate">Scan: Giường ID…</p>
+                        <p className="text-[7px] text-ic font-mono truncate">Scan: Giường ID…</p>
                       </div>
                     </label>
                   ))}
                 </div>
-                <p className="mt-3 text-[11px] text-slate-400 text-center no-print">
+                <p className="mt-3 text-[11px] text-mu text-center no-print">
                   💡 Mẹo: tem đã căn khổ 5×8 cm. Bấm <b>In ngay</b> hoặc <b>Ctrl+P</b> — chọn khổ giấy A4, tắt Header/Footer khi in.
                 </p>
               </div>
@@ -295,7 +295,7 @@ export default function BedQrPrintModal({ open, onClose, lockedBed = null }: Pro
                     </div>
                     <div className="space-y-0.5 text-center">
                       <p className="text-sm font-extrabold">{[bed?.ktx, bed?.day].filter(Boolean).join(' · ')}</p>
-                      <p className="text-sm font-extrabold text-cyan-700">Phòng {bed?.phong_so || '—'} · Giường {bed?.giuong || '—'}</p>
+                      <p className="text-sm font-extrabold text-pri">Phòng {bed?.phong_so || '—'} · Giường {bed?.giuong || '—'}</p>
                       <p className="text-base font-extrabold">
                         {bed?.status === 'occupied'
                           ? (bed?.ho_va_ten || bed?.ma_nv || '')

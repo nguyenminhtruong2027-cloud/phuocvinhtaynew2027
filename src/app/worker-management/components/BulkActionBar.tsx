@@ -12,15 +12,15 @@ export default function BulkActionBar({ selectedCount, onDelete, onClear }: Prop
   if (selectedCount === 0) return null;
 
   return (
-    <div className="slide-up mb-4 flex items-center gap-3 bg-gray-800/95 border border-blue-500/40 rounded-2xl px-4 py-3 shadow-xl backdrop-blur-md">
-      <span className="text-sm font-bold text-blue-400 font-tabular">
+    <div className="slide-up mb-4 flex items-center gap-3 bg-surf border border-bdr2 rounded-2xl px-4 py-3 shadow-xl backdrop-blur-md">
+      <span className="text-sm font-bold text-lnk font-tabular">
         Đã chọn {selectedCount} công nhân
       </span>
       <div className="flex-1" />
       {onDelete && (
         <button
           onClick={onDelete}
-          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all shadow-md shadow-rose-600/25 active:scale-95"
+          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-dgr hover:opacity-90 text-white text-xs font-bold transition-all active:scale-95"
         >
           <Trash2 size={14} />
           <span>Xóa {selectedCount} mục đã chọn</span>
@@ -28,7 +28,7 @@ export default function BulkActionBar({ selectedCount, onDelete, onClear }: Prop
       )}
       <button
         onClick={onClear}
-        className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gray-700/80 hover:bg-gray-700 text-gray-300 hover:text-white text-xs font-semibold transition-colors"
+        className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-act hover:bg-act/70 text-mu hover:text-tx text-xs font-semibold transition-colors"
       >
         <X size={13} />
         <span>Bỏ chọn</span>
