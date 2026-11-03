@@ -62,24 +62,24 @@ interface WorkerRegistration {
 const STATUS_CONFIG = {
   pending: {
     label: 'Chờ duyệt',
-    badgeCls: 'bg-[#fdf1e4] text-[#c9690f] border border-[#c9690f]/30',
+    badgeCls: 'tint-wn text-wn border border-wn/30',
     icon: <Clock size={12} />,
   },
   approved: {
     label: 'Đã duyệt',
-    badgeCls: 'bg-[#eaf6ef] text-[#1f7a45] border border-[#1f7a45]/30',
+    badgeCls: 'bg-okbg text-ok border border-bdr2',
     icon: <CheckCircle2 size={12} />,
   },
   rejected: {
     label: 'Từ chối',
-    badgeCls: 'bg-[#fbebe9] text-[#b3362b] border border-[#b3362b]/30',
+    badgeCls: 'bg-dgrbg text-dgr border border-dgr/30',
     icon: <XCircle size={12} />,
   },
 };
 
 const inputCls =
-  'w-full px-2.5 py-1.5 text-xs sm:text-sm border border-[#dde1e6] dark:border-[#2a333e] rounded bg-white dark:bg-[#11151a] text-[#1b2430] dark:text-[#dde1e6] focus:outline-none focus:border-[#c9690f]';
-const labelCls = 'text-xs text-[#4b5563] dark:text-[#9ca3af] mb-1 block font-medium';
+  'w-full px-2.5 py-1.5 text-xs sm:text-sm border border-bdr rounded bg-surf text-tx focus:outline-none focus:border-wn';
+const labelCls = 'text-xs text-mu mb-1 block font-medium';
 
 /**
  * Khung Chi Tiết Hồ Sơ Đăng Ký (Console style)
@@ -210,32 +210,32 @@ function DetailModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-white dark:bg-[#181d24] border border-[#dde1e6] dark:border-[#2a333e] rounded-md w-full max-w-2xl max-h-[92vh] overflow-y-auto">
+      <div className="bg-surf border border-bdr rounded-md w-full max-w-2xl max-h-[92vh] overflow-y-auto">
         {/* Navy Header */}
-        <div className="flex items-center justify-between p-4 bg-[#1b2430] text-white border-b border-[#2a333e]">
+        <div className="flex items-center justify-between p-4 bg-side text-tx border-b border-bdr">
           <div>
             <h3 className="font-bold text-sm tracking-wide">
               {isPending ? 'CHỈNH SỬA & DUYỆT HỒ SƠ ĐĂNG KÝ' : 'CHI TIẾT HỒ SƠ ĐĂNG KÝ'}
             </h3>
-            <p className="text-xs text-gray-300 mt-0.5 font-normal">
-              Mã hồ sơ: <span className="font-mono text-[#f39c55]">{reg.id}</span> · Đăng ký lúc: {new Date(reg.created_at).toLocaleString('vi-VN')}
+            <p className="text-xs text-mu mt-0.5 font-normal">
+              Mã hồ sơ: <span className="font-mono text-wn">{reg.id}</span> · Đăng ký lúc: {new Date(reg.created_at).toLocaleString('vi-VN')}
             </p>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded hover:bg-white/10 text-gray-300 hover:text-white cursor-pointer"
+            className="p-1.5 rounded hover:bg-act text-mu hover:text-tx cursor-pointer"
           >
             <X size={18} />
           </button>
         </div>
 
         <div className="p-5 space-y-4">
-          <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-[#dde1e6] dark:border-[#2a333e]">
+          <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-bdr">
             <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold ${cfg.badgeCls}`}>
               {cfg.icon} {cfg.label}
             </div>
             {isPending && (
-              <span className="text-xs text-[#4b5563] dark:text-[#9ca3af]">
+              <span className="text-xs text-mu">
                 * Người duyệt có thể trực tiếp sửa thông tin trước khi duyệt
               </span>
             )}
@@ -243,29 +243,29 @@ function DetailModal({
 
           {/* Cảnh báo trùng hồ sơ (Cam + Đỏ) */}
           {dupMatch && (
-            <div className="p-3 border-l-[3px] border-l-[#c9690f] bg-[#fdf1e4] dark:bg-[#281d14] border border-[#c9690f]/30 rounded text-xs text-[#853d07] dark:text-[#f39c55] space-y-1">
-              <div className="flex items-center gap-1.5 font-bold text-[#b3362b] dark:text-red-400">
+            <div className="p-3 border-l-[3px] border-l-wn tint-wn border border-wn/30 rounded text-xs text-wn space-y-1">
+              <div className="flex items-center gap-1.5 font-bold text-dgr">
                 <AlertTriangle size={14} />
                 <span>⚠ Cảnh báo: Có thể trùng với hồ sơ công nhân đã có trong hệ thống</span>
               </div>
-              <p className="font-semibold text-[#1b2430] dark:text-white">
+              <p className="font-semibold text-tx">
                 {dupMatch.worker.hoVaTen} — Mã NV [{dupMatch.worker.maNV || 'Chưa có'}]
               </p>
-              <p className="text-[11px] text-[#4b5563] dark:text-gray-300">
-                Vị trí hiện tại: {dupMatch.worker.ktx} - {dupMatch.worker.day} - Phòng {dupMatch.worker.phongSo} · Khớp theo {dupMatch.field}: <span className="font-mono font-bold text-[#b3362b] dark:text-red-400">{dupMatch.matchedValue}</span>
+              <p className="text-[11px] text-mu">
+                Vị trí hiện tại: {dupMatch.worker.ktx} - {dupMatch.worker.day} - Phòng {dupMatch.worker.phongSo} · Khớp theo {dupMatch.field}: <span className="font-mono font-bold text-dgr">{dupMatch.matchedValue}</span>
               </p>
             </div>
           )}
 
           {isPending ? (
             <div className="space-y-4">
-              <div className="text-xs font-bold text-[#1b2430] dark:text-white uppercase tracking-wider flex items-center gap-1.5 pb-1 border-b border-[#dde1e6] dark:border-[#2a333e]">
-                <User size={13} className="text-[#c9690f]" /> 1. Thông tin công nhân
+              <div className="text-xs font-bold text-tx uppercase tracking-wider flex items-center gap-1.5 pb-1 border-b border-bdr">
+                <User size={13} className="text-wn" /> 1. Thông tin công nhân
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className={labelCls}>Họ và tên <span className="text-[#b3362b]">*</span></label>
+                  <label className={labelCls}>Họ và tên <span className="text-dgr">*</span></label>
                   <input
                     type="text"
                     value={editForm.ho_va_ten}
@@ -286,7 +286,7 @@ function DetailModal({
                 </div>
 
                 <div>
-                  <label className={labelCls}>Số CCCD <span className="text-[#b3362b]">*</span></label>
+                  <label className={labelCls}>Số CCCD <span className="text-dgr">*</span></label>
                   <input
                     type="text"
                     value={editForm.so_cccd}
@@ -296,7 +296,7 @@ function DetailModal({
                 </div>
 
                 <div>
-                  <label className={labelCls}>Số điện thoại <span className="text-[#b3362b]">*</span></label>
+                  <label className={labelCls}>Số điện thoại <span className="text-dgr">*</span></label>
                   <input
                     type="tel"
                     value={editForm.so_dien_thoai}
@@ -306,7 +306,7 @@ function DetailModal({
                 </div>
 
                 <div>
-                  <label className={labelCls}>Ngày sinh (DD/MM/YYYY) <span className="text-[#b3362b]">*</span></label>
+                  <label className={labelCls}>Ngày sinh (DD/MM/YYYY) <span className="text-dgr">*</span></label>
                   <input
                     type="text"
                     value={editForm.ngay_sinh}
@@ -395,13 +395,13 @@ function DetailModal({
               </div>
 
               {/* Vị trí lưu trú (Dropdown liên kết theo tầng từ dữ liệu công nhân) */}
-              <div className="text-xs font-bold text-[#1b2430] dark:text-white uppercase tracking-wider flex items-center gap-1.5 pt-2 pb-1 border-b border-[#dde1e6] dark:border-[#2a333e]">
-                <Home size={13} className="text-[#c9690f]" /> 2. Vị trí phòng lưu trú (Liên kết từ dữ liệu công nhân)
+              <div className="text-xs font-bold text-tx uppercase tracking-wider flex items-center gap-1.5 pt-2 pb-1 border-b border-bdr">
+                <Home size={13} className="text-wn" /> 2. Vị trí phòng lưu trú (Liên kết từ dữ liệu công nhân)
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className={labelCls}>Khu KTX <span className="text-[#b3362b]">*</span></label>
+                  <label className={labelCls}>Khu KTX <span className="text-dgr">*</span></label>
                   <select
                     value={editForm.ktx}
                     onChange={e => handleKtxChange(e.target.value)}
@@ -417,7 +417,7 @@ function DetailModal({
                 </div>
 
                 <div>
-                  <label className={labelCls}>Dãy nhà <span className="text-[#b3362b]">*</span></label>
+                  <label className={labelCls}>Dãy nhà <span className="text-dgr">*</span></label>
                   <select
                     value={editForm.day}
                     onChange={e => handleDayChange(e.target.value)}
@@ -434,7 +434,7 @@ function DetailModal({
                 </div>
 
                 <div>
-                  <label className={labelCls}>Phòng số <span className="text-[#b3362b]">*</span></label>
+                  <label className={labelCls}>Phòng số <span className="text-dgr">*</span></label>
                   <select
                     value={editForm.phong_so}
                     onChange={e => setEditForm(prev => ({ ...prev, phong_so: e.target.value }))}
@@ -484,29 +484,29 @@ function DetailModal({
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3 text-xs bg-[#f3f4f6] dark:bg-[#11151a] p-3.5 rounded border border-[#dde1e6] dark:border-[#2a333e]">
+            <div className="grid grid-cols-2 gap-3 text-xs bg-page p-3.5 rounded border border-bdr">
               <div className="col-span-2">
-                <span className="text-gray-500 block">Họ và tên</span>
-                <p className="font-bold text-sm text-[#1b2430] dark:text-white mt-0.5">{reg.ho_va_ten}</p>
+                <span className="text-ic block">Họ và tên</span>
+                <p className="font-bold text-sm text-tx mt-0.5">{reg.ho_va_ten}</p>
               </div>
               <div>
-                <span className="text-gray-500 block">Mã nhân viên</span>
+                <span className="text-ic block">Mã nhân viên</span>
                 <p className="font-mono font-semibold mt-0.5">{reg.ma_nv || '—'}</p>
               </div>
               <div>
-                <span className="text-gray-500 block">Số CCCD</span>
+                <span className="text-ic block">Số CCCD</span>
                 <p className="font-mono font-semibold mt-0.5">{reg.so_cccd}</p>
               </div>
               <div>
-                <span className="text-gray-500 block">Số điện thoại</span>
+                <span className="text-ic block">Số điện thoại</span>
                 <p className="font-semibold mt-0.5">{reg.so_dien_thoai}</p>
               </div>
               <div>
-                <span className="text-gray-500 block">Đơn vị</span>
+                <span className="text-ic block">Đơn vị</span>
                 <p className="font-semibold mt-0.5">{reg.don_vi || '—'}</p>
               </div>
-              <div className="col-span-2 pt-2 border-t border-[#dde1e6] dark:border-[#2a333e]">
-                <span className="text-gray-500 block">Vị trí phòng ở</span>
+              <div className="col-span-2 pt-2 border-t border-bdr">
+                <span className="text-ic block">Vị trí phòng ở</span>
                 <p className="font-bold mt-0.5">
                   {reg.ktx} — {reg.day} — Phòng {reg.phong_so} {reg.giuong ? `(G.${reg.giuong})` : ''}
                 </p>
@@ -516,22 +516,22 @@ function DetailModal({
 
           {reg.cccd_image_url && (
             <div>
-              <span className="text-xs text-gray-500 block mb-1">Ảnh chụp CCCD</span>
+              <span className="text-xs text-ic block mb-1">Ảnh chụp CCCD</span>
               <img
                 src={reg.cccd_image_url}
                 alt={`Ảnh CCCD của ${reg.ho_va_ten}`}
-                className="w-full rounded border border-[#dde1e6] dark:border-[#2a333e] object-cover max-h-48"
+                className="w-full rounded border border-bdr object-cover max-h-48"
               />
             </div>
           )}
 
           {isPending && (
-            <div className="flex gap-2.5 pt-3 border-t border-[#dde1e6] dark:border-[#2a333e]">
+            <div className="flex gap-2.5 pt-3 border-t border-bdr">
               <button
                 type="button"
                 onClick={() => onReject(reg.id)}
                 disabled={isProcessing}
-                className="flex-1 py-2 px-3 border border-[#b3362b] text-[#b3362b] hover:bg-[#fbebe9] dark:hover:bg-[#3b1814] rounded text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer text-center"
+                className="flex-1 py-2 px-3 border border-dgr text-dgr hover:bg-dgrbg rounded text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer text-center"
               >
                 {isProcessing ? <Loader2 size={13} className="animate-spin inline mr-1" /> : <XCircle size={13} className="inline mr-1" />}
                 Từ chối hồ sơ
@@ -540,7 +540,7 @@ function DetailModal({
                 type="button"
                 onClick={handleApproveSubmit}
                 disabled={isProcessing}
-                className="flex-1 py-2 px-3 bg-[#1f7a45] hover:bg-[#186036] text-white rounded text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer text-center"
+                className="flex-1 py-2 px-3 bg-ok2 hover:opacity-90 text-tx rounded text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer text-center"
               >
                 {isProcessing ? <Loader2 size={13} className="animate-spin inline mr-1" /> : <CheckCircle2 size={13} className="inline mr-1" />}
                 Duyệt hồ sơ (Lưu bản chỉnh sửa)
@@ -566,31 +566,31 @@ function DeleteConfirmModal({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-white dark:bg-[#181d24] border border-[#dde1e6] dark:border-[#2a333e] rounded-md w-full max-w-sm p-5 space-y-4">
+      <div className="bg-surf border border-bdr rounded-md w-full max-w-sm p-5 space-y-4">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded bg-[#fbebe9] text-[#b3362b] flex items-center justify-center shrink-0">
+          <div className="w-8 h-8 rounded bg-dgrbg text-dgr flex items-center justify-center shrink-0">
             <Trash2 size={16} />
           </div>
           <div>
-            <h3 className="font-bold text-sm text-[#1b2430] dark:text-white">Xóa hồ sơ đăng ký</h3>
-            <p className="text-xs text-[#4b5563] dark:text-[#9ca3af]">Thao tác không thể hoàn tác</p>
+            <h3 className="font-bold text-sm text-tx">Xóa hồ sơ đăng ký</h3>
+            <p className="text-xs text-mu">Thao tác không thể hoàn tác</p>
           </div>
         </div>
-        <p className="text-xs text-[#1b2430] dark:text-gray-300">
+        <p className="text-xs text-tx">
           Bạn có chắc chắn muốn xóa hồ sơ của <strong>{name}</strong> khỏi hệ thống?
         </p>
         <div className="flex gap-2 pt-1">
           <button
             onClick={onCancel}
             disabled={deleting}
-            className="flex-1 py-1.5 border border-[#dde1e6] dark:border-[#2a333e] rounded text-xs font-semibold hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+            className="flex-1 py-1.5 border border-bdr rounded text-xs font-semibold hover:bg-act transition-colors cursor-pointer"
           >
             Hủy
           </button>
           <button
             onClick={onConfirm}
             disabled={deleting}
-            className="flex-1 py-1.5 bg-[#b3362b] hover:bg-[#8f2b22] text-white rounded text-xs font-bold transition-colors cursor-pointer"
+            className="flex-1 py-1.5 bg-dgr hover:opacity-90 text-white rounded text-xs font-bold transition-colors cursor-pointer"
           >
             {deleting ? 'Đang xóa...' : 'Xác nhận xóa'}
           </button>
@@ -633,31 +633,31 @@ function QRCodeDisplay({ url }: { url: string }) {
   return (
     <>
       {showPrintView && (
-        <div className="fixed inset-0 z-[9999] bg-white flex flex-col items-center justify-center p-8 print:block text-black" id="print-area">
+        <div className="fixed inset-0 z-[9999] bg-surf flex flex-col items-center justify-center p-8 print:block text-black" id="print-area">
           <div className="text-center space-y-4 max-w-sm mx-auto">
             <h2 className="text-xl font-bold uppercase tracking-wider">Đăng Ký Cư Trú KTX Phước Vĩnh Tây</h2>
-            <p className="text-xs text-gray-600">Quét mã QR dưới đây để điền thông tin</p>
+            <p className="text-xs text-mu">Quét mã QR dưới đây để điền thông tin</p>
             <img src={qrLargeUrl} alt="QR Code" className="w-56 h-56 mx-auto border-2 border-black p-2" />
             <p className="text-xs font-mono break-all">{url}</p>
           </div>
         </div>
       )}
-      <div className="bg-white dark:bg-[#181d24] border border-[#dde1e6] dark:border-[#2a333e] rounded-md p-4">
+      <div className="bg-surf border border-bdr rounded-md p-4">
         <div className="flex flex-col sm:flex-row items-center gap-5">
           <div className="shrink-0 flex flex-col items-center gap-2.5">
-            <div className="p-2 border border-[#dde1e6] dark:border-[#2a333e] bg-white rounded">
+            <div className="p-2 border border-bdr bg-surf rounded">
               <img src={qrApiUrl} alt="QR Code đăng ký" width={160} height={160} className="w-36 h-36" />
             </div>
             <div className="flex gap-1.5 w-full">
               <button
                 onClick={handleDownload}
-                className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 bg-[#1b2430] hover:bg-[#2a3749] text-white rounded text-[11px] font-semibold cursor-pointer"
+                className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 bg-side hover:bg-act text-tx rounded text-[11px] font-semibold cursor-pointer"
               >
                 <Download size={12} /> Tải mã
               </button>
               <button
                 onClick={handlePrint}
-                className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 border border-[#dde1e6] dark:border-[#2a333e] hover:bg-gray-100 dark:hover:bg-gray-800 text-[#1b2430] dark:text-gray-300 rounded text-[11px] font-semibold cursor-pointer"
+                className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 border border-bdr hover:bg-act text-tx rounded text-[11px] font-semibold cursor-pointer"
               >
                 <Printer size={12} /> In ấn
               </button>
@@ -666,22 +666,22 @@ function QRCodeDisplay({ url }: { url: string }) {
 
           <div className="flex-1 space-y-2 text-center sm:text-left">
             <div>
-              <span className="text-[11px] font-bold uppercase text-[#c9690f] tracking-wider">Mã Tiếp Nhận Công Nhân Mới</span>
-              <h3 className="font-bold text-sm text-[#1b2430] dark:text-white mt-0.5">Mã QR Đăng Ký Cư Trú Trực Tuyến</h3>
-              <p className="text-xs text-[#4b5563] dark:text-[#9ca3af] mt-1 leading-relaxed">
+              <span className="text-[11px] font-bold uppercase text-wn tracking-wider">Mã Tiếp Nhận Công Nhân Mới</span>
+              <h3 className="font-bold text-sm text-tx mt-0.5">Mã QR Đăng Ký Cư Trú Trực Tuyến</h3>
+              <p className="text-xs text-mu mt-1 leading-relaxed">
                 Niêm yết tại cổng bảo vệ hoặc văn phòng KTX. Công nhân sử dụng Zalo hoặc camera điện thoại quét mã để khai báo họ tên, CCCD, phòng ở và đơn vị công tác.
               </p>
             </div>
 
             <div className="flex items-center gap-2 pt-1 flex-wrap">
-              <span className="text-xs text-gray-500 font-mono bg-[#f3f4f6] dark:bg-[#11151a] px-2 py-1 rounded border border-[#dde1e6] dark:border-[#2a333e] break-all">
+              <span className="text-xs text-ic font-mono bg-page px-2 py-1 rounded border border-bdr break-all">
                 {url}
               </span>
               <a
                 href="/register"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs text-[#c9690f] hover:underline font-semibold"
+                className="inline-flex items-center gap-1 text-xs text-wn hover:underline font-semibold"
               >
                 <ExternalLink size={12} /> Mở trang đăng ký
               </a>
@@ -962,17 +962,17 @@ export default function QRPortalClient() {
       {/* Header bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg md:text-xl font-bold tracking-tight text-[#1b2430] dark:text-white uppercase">
+          <h1 className="text-lg md:text-xl font-bold tracking-tight text-tx uppercase">
             HỒ SƠ ĐĂNG KÝ CƯ TRÚ
           </h1>
-          <p className="text-xs text-[#4b5563] dark:text-[#9ca3af] mt-0.5">
+          <p className="text-xs text-mu mt-0.5">
             Duyệt và phân bổ phòng cho công nhân mới quét mã đăng ký trực tuyến
           </p>
         </div>
         <button
           onClick={() => fetchRegistrations(true)}
           disabled={refreshing}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-[#dde1e6] dark:border-[#2a333e] bg-white dark:bg-[#181d24] text-[#1b2430] dark:text-gray-300 rounded text-xs font-semibold hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-60 cursor-pointer w-fit"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-bdr bg-surf text-tx rounded text-xs font-semibold hover:bg-act dark:hover:bg-act transition-colors disabled:opacity-60 cursor-pointer w-fit"
         >
           <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
           <span>Làm mới</span>
@@ -981,8 +981,8 @@ export default function QRPortalClient() {
 
       {/* Phân quyền Staff */}
       {!isAdmin && (
-        <div className="p-2.5 bg-[#fdf1e4] dark:bg-[#281d14] border border-[#c9690f]/30 rounded text-xs text-[#853d07] dark:text-[#f39c55] flex items-center gap-2">
-          <Building2 size={14} className="shrink-0 text-[#c9690f]" />
+        <div className="p-2.5 tint-wn border border-wn/30 rounded text-xs text-wn flex items-center gap-2">
+          <Building2 size={14} className="shrink-0 text-wn" />
           <span>
             {currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0 ? (
               <>
@@ -1000,28 +1000,28 @@ export default function QRPortalClient() {
       <QRCodeDisplay url={registerUrl} />
 
       {/* DẢI SỐ LIỆU TỔNG QUAN LIỀN KHỐI (Requirement: Segmented stats strip, NO separate floating cards) */}
-      <div className="bg-white dark:bg-[#181d24] border border-[#dde1e6] dark:border-[#2a333e] rounded-md grid grid-cols-3 divide-x divide-[#dde1e6] dark:divide-[#2a333e] overflow-hidden">
+      <div className="bg-surf border border-bdr rounded-md grid grid-cols-3 divide-x divide-bdr overflow-hidden">
         {[
           {
             key: 'pending',
             label: 'Chờ duyệt',
             count: counts.pending,
-            activeColor: 'bg-[#fdf1e4] dark:bg-[#281d14] text-[#c9690f]',
-            numColor: 'text-[#c9690f]',
+            activeColor: 'tint-wn text-wn',
+            numColor: 'text-wn',
           },
           {
             key: 'approved',
             label: 'Đã duyệt',
             count: counts.approved,
-            activeColor: 'bg-[#eaf6ef] dark:bg-[#103320] text-[#1f7a45]',
-            numColor: 'text-[#1f7a45]',
+            activeColor: 'bg-okbg  text-ok',
+            numColor: 'text-ok',
           },
           {
             key: 'rejected',
             label: 'Từ chối',
             count: counts.rejected,
-            activeColor: 'bg-[#fbebe9] dark:bg-[#3b1814] text-[#b3362b]',
-            numColor: 'text-[#b3362b]',
+            activeColor: 'bg-dgrbg text-dgr',
+            numColor: 'text-dgr',
           },
         ].map(s => {
           const isSelected = filterStatus === s.key;
@@ -1031,13 +1031,13 @@ export default function QRPortalClient() {
               type="button"
               onClick={() => setFilterStatus(s.key as any)}
               className={`p-3 text-center transition-colors cursor-pointer ${
-                isSelected ? s.activeColor : 'hover:bg-gray-50 dark:hover:bg-white/5'
+                isSelected ? s.activeColor : 'hover:bg-act'
               }`}
             >
               <div className={`text-2xl font-bold font-mono ${s.numColor}`}>
                 {s.count}
               </div>
-              <div className="text-xs font-semibold mt-0.5 uppercase tracking-wider text-[#4b5563] dark:text-[#9ca3af]">
+              <div className="text-xs font-semibold mt-0.5 uppercase tracking-wider text-mu">
                 {s.label}
               </div>
             </button>
@@ -1046,10 +1046,10 @@ export default function QRPortalClient() {
       </div>
 
       {/* THANH BỘ LỌC LIỀN KHỐI (Requirement: Segmented filter button group + console filters) */}
-      <div className="bg-white dark:bg-[#181d24] border border-[#dde1e6] dark:border-[#2a333e] rounded-md p-3 space-y-3">
+      <div className="bg-surf border border-bdr rounded-md p-3 space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           {/* Nhóm nút lọc trạng thái liền khối (Navy #1b2430 khi active) */}
-          <div className="inline-flex border border-[#dde1e6] dark:border-[#2a333e] rounded overflow-hidden divide-x divide-[#dde1e6] dark:divide-[#2a333e]">
+          <div className="inline-flex border border-bdr rounded overflow-hidden divide-x divide-bdr">
             {[
               { key: 'all', label: `Tất cả (${scopedRegistrations.length})` },
               { key: 'pending', label: `Chờ duyệt (${counts.pending})` },
@@ -1064,8 +1064,8 @@ export default function QRPortalClient() {
                   onClick={() => setFilterStatus(t.key as any)}
                   className={`px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                     isActive
-                      ? 'bg-[#1b2430] text-white'
-                      : 'bg-white dark:bg-[#181d24] text-[#4b5563] dark:text-[#9ca3af] hover:bg-gray-100 dark:hover:bg-gray-800'
+                      ? 'bg-side text-tx'
+                      : 'bg-surf text-mu hover:bg-act'
                   }`}
                 >
                   {t.label}
@@ -1076,19 +1076,19 @@ export default function QRPortalClient() {
 
           {/* Ô tìm kiếm console */}
           <div className="relative w-full sm:w-64">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-mu pointer-events-none" />
             <input
               type="text"
               placeholder="Tìm tên, CCCD, SĐT, mã NV..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              className="w-full pl-8 pr-7 py-1.5 text-xs bg-[#f3f4f6] dark:bg-[#11151a] border border-[#dde1e6] dark:border-[#2a333e] rounded text-[#1b2430] dark:text-[#dde1e6] focus:outline-none focus:border-[#c9690f]"
+              className="w-full pl-8 pr-7 py-1.5 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-black dark:hover:text-white"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-mu hover:text-black dark:hover:text-tx"
               >
                 <X size={12} />
               </button>
@@ -1097,9 +1097,9 @@ export default function QRPortalClient() {
         </div>
 
         {/* Bộ lọc vị trí KTX / Dãy / Phòng */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2.5 border-t border-[#dde1e6] dark:border-[#2a333e]">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2.5 border-t border-bdr">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-gray-500 whitespace-nowrap min-w-[50px]">Khu KTX:</span>
+            <span className="text-xs font-semibold text-ic whitespace-nowrap min-w-[50px]">Khu KTX:</span>
             <select
               value={selectedKtx}
               onChange={e => {
@@ -1107,7 +1107,7 @@ export default function QRPortalClient() {
                 setSelectedDay('all');
                 setSelectedRoom('all');
               }}
-              className="flex-1 py-1 px-2 text-xs bg-[#f3f4f6] dark:bg-[#11151a] border border-[#dde1e6] dark:border-[#2a333e] rounded text-[#1b2430] dark:text-[#dde1e6] focus:outline-none focus:border-[#c9690f]"
+              className="flex-1 py-1 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn"
             >
               <option value="all">Tất cả KTX</option>
               {hierarchy.ktxList.map(k => (
@@ -1117,14 +1117,14 @@ export default function QRPortalClient() {
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-gray-500 whitespace-nowrap min-w-[50px]">Dãy nhà:</span>
+            <span className="text-xs font-semibold text-ic whitespace-nowrap min-w-[50px]">Dãy nhà:</span>
             <select
               value={selectedDay}
               onChange={e => {
                 setSelectedDay(e.target.value);
                 setSelectedRoom('all');
               }}
-              className="flex-1 py-1 px-2 text-xs bg-[#f3f4f6] dark:bg-[#11151a] border border-[#dde1e6] dark:border-[#2a333e] rounded text-[#1b2430] dark:text-[#dde1e6] focus:outline-none focus:border-[#c9690f]"
+              className="flex-1 py-1 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn"
             >
               <option value="all">Tất cả Dãy</option>
               {filterAvailableDays.map(d => (
@@ -1134,11 +1134,11 @@ export default function QRPortalClient() {
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-gray-500 whitespace-nowrap min-w-[50px]">Phòng số:</span>
+            <span className="text-xs font-semibold text-ic whitespace-nowrap min-w-[50px]">Phòng số:</span>
             <select
               value={selectedRoom}
               onChange={e => setSelectedRoom(e.target.value)}
-              className="flex-1 py-1 px-2 text-xs bg-[#f3f4f6] dark:bg-[#11151a] border border-[#dde1e6] dark:border-[#2a333e] rounded text-[#1b2430] dark:text-[#dde1e6] focus:outline-none focus:border-[#c9690f]"
+              className="flex-1 py-1 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn"
             >
               <option value="all">Tất cả Phòng</option>
               {filterAvailableRooms.map(p => (
@@ -1150,18 +1150,18 @@ export default function QRPortalClient() {
       </div>
 
       {/* BẢNG DANH SÁCH (TABLE) THAY VÌ CARD STACK (Requirement: Operations Table View) */}
-      <div className="bg-white dark:bg-[#181d24] border border-[#dde1e6] dark:border-[#2a333e] rounded-md overflow-hidden">
+      <div className="bg-surf border border-bdr rounded-md overflow-hidden">
         {loading ? (
-          <div className="flex items-center justify-center py-16 text-gray-500 text-xs">
-            <Loader2 size={18} className="animate-spin mr-2 text-[#c9690f]" />
+          <div className="flex items-center justify-center py-16 text-ic text-xs">
+            <Loader2 size={18} className="animate-spin mr-2 text-wn" />
             <span>Đang tải danh sách hồ sơ...</span>
           </div>
         ) : filtered.length === 0 ? (
           /* TRẠNG THÁI RỖNG (Requirement: Khung viền đứt nét, icon đơn giản, tiêu đề in đậm) */
-          <div className="p-10 border border-dashed border-[#dde1e6] dark:border-[#2a333e] m-4 rounded text-center space-y-1.5">
-            <Inbox size={32} className="mx-auto text-gray-400 stroke-1" />
-            <h4 className="font-bold text-sm text-[#1b2430] dark:text-white">Không có hồ sơ nào phù hợp</h4>
-            <p className="text-xs text-[#4b5563] dark:text-[#9ca3af] max-w-sm mx-auto">
+          <div className="p-10 border border-dashed border-bdr m-4 rounded text-center space-y-1.5">
+            <Inbox size={32} className="mx-auto text-mu stroke-1" />
+            <h4 className="font-bold text-sm text-tx">Không có hồ sơ nào phù hợp</h4>
+            <p className="text-xs text-mu max-w-sm mx-auto">
               Không tìm thấy hồ sơ đăng ký nào theo bộ lọc hoặc từ khóa hiện tại. Thử chọn &quot;Tất cả&quot; hoặc xóa điều kiện lọc.
             </p>
           </div>
@@ -1169,7 +1169,7 @@ export default function QRPortalClient() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="bg-[#f3f4f6] dark:bg-[#11151a] border-b border-[#dde1e6] dark:border-[#2a333e] text-[11px] font-bold text-[#4b5563] dark:text-[#9ca3af] uppercase tracking-wider">
+                <tr className="bg-page border-b border-bdr text-[11px] font-bold text-mu uppercase tracking-wider">
                   <th className="py-2.5 px-3">CÔNG NHÂN</th>
                   <th className="py-2.5 px-3">LIÊN HỆ & CCCD</th>
                   <th className="py-2.5 px-3">ĐƠN VỊ / TỔ</th>
@@ -1179,7 +1179,7 @@ export default function QRPortalClient() {
                   <th className="py-2.5 px-3 text-right">THAO TÁC</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#dde1e6] dark:divide-[#2a333e]">
+              <tbody className="divide-y divide-bdr">
                 {filtered.map(reg => {
                   const cfg = STATUS_CONFIG[reg.status];
                   const isProcessing = processing === reg.id;
@@ -1191,34 +1191,34 @@ export default function QRPortalClient() {
                       key={reg.id}
                       className={`transition-colors ${
                         dupMatch
-                          ? 'border-l-[3px] border-l-[#c9690f] bg-[#fdf1e4]/25 dark:bg-[#281d14]/25 hover:bg-[#fdf1e4]/40 dark:hover:bg-[#281d14]/40'
-                          : 'hover:bg-[#f9fafb] dark:hover:bg-[#1e242d]'
+                          ? 'border-l-[3px] border-l-wn tint-wn/25/25 hover:tint-wn/40/40'
+                          : 'hover:bg-act'
                       }`}
                     >
                       {/* Cột 1: Tên & Mã NV */}
                       <td className="py-2.5 px-3 align-top">
-                        <div className="font-bold text-[#1b2430] dark:text-white text-xs sm:text-sm">
+                        <div className="font-bold text-tx text-xs sm:text-sm">
                           {reg.ho_va_ten}
                         </div>
                         <div className="flex items-center gap-1.5 mt-0.5">
                           {reg.ma_nv ? (
-                            <span className="font-mono text-[11px] text-gray-500 bg-gray-100 dark:bg-gray-800 px-1 rounded">
+                            <span className="font-mono text-[11px] text-ic bg-act px-1 rounded">
                               {reg.ma_nv}
                             </span>
                           ) : (
-                            <span className="text-[11px] text-gray-400">Chưa có mã</span>
+                            <span className="text-[11px] text-mu">Chưa có mã</span>
                           )}
                           {reg.gioi_tinh && (
-                            <span className="text-[11px] text-gray-400">· {reg.gioi_tinh}</span>
+                            <span className="text-[11px] text-mu">· {reg.gioi_tinh}</span>
                           )}
                         </div>
                         {/* Nhãn cảnh báo trùng màu đỏ nổi bật (Requirement) */}
                         {dupMatch && (
                           <div className="mt-1">
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#fbebe9] text-[#b3362b] border border-[#b3362b]/30">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-dgrbg text-dgr border border-dgr/30">
                               <AlertTriangle size={10} /> Trùng {dupMatch.field}
                             </span>
-                            <p className="text-[10px] text-[#b3362b] dark:text-red-400 mt-0.5 font-medium leading-tight">
+                            <p className="text-[10px] text-dgr mt-0.5 font-medium leading-tight">
                               Khớp với: {dupMatch.worker.hoVaTen} [{dupMatch.worker.maNV || '—'}] ({dupMatch.worker.ktx} - {dupMatch.worker.day} - P.{dupMatch.worker.phongSo})
                             </p>
                           </div>
@@ -1227,10 +1227,10 @@ export default function QRPortalClient() {
 
                       {/* Cột 2: CCCD & SĐT */}
                       <td className="py-2.5 px-3 align-top whitespace-nowrap">
-                        <div className="font-mono font-medium text-xs text-[#1b2430] dark:text-gray-200">
+                        <div className="font-mono font-medium text-xs text-tx">
                           {reg.so_cccd || '—'}
                         </div>
-                        <div className="text-[11px] text-[#4b5563] dark:text-gray-400 mt-0.5 flex items-center gap-1">
+                        <div className="text-[11px] text-mu mt-0.5 flex items-center gap-1">
                           <Phone size={10} />
                           <span>{reg.so_dien_thoai || '—'}</span>
                         </div>
@@ -1238,11 +1238,11 @@ export default function QRPortalClient() {
 
                       {/* Cột 3: Đơn vị / Tổ */}
                       <td className="py-2.5 px-3 align-top">
-                        <div className="font-semibold text-xs text-[#1b2430] dark:text-gray-200">
+                        <div className="font-semibold text-xs text-tx">
                           {reg.don_vi || '—'}
                         </div>
                         {reg.tieu_doan && (
-                          <div className="text-[11px] text-[#4b5563] dark:text-gray-400 mt-0.5">
+                          <div className="text-[11px] text-mu mt-0.5">
                             TĐ: {reg.tieu_doan}
                           </div>
                         )}
@@ -1250,18 +1250,18 @@ export default function QRPortalClient() {
 
                       {/* Cột 4: Vị trí đăng ký */}
                       <td className="py-2.5 px-3 align-top">
-                        <div className="font-bold text-xs text-[#1b2430] dark:text-white">
+                        <div className="font-bold text-xs text-tx">
                           {reg.ktx} — {reg.day}
                         </div>
-                        <div className="text-[11px] text-[#4b5563] dark:text-gray-400 mt-0.5">
+                        <div className="text-[11px] text-mu mt-0.5">
                           Phòng {reg.phong_so} {reg.giuong ? `(Giường ${reg.giuong})` : ''}
                         </div>
                       </td>
 
                       {/* Cột 5: Ngày gửi */}
-                      <td className="py-2.5 px-3 align-top text-[11px] text-[#4b5563] dark:text-gray-400 whitespace-nowrap">
+                      <td className="py-2.5 px-3 align-top text-[11px] text-mu whitespace-nowrap">
                         {new Date(reg.created_at).toLocaleDateString('vi-VN')}
-                        <div className="text-[10px] text-gray-400">
+                        <div className="text-[10px] text-mu">
                           {new Date(reg.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
                         </div>
                       </td>
@@ -1279,7 +1279,7 @@ export default function QRPortalClient() {
                         <div className="inline-flex items-center gap-1.5 justify-end">
                           <button
                             onClick={() => setDetailReg(reg)}
-                            className="inline-flex items-center gap-1 px-2 py-1 border border-[#dde1e6] dark:border-[#2a333e] bg-white dark:bg-[#181d24] text-[#374151] dark:text-[#d1d5db] hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-xs font-medium cursor-pointer"
+                            className="inline-flex items-center gap-1 px-2 py-1 border border-bdr bg-surf text-mu hover:bg-act rounded text-xs font-medium cursor-pointer"
                             title={reg.status === 'pending' ? 'Sửa thông tin & duyệt' : 'Xem chi tiết'}
                           >
                             <Eye size={12} />
@@ -1291,7 +1291,7 @@ export default function QRPortalClient() {
                               <button
                                 onClick={() => handleReject(reg.id)}
                                 disabled={isProcessing}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 border border-[#b3362b] text-[#b3362b] hover:bg-[#fbebe9] dark:hover:bg-[#3b1814] rounded text-xs font-medium transition-colors cursor-pointer disabled:opacity-50"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 border border-dgr text-dgr hover:bg-dgrbg rounded text-xs font-medium transition-colors cursor-pointer disabled:opacity-50"
                                 title="Từ chối hồ sơ"
                               >
                                 {isProcessing ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />}
@@ -1300,7 +1300,7 @@ export default function QRPortalClient() {
                               <button
                                 onClick={() => handleApprove(reg)}
                                 disabled={isProcessing}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#1f7a45] hover:bg-[#186036] text-white rounded text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-ok2 hover:opacity-90 text-tx rounded text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
                                 title="Duyệt hồ sơ ngay"
                               >
                                 {isProcessing ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
@@ -1312,7 +1312,7 @@ export default function QRPortalClient() {
                           {isDone && (
                             <button
                               onClick={() => setDeleteTarget(reg)}
-                              className="p-1 border border-[#dde1e6] dark:border-[#2a333e] text-gray-400 hover:text-[#b3362b] hover:border-[#b3362b] rounded cursor-pointer transition-colors"
+                              className="p-1 border border-bdr text-dgr hover:opacity-80 hover:border-dgr rounded cursor-pointer transition-colors"
                               title="Xóa hồ sơ"
                             >
                               <Trash2 size={13} />

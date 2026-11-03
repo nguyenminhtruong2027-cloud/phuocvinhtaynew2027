@@ -218,77 +218,77 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
       <div
-        className="bg-[#131B2E] border border-slate-800/80 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg flex flex-col max-h-[90vh]"
+        className="bg-surf border border-bdr rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg flex flex-col max-h-[90vh]"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800/80">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-bdr">
           <div>
-            <h3 className="font-extrabold text-white flex items-center gap-2">
-              <ArrowRightLeft size={16} className="text-blue-400" /> ⇄ Chuyển / Đổi Giường
+            <h3 className="font-extrabold text-tx flex items-center gap-2">
+              <ArrowRightLeft size={16} className="text-lnk" /> ⇄ Chuyển / Đổi Giường
             </h3>
-            <p className="text-xs text-slate-300 font-tabular mt-0.5 truncate">
+            <p className="text-xs text-mu font-tabular mt-0.5 truncate">
               {maNv || workerName || '—'} · vị trí cũ: {sourceBed ? `${sourceBed.ktx} · ${sourceBed.day} · P${sourceBed.phong_so} · G${sourceBed.giuong}` : '—'}
             </p>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-slate-900/80 text-slate-400 hover:text-white"><X size={16} /></button>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-act text-mu hover:text-tx"><X size={16} /></button>
         </div>
 
         {loading ? (
-          <div className="flex-1 flex items-center justify-center py-14"><Loader2 size={22} className="animate-spin text-cyan-400" /></div>
+          <div className="flex-1 flex items-center justify-center py-14"><Loader2 size={22} className="animate-spin text-pri2" /></div>
         ) : (
           <div className="px-5 py-4 space-y-3 overflow-y-auto">
             {error && (
-              <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-xs font-semibold text-rose-300 flex items-center gap-2">
+              <div className="rounded-xl border border-dgr tint-dgr p-3 text-xs font-semibold text-dgr flex items-center gap-2">
                 <AlertCircle size={14} className="shrink-0" /> {error}
               </div>
             )}
             {emptyBeds.length === 0 ? (
-              <p className="text-sm text-slate-400 italic text-center py-8">Không còn giường trống nào để chuyển.</p>
+              <p className="text-sm text-mu italic text-center py-8">Không còn giường trống nào để chuyển.</p>
             ) : (
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
-                    <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">KTX mới</label>
+                    <label className="text-[11px] font-bold text-mu uppercase tracking-wider">KTX mới</label>
                     <select
                       value={selKtx}
                       onChange={e => { setSelKtx(e.target.value); setSelDay(''); setSelRoom(''); setSelBed(''); }}
-                      className="mt-1 w-full bg-slate-900/80 border border-slate-700 text-gray-100 rounded-xl px-3 py-2 text-sm font-semibold cursor-pointer"
+                      className="mt-1 w-full bg-surf border border-bdr text-tx rounded-xl px-3 py-2 text-sm font-semibold cursor-pointer"
                     >
                       <option value="">-- Chọn KTX --</option>
                       {ktxList.map(k => <option key={k} value={k}>{k}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">Dãy mới</label>
+                    <label className="text-[11px] font-bold text-mu uppercase tracking-wider">Dãy mới</label>
                     <select
                       value={selDay}
                       onChange={e => { setSelDay(e.target.value); setSelRoom(''); setSelBed(''); }}
                       disabled={!selKtx}
-                      className="mt-1 w-full bg-slate-900/80 border border-slate-700 text-gray-100 rounded-xl px-3 py-2 text-sm font-semibold cursor-pointer disabled:opacity-40"
+                      className="mt-1 w-full bg-surf border border-bdr text-tx rounded-xl px-3 py-2 text-sm font-semibold cursor-pointer disabled:opacity-40"
                     >
                       <option value="">-- Chọn Dãy --</option>
                       {dayList.map(d => <option key={d} value={d}>{d}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">Phòng mới</label>
+                    <label className="text-[11px] font-bold text-mu uppercase tracking-wider">Phòng mới</label>
                     <select
                       value={selRoom}
                       onChange={e => { setSelRoom(e.target.value); setSelBed(''); }}
                       disabled={!selDay}
-                      className="mt-1 w-full bg-slate-900/80 border border-slate-700 text-gray-100 rounded-xl px-3 py-2 text-sm font-semibold cursor-pointer disabled:opacity-40"
+                      className="mt-1 w-full bg-surf border border-bdr text-tx rounded-xl px-3 py-2 text-sm font-semibold cursor-pointer disabled:opacity-40"
                     >
                       <option value="">-- Chọn Phòng --</option>
                       {roomList.map(r => <option key={r} value={r}>Phòng {r}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">Giường mới (chỉ giường trống)</label>
+                    <label className="text-[11px] font-bold text-mu uppercase tracking-wider">Giường mới (chỉ giường trống)</label>
                     <select
                       value={selBed}
                       onChange={e => setSelBed(e.target.value)}
                       disabled={!selRoom}
-                      className="mt-1 w-full bg-slate-900/80 border border-slate-700 text-gray-100 rounded-xl px-3 py-2 text-sm font-semibold cursor-pointer disabled:opacity-40"
+                      className="mt-1 w-full bg-surf border border-bdr text-tx rounded-xl px-3 py-2 text-sm font-semibold cursor-pointer disabled:opacity-40"
                     >
                       <option value="">-- Chọn Giường --</option>
                       {bedList.map(b => <option key={b.id} value={b.id}>G{b.giuong}</option>)}
@@ -300,7 +300,7 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
                   type="button"
                   disabled={busy || !selBed}
                   onClick={confirmTransfer}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-extrabold disabled:opacity-50 transition-colors"
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-pri hover:opacity-90 text-tx text-sm font-extrabold disabled:opacity-50 transition-colors"
                 >
                   {busy ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />} ✓ Xác nhận chuyển giường
                 </button>

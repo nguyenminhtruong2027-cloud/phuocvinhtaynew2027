@@ -40,11 +40,11 @@ interface WorkerLite {
 
 function renderSkeleton() {
   return (
-    <div className="min-h-screen bg-[#0B0F17] p-4 flex items-center justify-center" suppressHydrationWarning>
-      <div className="w-full max-w-md rounded-2xl border border-slate-800/80 bg-[#131B2E] p-6 space-y-4 animate-pulse">
-        <div className="h-6 w-40 bg-white/10 rounded" />
-        <div className="h-32 bg-white/10 rounded-xl" />
-        <div className="h-10 bg-white/10 rounded-xl" />
+    <div className="min-h-screen bg-page p-4 flex items-center justify-center" suppressHydrationWarning>
+      <div className="w-full max-w-md rounded-2xl border border-bdr bg-surf p-6 space-y-4 animate-pulse">
+        <div className="h-6 w-40 bg-surf/10 rounded" />
+        <div className="h-32 bg-surf/10 rounded-xl" />
+        <div className="h-10 bg-surf/10 rounded-xl" />
       </div>
     </div>
   );
@@ -338,7 +338,7 @@ export default function BedInspectClient() {
   if (loading) {
     return (
       <div className="p-4 max-w-md mx-auto flex items-center justify-center py-16">
-        <Loader2 size={26} className="animate-spin text-cyan-400" />
+        <Loader2 size={26} className="animate-spin text-pri2" />
       </div>
     );
   }
@@ -351,22 +351,22 @@ export default function BedInspectClient() {
   const maNv = bed?.ma_nv || worker?.maNV || '';
 
   return (
-    <div className="min-h-[80vh] p-4 bg-[#0B0F17]" suppressHydrationWarning>
+    <div className="min-h-[80vh] p-4 bg-page" suppressHydrationWarning>
       <div className="max-w-md mx-auto space-y-4">
         {/* Header */}
-        <div className="rounded-2xl border border-slate-800/80 bg-[#131B2E] p-4 flex items-center justify-between shadow-xl">
+        <div className="rounded-2xl border border-bdr bg-surf p-4 flex items-center justify-between shadow-xl">
           <div className="min-w-0">
-            <h1 className="text-base font-extrabold text-white flex items-center gap-2">
-              <ScanLine size={18} className="text-cyan-400" /> Kiểm Tra Giường QR
+            <h1 className="text-base font-extrabold text-tx flex items-center gap-2">
+              <ScanLine size={18} className="text-pri2" /> Kiểm Tra Giường QR
             </h1>
-            <p className="text-xs text-slate-300 font-tabular mt-1 truncate">
+            <p className="text-xs text-mu font-tabular mt-1 truncate">
               {[bed?.ktx, bed?.day].filter(Boolean).join(' · ') || '—'}
             </p>
           </div>
           <button
             onClick={() => setShowQrPrint(true)}
             disabled={!bed}
-            className="p-2 rounded-xl border border-cyan-500/40 bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 disabled:opacity-40"
+            className="p-2 rounded-xl border border-bdr2 bg-bdg text-lnk hover:bg-bdg disabled:opacity-40"
             title="🖨️ In Tem QR Giường"
           >
             <Printer size={14} />
@@ -374,25 +374,25 @@ export default function BedInspectClient() {
           <button
             onClick={() => loadBedData()}
             disabled={loading}
-            className="p-2 rounded-xl border border-slate-800/80 bg-slate-900/80 text-slate-300 hover:text-white disabled:opacity-50"
+            className="p-2 rounded-xl border border-bdr bg-surf text-mu hover:text-tx disabled:opacity-50"
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
         </div>
 
         {notFound && (
-          <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-5 space-y-1.5">
-            <p className="text-sm font-extrabold text-amber-300 flex items-center gap-2">
+          <div className="rounded-2xl border border-wn tint-wn p-5 space-y-1.5">
+            <p className="text-sm font-extrabold text-wn flex items-center gap-2">
               <AlertCircle size={15} /> Không tìm thấy giường trong cơ sở dữ liệu
             </p>
-            <p className="text-xs text-amber-200/80">
+            <p className="text-xs text-wn/80">
               Mã QR không khớp bản ghi <code>beds</code> nào. Kiểm tra lại mã hoặc liên hệ quản lý đồng bộ dữ liệu.
             </p>
           </div>
         )}
 
         {message && (
-          <div className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-4 text-sm font-semibold text-cyan-300 flex items-start gap-2">
+          <div className="rounded-2xl border border-bdr2 bg-bdg p-4 text-sm font-semibold text-lnk flex items-start gap-2">
             <CheckCircle2 size={15} className="shrink-0 mt-0.5" />
             <span className="leading-snug">{message}</span>
           </div>
@@ -405,54 +405,54 @@ export default function BedInspectClient() {
             <>
               {/* Bed identity card */}
               <div className={`rounded-2xl border p-5 shadow-2xl ${
-                occupied ? 'border-emerald-500/50 bg-[#131B2E]' : maintenance ? 'border-amber-500/50 bg-[#131B2E]' : 'border border-dashed border-blue-400 bg-[#131B2E]'
+                occupied ? 'border-bdr2 bg-surf' : maintenance ? 'border-wn bg-surf' : 'border border-dashed border-pri2 bg-surf'
               }`}>
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-extrabold text-cyan-300 font-tabular flex items-center gap-1.5">
+                  <span className="text-xs font-extrabold text-lnk font-tabular flex items-center gap-1.5">
                     <BedDouble size={14} /> Giường {bed.giuong || '—'}
                   </span>
                   {occupied
-                    ? <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/50">● ĐÃ Ở (OCCUPIED)</span>
+                    ? <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-okbg text-ok border border-bdr2">● ĐÃ Ở (OCCUPIED)</span>
                     : maintenance
-                    ? <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/50">● ĐANG BẢO TRÌ</span>
-                    : <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/50">● GIƯỜNG TRỐNG SẴN SÀNG</span>}
+                    ? <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full tint-wn text-wn border border-wn">● ĐANG BẢO TRÌ</span>
+                    : <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-bdg text-lnk border border-pri2">● GIƯỜNG TRỐNG SẴN SÀNG</span>}
                 </div>
-                <p className="text-2xl font-extrabold text-white font-tabular">Phòng {bed.phong_so || '—'}</p>
-                <p className="text-xs text-slate-300 font-tabular mt-0.5">
+                <p className="text-2xl font-extrabold text-tx font-tabular">Phòng {bed.phong_so || '—'}</p>
+                <p className="text-xs text-mu font-tabular mt-0.5">
                   {bed.ktx || '—'} · {bed.day || '—'} · G{bed.giuong || '—'}
                 </p>
               </div>
 
               {/* Occupied: worker profile */}
               {occupied && name && (
-                <div className="rounded-2xl border border-slate-800/80 bg-[#131B2E] p-5 shadow-xl">
+                <div className="rounded-2xl border border-bdr bg-surf p-5 shadow-xl">
                   <div className="flex items-center gap-4">
-                    <div className={`w-16 h-16 rounded-full flex items-center justify-center text-2xl font-extrabold shrink-0 ${female ? 'bg-pink-500/20 text-pink-300 border border-pink-500/40' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'}`}>
+                    <div className={`w-16 h-16 rounded-full flex items-center justify-center text-2xl font-extrabold shrink-0 ${female ? 'bg-bdg text-pri2 border border-bdr2' : 'bg-okbg text-ok border border-bdr2'}`}>
                       {name.charAt(0).toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0 space-y-1">
-                      <p className="text-lg font-extrabold text-white flex items-center gap-2 truncate">
+                      <p className="text-lg font-extrabold text-tx flex items-center gap-2 truncate">
                         {name}
-                        {female && <VenusAndMars size={14} className="text-pink-300 shrink-0" />}
+                        {female && <VenusAndMars size={14} className="text-pri2 shrink-0" />}
                       </p>
-                      <p className="text-xs text-slate-200 font-tabular flex items-center gap-1.5"><User size={11} className="shrink-0" /> Mã NV: <b className="text-cyan-300">{maNv || '—'}</b></p>
-                      <p className="text-xs text-slate-300 flex items-center gap-1.5 truncate"><Briefcase size={11} className="shrink-0" /> {worker?.donVi || '—'}</p>
-                      <p className="text-xs text-slate-300 font-tabular flex items-center gap-1.5"><Phone size={11} className="shrink-0" /> {worker?.soDienThoai || '—'}</p>
-                      <p className="text-xs text-slate-300 font-tabular flex items-center gap-1.5"><Calendar size={11} className="shrink-0" /> Vào: {worker?.ngayVaoKTX || '—'}</p>
+                      <p className="text-xs text-tx font-tabular flex items-center gap-1.5"><User size={11} className="shrink-0" /> Mã NV: <b className="text-lnk">{maNv || '—'}</b></p>
+                      <p className="text-xs text-mu flex items-center gap-1.5 truncate"><Briefcase size={11} className="shrink-0" /> {worker?.donVi || '—'}</p>
+                      <p className="text-xs text-mu font-tabular flex items-center gap-1.5"><Phone size={11} className="shrink-0" /> {worker?.soDienThoai || '—'}</p>
+                      <p className="text-xs text-mu font-tabular flex items-center gap-1.5"><Calendar size={11} className="shrink-0" /> Vào: {worker?.ngayVaoKTX || '—'}</p>
                     </div>
                   </div>
                 </div>
               )}
 
               {/* Action buttons */}
-              <div className="rounded-2xl border border-slate-800/80 bg-[#131B2E] p-4 space-y-2.5">
+              <div className="rounded-2xl border border-bdr bg-surf p-4 space-y-2.5">
                 {occupied && name && (
                   <>
                     <button
                       type="button"
                       disabled={busy}
                       onClick={confirmPresence}
-                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-extrabold transition-colors disabled:opacity-50"
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-ok2 hover:bg-ok2 text-tx text-sm font-extrabold transition-colors disabled:opacity-50"
                     >
                       {busy ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />} ✓ Xác nhận có mặt
                     </button>
@@ -460,7 +460,7 @@ export default function BedInspectClient() {
                       type="button"
                       disabled={busy}
                       onClick={() => setShowTransfer(true)}
-                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-extrabold transition-colors disabled:opacity-50"
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-pri hover:opacity-90 text-tx text-sm font-extrabold transition-colors disabled:opacity-50"
                     >
                       {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowRightLeft size={15} />} ⇄ Chuyển / Đổi Giường
                     </button>
@@ -468,7 +468,7 @@ export default function BedInspectClient() {
                       type="button"
                       disabled={busy}
                       onClick={() => setBedStatus('maintenance')}
-                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0F17] text-sm font-extrabold transition-colors disabled:opacity-50"
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-wn hover:bg-wn text-[#0B0F17] text-sm font-extrabold transition-colors disabled:opacity-50"
                     >
                       {busy ? <Loader2 size={15} className="animate-spin" /> : <Wrench size={15} />} 🔧 Báo hỏng / Bảo trì
                     </button>
@@ -476,7 +476,7 @@ export default function BedInspectClient() {
                       type="button"
                       disabled={busy}
                       onClick={requestCheckout}
-                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-extrabold transition-colors disabled:opacity-50"
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-dgr hover:bg-dgr text-tx text-sm font-extrabold transition-colors disabled:opacity-50"
                     >
                       {busy ? <Loader2 size={15} className="animate-spin" /> : <DoorOpen size={15} />} 🚪 Check-out
                     </button>
@@ -487,7 +487,7 @@ export default function BedInspectClient() {
                     type="button"
                     disabled={busy}
                     onClick={() => setBedStatus('empty')}
-                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-extrabold disabled:opacity-50"
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-ok2 hover:bg-ok2 text-tx text-sm font-extrabold disabled:opacity-50"
                   >
                     {busy ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />} ✓ Hoàn tất bảo trì
                   </button>
@@ -498,7 +498,7 @@ export default function BedInspectClient() {
                         type="button"
                         disabled={busy}
                         onClick={() => { setShowAssign(true); setAssignSearch(''); }}
-                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-extrabold transition-colors disabled:opacity-50"
+                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-pri hover:bg-pri2 text-tx text-sm font-extrabold transition-colors disabled:opacity-50"
                       >
                         {busy ? <Loader2 size={15} className="animate-spin" /> : <UserCheck size={15} />} ＋ Gán Nhanh Công Nhân
                       </button>
@@ -506,14 +506,14 @@ export default function BedInspectClient() {
                         type="button"
                         disabled={busy}
                         onClick={() => setBedStatus('maintenance')}
-                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0B0F17] text-sm font-extrabold transition-colors disabled:opacity-50"
+                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-wn hover:bg-wn text-[#0B0F17] text-sm font-extrabold transition-colors disabled:opacity-50"
                       >
                         {busy ? <Loader2 size={15} className="animate-spin" /> : <Wrench size={15} />} 🔧 Báo hỏng / Bảo trì
                       </button>
                     </>
                   )
                 )}
-                {busy && <p className="text-[11px] text-slate-300 flex items-center gap-1.5"><Loader2 size={11} className="animate-spin" /> Đang xử lý…</p>}
+                {busy && <p className="text-[11px] text-mu flex items-center gap-1.5"><Loader2 size={11} className="animate-spin" /> Đang xử lý…</p>}
               </div>
             </>
           );
@@ -555,29 +555,29 @@ export default function BedInspectClient() {
       {/* ─── Quick Assign Modal ─── */}
       {showAssign && bed && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setShowAssign(false)}>
-          <div className="bg-[#131B2E] border border-slate-800/80 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800/80">
+          <div className="bg-surf border border-bdr rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-bdr">
               <div>
-                <h3 className="font-extrabold text-white flex items-center gap-2"><UserCheck size={16} className="text-cyan-400" /> Gán nhanh công nhân</h3>
-                <p className="text-xs text-slate-300 font-tabular mt-0.5">{bed.ktx} · {bed.day} · P{bed.phong_so} · G{bed.giuong}</p>
+                <h3 className="font-extrabold text-tx flex items-center gap-2"><UserCheck size={16} className="text-pri2" /> Gán nhanh công nhân</h3>
+                <p className="text-xs text-mu font-tabular mt-0.5">{bed.ktx} · {bed.day} · P{bed.phong_so} · G{bed.giuong}</p>
               </div>
-              <button onClick={() => setShowAssign(false)} className="p-2 rounded-lg hover:bg-slate-900/80 text-slate-400 hover:text-white"><X size={16} /></button>
+              <button onClick={() => setShowAssign(false)} className="p-2 rounded-lg hover:bg-surf text-mu hover:text-tx"><X size={16} /></button>
             </div>
             <div className="px-5 pt-4">
               <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ic" />
                 <input
                   autoFocus
                   value={assignSearch}
                   onChange={e => setAssignSearch(e.target.value)}
                   placeholder="Tên / Mã NV / Số CCCD…"
-                  className="w-full bg-slate-900/80 border border-slate-700 text-white placeholder-slate-500 rounded-xl pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
+                  className="w-full bg-surf border border-bdr text-tx placeholder-mu rounded-xl pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
                 />
               </div>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1.5">
               {candidates.length === 0 ? (
-                <p className="text-sm text-slate-400 italic text-center py-8">Không tìm thấy công nhân chưa có giường.</p>
+                <p className="text-sm text-mu italic text-center py-8">Không tìm thấy công nhân chưa có giường.</p>
               ) : (
                 candidates.slice(0, 80).map(w => (
                   <button
@@ -585,18 +585,18 @@ export default function BedInspectClient() {
                     type="button"
                     disabled={busy}
                     onClick={() => handleAssign(w)}
-                    className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl border border-slate-800/80 hover:border-cyan-400/60 hover:bg-slate-900/80 transition-colors disabled:opacity-60"
+                    className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl border border-bdr hover:border-pri2/60 hover:bg-surf transition-colors disabled:opacity-60"
                   >
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-extrabold shrink-0 ${(w?.gioiTinh || '').toLowerCase().includes('nữ') ? 'bg-pink-500/20 text-pink-300 border border-pink-500/40' : 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/40'}`}>
+                    <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-extrabold shrink-0 ${(w?.gioiTinh || '').toLowerCase().includes('nữ') ? 'bg-bdg text-pri2 border border-bdr2' : 'bg-bdg text-lnk border border-bdr2'}`}>
                       {String(w?.hoVaTen || '?').charAt(0).toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-extrabold text-white truncate">{w?.hoVaTen || '(Không tên)'}</p>
-                      <p className="text-[11px] text-slate-300 font-tabular truncate">
+                      <p className="text-sm font-extrabold text-tx truncate">{w?.hoVaTen || '(Không tên)'}</p>
+                      <p className="text-[11px] text-mu font-tabular truncate">
                         {w?.maNV || '—'} · CCCD {w?.cccd ? `${w.cccd.slice(0, 4)}****${w.cccd.slice(-3)}` : '—'} · {w?.donVi || '—'}
                       </p>
                     </div>
-                    <UserCheck size={15} className="text-cyan-400 shrink-0" />
+                    <UserCheck size={15} className="text-pri2 shrink-0" />
                   </button>
                 ))
               )}

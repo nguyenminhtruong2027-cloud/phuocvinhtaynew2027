@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { Worker, calcSoNgay, compareKtxNames } from '@/data/workers';
-import { X, Loader2, Save, ScanLine, CheckCircle2, Camera, AlertTriangle, Check, RefreshCw } from 'lucide-react';
+import { X, Loader2, Save, ScanLine, CheckCircle2, Camera, AlertTriangle, AlertCircle, Check, RefreshCw } from 'lucide-react';
 import { useKtxStructure, compareDayNames } from '@/lib/ktxStructure';
 
 interface Props {
@@ -220,13 +220,13 @@ function CCCDOCRScanner({
           {status === 'ready' && (
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground text-center">Đặt mặt trước CCCD vào khung, giữ thẳng và rõ nét</p>
-              <div className="flex items-start gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-lg">
-                <AlertTriangle size={13} className="text-amber-600 mt-0.5 flex-shrink-0" />
-                <p className="text-xs text-amber-700">Chế độ OCR dùng khi mã QR mặt sau bị hỏng. Dữ liệu bóc tách cần xác nhận trước khi lưu.</p>
+              <div className="flex items-start gap-2 p-2.5 tint-wn border border-wn rounded-lg">
+                <AlertTriangle size={13} className="text-wn mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-wn">Chế độ OCR dùng khi mã QR mặt sau bị hỏng. Dữ liệu bóc tách cần xác nhận trước khi lưu.</p>
               </div>
               <button
                 onClick={handleCapture}
-                className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2"
+                className="w-full py-2.5 bg-wn hover:opacity-90 text-[#0B0F17] rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2"
               >
                 <Camera size={15} />
                 Chụp ảnh CCCD
@@ -243,9 +243,9 @@ function CCCDOCRScanner({
           )}
           {status === 'confirming' && (
             <div className="space-y-3">
-              <div className="flex items-start gap-2 p-2.5 bg-blue-50 border border-blue-200 rounded-lg">
-                <AlertTriangle size={13} className="text-blue-600 mt-0.5 flex-shrink-0" />
-                <p className="text-xs text-blue-700 font-medium">Kiểm tra và chỉnh sửa dữ liệu bóc tách trước khi xác nhận. Bắt buộc nhấn &quot;Xác nhận đúng&quot; để lưu.</p>
+              <div className="flex items-start gap-2 p-2.5 bg-bdg border border-bdr2 rounded-lg">
+                <AlertCircle size={13} className="text-lnk mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-lnk">Mẹo: dùng webcam hoặc điện thoại quét QR mặt sau CCCD để tự điền.</p>
               </div>
               <div className="space-y-2">
                 <div>
@@ -314,7 +314,7 @@ function CCCDOCRScanner({
                 </button>
                 <button
                   onClick={handleConfirm}
-                  className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-1.5"
+                  className="flex-1 py-2 bg-ok2 hover:opacity-90 text-[#0B0F17] rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-1.5"
                 >
                   <Check size={13} />
                   Xác nhận đúng
@@ -583,7 +583,7 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
                   </button>
                 </div>
                 {scanSuccess && (
-                  <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700">
+                  <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-okbg border border-bdr2 rounded-lg text-xs text-ok">
                     <CheckCircle2 size={13} />
                     Đã tự động điền thông tin từ CCCD
                   </div>

@@ -155,7 +155,7 @@ export default function CheckoutPage() {
 
         {/* Header Card */}
         <div className="bg-card border border-border rounded-2xl p-6 shadow-sm space-y-2 text-center sm:text-left">
-          <div className="inline-flex items-center gap-2 px-3 py-1 bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 rounded-full text-xs font-bold">
+          <div className="inline-flex items-center gap-2 px-3 py-1 tint-dgr text-dgr border border-dgr rounded-full text-xs font-bold">
             <LogOut size={13} /> Khai báo dọn ra KTX
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">
@@ -167,21 +167,21 @@ export default function CheckoutPage() {
         </div>
 
         {submitted ? (
-          <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-2xl p-6 sm:p-8 text-center space-y-4 shadow-sm">
-            <div className="w-16 h-16 mx-auto rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+          <div className="bg-okbg border border-bdr22 rounded-2xl p-6 sm:p-8 text-center space-y-4 shadow-sm">
+            <div className="w-16 h-16 mx-auto rounded-full bg-okbg flex items-center justify-center text-ok">
               <CheckCircle2 size={36} />
             </div>
             <div className="space-y-1">
-              <h2 className="text-xl font-bold text-emerald-800 dark:text-emerald-300">
+              <h2 className="text-xl font-bold text-ok">
                 Gửi yêu cầu Check-out thành công!
               </h2>
-              <p className="text-xs text-emerald-700 dark:text-emerald-400">
+              <p className="text-xs text-ok">
                 Ban Quản lý KTX đã nhận được thông tin khai báo dọn ra của{' '}
                 <strong>{form.ho_va_ten}</strong> ({form.ma_nv_or_cccd}).
               </p>
             </div>
-            <div className="bg-white/90 dark:bg-card border border-emerald-200 dark:border-emerald-800/60 rounded-xl p-4 text-xs text-left space-y-2 text-foreground">
-              <p className="font-semibold text-emerald-800 dark:text-emerald-300 border-b border-border pb-1">
+            <div className="bg-surf/90 border border-bdr22/60 rounded-xl p-4 text-xs text-left space-y-2 text-foreground">
+              <p className="font-semibold text-ok border-b border-border pb-1">
                 Chi tiết xác nhận:
               </p>
               <p>• <strong>Khu vực phòng:</strong> {form.ktx} - {form.day} - Phòng {form.phong_so} {form.giuong ? `(Giường ${form.giuong})` : ''}</p>
@@ -215,7 +215,7 @@ export default function CheckoutPage() {
         ) : (
           <form onSubmit={handleSubmit} className="bg-card border border-border rounded-2xl p-6 shadow-sm space-y-4" suppressHydrationWarning>
             {error && (
-              <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-xl text-xs text-red-600 dark:text-red-400 flex items-start gap-2" suppressHydrationWarning>
+              <div className="p-3 bg-dgrbg border border-dgr rounded-xl text-xs text-dgr dark:text-red-400 flex items-start gap-2" suppressHydrationWarning>
                 <AlertCircle size={15} className="shrink-0 mt-0.5" />
                 <span>{error}</span>
               </div>
@@ -277,7 +277,7 @@ export default function CheckoutPage() {
             {/* Room Location */}
             <div className="space-y-3 pt-3 border-t border-border" suppressHydrationWarning>
               <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                <Home size={14} className="text-rose-500" />
+                <Home size={14} className="text-dgr" />
                 <span>2. Vị trí phòng ở cần trả</span>
               </h3>
 
@@ -419,7 +419,7 @@ export default function CheckoutPage() {
                     type="checkbox"
                     checked={form.ban_giao_chia_khoa}
                     onChange={e => setForm({ ...form, ban_giao_chia_khoa: e.target.checked })}
-                    className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4 cursor-pointer"
+                    className="rounded text-dgr focus:ring-rose-500 w-4 h-4 cursor-pointer"
                     suppressHydrationWarning
                   />
                   <span>Đã nộp lại chìa khóa phòng cho Quản lý / Bảo vệ trực KTX</span>
@@ -430,7 +430,7 @@ export default function CheckoutPage() {
                     type="checkbox"
                     checked={form.ban_giao_tai_san}
                     onChange={e => setForm({ ...form, ban_giao_tai_san: e.target.checked })}
-                    className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4 cursor-pointer"
+                    className="rounded text-dgr focus:ring-rose-500 w-4 h-4 cursor-pointer"
                     suppressHydrationWarning
                   />
                   <span>Đã thu dọn đồ đạc cá nhân, dọn sạch giường và không làm hư hỏng trang thiết bị</span>
@@ -455,7 +455,7 @@ export default function CheckoutPage() {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full flex items-center justify-center gap-2 py-3 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-xl text-sm font-semibold shadow-md transition-all cursor-pointer"
+              className="w-full flex items-center justify-center gap-2 py-3 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-tx rounded-xl text-sm font-semibold shadow-md transition-all cursor-pointer"
               suppressHydrationWarning
             >
               {submitting ? (

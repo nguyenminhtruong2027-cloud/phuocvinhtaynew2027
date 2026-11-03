@@ -51,20 +51,20 @@ export default function LoginClient() {
   return (
     <div className="min-h-screen flex bg-background" suppressHydrationWarning>
       {/* Left brand panel */}
-      <div className="hidden lg:flex flex-col justify-between w-[420px] xl:w-[480px] bg-primary p-10 flex-shrink-0" suppressHydrationWarning>
+      <div className="hidden lg:flex flex-col justify-between w-[420px] xl:w-[480px] bg-pri p-10 flex-shrink-0" suppressHydrationWarning>
         <div className="flex items-center gap-3" suppressHydrationWarning>
           <AppLogo size={40} />
           <div>
-            <p className="font-bold text-white text-base leading-tight">KÝ TÚC XÁ PHƯỚC VĨNH TÂY</p>
-            <p className="text-white/60 text-xs">HỆ Thống Quản Lý</p>
+            <p className="font-bold text-tx text-base leading-tight">KÝ TÚC XÁ PHƯỚC VĨNH TÂY</p>
+            <p className="text-tx/60 text-xs">HỆ Thống Quản Lý</p>
           </div>
         </div>
 
         <div suppressHydrationWarning>
-          <h1 className="text-3xl font-bold text-white leading-tight mb-4">
+          <h1 className="text-3xl font-bold text-tx leading-tight mb-4">
             Quản lý ký túc xá<br />công nhân xây dựng
           </h1>
-          <p className="text-white/70 text-sm leading-relaxed mb-8">
+          <p className="text-tx/70 text-sm leading-relaxed mb-8">
             Hệ thống quản lý nội bộ — theo dõi công nhân, sơ đồ phòng, tạm trú và nhật ký hoạt động theo thời gian thực.
           </p>
 
@@ -76,16 +76,16 @@ export default function LoginClient() {
               { label: 'Bảo mật', value: 'Auth Guard' },
             ].map(stat => (
               <div key={`stat-${stat.label}`} className="bg-white/10 rounded-lg p-3">
-                <p className="text-white font-bold text-sm">{stat.value}</p>
-                <p className="text-white/60 text-xs mt-0.5">{stat.label}</p>
+                <p className="text-tx font-bold text-sm">{stat.value}</p>
+                <p className="text-tx/60 text-xs mt-0.5">{stat.label}</p>
               </div>
             ))}
           </div>
         </div>
 
         <div className="flex items-center gap-2" suppressHydrationWarning>
-          <Building2 size={14} className="text-white/40" />
-          <p className="text-white/40 text-xs">KÝ TÚC XÁ PHƯỚC VĨNH TÂY · Hệ Thống Quản Lý Nội Bộ</p>
+          <Building2 size={14} className="text-tx/40" />
+          <p className="text-tx/40 text-xs">KÝ TÚC XÁ PHƯỚC VĨNH TÂY · Hệ Thống Quản Lý Nội Bộ</p>
         </div>
       </div>
 
@@ -114,14 +114,14 @@ export default function LoginClient() {
 
           <form onSubmit={handleSubmit} className="space-y-4" suppressHydrationWarning>
             {error && (
-              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-4 py-3" suppressHydrationWarning>
-                <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+              <div className="bg-dgrbg border border-dgr rounded-lg px-4 py-3" suppressHydrationWarning>
+                <p className="text-sm text-dgr">{error}</p>
               </div>
             )}
 
             <div suppressHydrationWarning>
               <label className="block text-sm font-semibold text-foreground mb-1.5">
-                Email <span className="text-red-500">*</span>
+                Email <span className="text-dgr">*</span>
               </label>
               <input
                 type="email"
@@ -137,7 +137,7 @@ export default function LoginClient() {
 
             <div suppressHydrationWarning>
               <label className="block text-sm font-semibold text-foreground mb-1.5">
-                Mật khẩu <span className="text-red-500">*</span>
+                Mật khẩu <span className="text-dgr">*</span>
               </label>
               <div className="relative" suppressHydrationWarning>
                 <input

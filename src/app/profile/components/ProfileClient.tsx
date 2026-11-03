@@ -65,7 +65,7 @@ export default function ProfileClient() {
 
       {/* Avatar + Info Card */}
       <div className="bg-card border border-border rounded-2xl p-6 mb-6 flex items-center gap-5">
-        <div className={`w-16 h-16 rounded-full flex items-center justify-center text-white text-2xl font-bold flex-shrink-0 ${currentUser?.role === 'admin' ? 'bg-red-500' : 'bg-blue-500'}`}>
+        <div className={`w-16 h-16 rounded-full flex items-center justify-center text-white text-2xl font-bold flex-shrink-0 ${currentUser?.role === 'admin' ? 'bg-pri' : 'bg-ok2'}`}>
           {currentUser?.name?.charAt(0)?.toUpperCase()}
         </div>
         <div className="flex-1 min-w-0">
@@ -73,11 +73,11 @@ export default function ProfileClient() {
           <p className="text-sm text-muted-foreground truncate">{currentUser?.email}</p>
           <div className="mt-1.5">
             {currentUser?.role === 'admin' ? (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-dgrbg text-dgr">
                 <ShieldCheck size={11} /> Quản trị viên
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-bdg text-lnk">
                 <Shield size={11} /> Quản lý
               </span>
             )}
@@ -130,8 +130,8 @@ export default function ProfileClient() {
           <h2 className="text-base font-semibold text-foreground">Đổi mật khẩu</h2>
         </div>
         <div className="flex flex-col gap-3">
-          {pwError && <p className="text-xs text-red-500 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded-lg">{pwError}</p>}
-          {pwSuccess && <p className="text-xs text-green-600 bg-green-50 dark:bg-green-900/20 px-3 py-2 rounded-lg flex items-center gap-1.5"><CheckCircle size={13} /> Đổi mật khẩu thành công!</p>}
+          {pwError && <p className="text-xs text-dgr bg-dgrbg px-3 py-2 rounded-lg">{pwError}</p>}
+          {pwSuccess && <p className="text-xs text-ok bg-okbg px-3 py-2 rounded-lg flex items-center gap-1.5"><CheckCircle size={13} /> Đổi mật khẩu thành công!</p>}
           <div>
             <label className="block text-xs font-semibold text-muted-foreground mb-1">Mật khẩu hiện tại</label>
             <input

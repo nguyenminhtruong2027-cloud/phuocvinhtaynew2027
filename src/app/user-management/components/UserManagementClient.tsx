@@ -37,8 +37,8 @@ function Toast({ message, type, onClose }: { message: string; type: 'success' | 
   return (
     <div className={`fixed top-4 right-4 z-[100] flex items-start gap-3 px-4 py-3 rounded-xl shadow-lg border max-w-sm ${
       type === 'success'
-        ? 'bg-green-50 border-green-200 text-green-800 dark:bg-green-900/30 dark:border-green-700 dark:text-green-300'
-        : 'bg-red-50 border-red-200 text-red-800 dark:bg-red-900/30 dark:border-red-700 dark:text-red-300'
+        ? 'bg-okbg border-bdr2 text-ok'
+        : 'bg-dgrbg border-dgr text-dgr'
     }`}>
       {type === 'success' ? <CheckCircle size={18} className="flex-shrink-0 mt-0.5" /> : <AlertCircle size={18} className="flex-shrink-0 mt-0.5" />}
       <p className="text-sm font-medium leading-snug">{message}</p>
@@ -158,7 +158,7 @@ export default function UserManagementClient() {
   if (!isAdmin) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 p-6 text-center">
-        <div className="w-14 h-14 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-500">
+        <div className="w-14 h-14 rounded-2xl bg-amber-500/15 border border-wn flex items-center justify-center text-wn">
           <Shield size={32} />
         </div>
         <div className="space-y-1 max-w-md">
@@ -403,11 +403,11 @@ export default function UserManagementClient() {
       case 'emerald':
         return {
           border: 'border-emerald-500/30 dark:border-emerald-500/40',
-          headerBg: 'bg-emerald-500/10 dark:bg-emerald-950/40',
+          headerBg: 'bg-okbg',
           headerText: 'text-emerald-700 dark:text-emerald-300',
           badgeText: 'text-emerald-800 dark:text-emerald-300',
-          badgeBg: 'bg-emerald-100 dark:bg-emerald-900/40 border-emerald-300 dark:border-emerald-700',
-          itemChecked: 'bg-emerald-500/20 border-emerald-500/50 text-emerald-700 dark:text-emerald-300 font-semibold',
+          badgeBg: 'bg-okbg border-bdr2',
+          itemChecked: 'bg-okbg border-bdr2 text-ok font-semibold',
         };
       case 'purple':
         return {
@@ -429,30 +429,30 @@ export default function UserManagementClient() {
         };
       case 'amber':
         return {
-          border: 'border-amber-500/30 dark:border-amber-500/40',
-          headerBg: 'bg-amber-500/10 dark:bg-amber-950/40',
-          headerText: 'text-amber-700 dark:text-amber-300',
-          badgeText: 'text-amber-800 dark:text-amber-300',
-          badgeBg: 'bg-amber-100 dark:bg-amber-900/40 border-amber-300 dark:border-amber-700',
-          itemChecked: 'bg-amber-500/20 border-amber-500/50 text-amber-700 dark:text-amber-300 font-semibold',
+          border: 'border-wn dark:border-amber-500/40',
+          headerBg: 'tint-wn',
+          headerText: 'text-wn',
+          badgeText: 'text-wn',
+          badgeBg: 'tint-wn border-wn',
+          itemChecked: 'bg-amber-500/20 border-amber-500/50 text-wn font-semibold',
         };
       case 'rose':
         return {
           border: 'border-rose-500/30 dark:border-rose-500/40',
-          headerBg: 'bg-rose-500/10 dark:bg-rose-950/40',
+          headerBg: 'bg-dgrbg',
           headerText: 'text-rose-700 dark:text-rose-300',
           badgeText: 'text-rose-800 dark:text-rose-300',
-          badgeBg: 'bg-rose-100 dark:bg-rose-900/40 border-rose-300 dark:border-rose-700',
-          itemChecked: 'bg-rose-500/20 border-rose-500/50 text-rose-700 dark:text-rose-300 font-semibold',
+          badgeBg: 'bg-dgrbg border-dgr',
+          itemChecked: 'bg-dgrbg border-dgr text-dgr font-semibold',
         };
       default: // blue
         return {
           border: 'border-blue-500/30 dark:border-blue-500/40',
-          headerBg: 'bg-blue-500/10 dark:bg-blue-950/40',
+          headerBg: 'bg-bdg',
           headerText: 'text-blue-700 dark:text-blue-300',
           badgeText: 'text-blue-800 dark:text-blue-300',
-          badgeBg: 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 dark:border-blue-700',
-          itemChecked: 'bg-blue-500/20 border-blue-500/50 text-blue-700 dark:text-blue-300 font-semibold',
+          badgeBg: 'bg-bdg border-bdr2',
+          itemChecked: 'bg-bdg border-bdr2 text-lnk font-semibold',
         };
     }
   };
@@ -460,7 +460,7 @@ export default function UserManagementClient() {
   // Helper to render assigned blocks grouped by any dynamic KTX
   const renderAssignedBlocks = (assignedBlocks: string[]) => {
     if (!assignedBlocks || assignedBlocks.length === 0) {
-      return <span className="text-xs text-amber-600 dark:text-amber-400">Chưa gán dãy</span>;
+      return <span className="text-xs text-wn">Chưa gán dãy</span>;
     }
 
     // Group assigned blocks by their prefix (e.g. "KTX 1", "KTX 2", "KTX 3", etc.)
@@ -514,7 +514,7 @@ export default function UserManagementClient() {
           <h1 className="text-2xl font-bold text-foreground tracking-tight">Quản lý Tài khoản</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Tạo tài khoản, gán vai trò và phân quyền phụ trách KTX + Dãy</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => {
               loadProfiles();
@@ -529,7 +529,7 @@ export default function UserManagementClient() {
           </button>
           <button
             onClick={openAdd}
-            className="btn-primary text-sm flex items-center gap-1.5 cursor-pointer"
+            className="btn-primary text-sm flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
           >
             <UserPlus size={15} />
             <span>Tạo tài khoản mới</span>
@@ -625,11 +625,11 @@ export default function UserManagementClient() {
                       </td>
                       <td className="px-4 py-3">
                         {profile.role === 'admin' ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-dgrbg text-dgr">
                             <ShieldCheck size={11} /> Admin
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-bdg text-lnk">
                             <Shield size={11} /> Staff
                           </span>
                         )}
@@ -657,7 +657,7 @@ export default function UserManagementClient() {
                             onClick={() => setDeleteTarget(profile)}
                             title="Xóa tài khoản"
                             disabled={profile.id === currentUser?.id}
-                            className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-muted-foreground hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                            className="p-1.5 rounded-lg hover:bg-dgrbg transition-colors text-muted-foreground hover:text-dgr disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                           >
                             <Trash2 size={14} />
                           </button>
@@ -691,7 +691,7 @@ export default function UserManagementClient() {
             {/* Modal Body (Scrollable) */}
             <div className="px-6 py-4 flex-1 overflow-y-auto space-y-4">
               {formError && (
-                <div className="flex items-start gap-2 text-xs text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400 px-3 py-2.5 rounded-lg border border-red-200 dark:border-red-800">
+                <div className="flex items-start gap-2 text-xs text-dgr bg-red-50 dark:bg-red-900/20 dark:text-red-400 px-3 py-2.5 rounded-lg border border-red-200 dark:border-red-800">
                   <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
                   <span className="whitespace-normal break-words">{formError}</span>
                 </div>
@@ -760,8 +760,8 @@ export default function UserManagementClient() {
 
                   {/* Container for All KTX Groups */}
                   {ktxGroups.length === 0 ? (
-                    <div className="p-4 rounded-xl border border-dashed border-amber-300 dark:border-amber-700/60 bg-amber-50/50 dark:bg-amber-950/20 text-center space-y-2">
-                      <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">
+                    <div className="p-4 rounded-xl border border-dashed tint-wn border-wn text-center space-y-2">
+                      <p className="text-xs text-wn font-medium">
                         Chưa có dữ liệu KTX/Dãy, hãy nhập phòng trước
                       </p>
                       <button
@@ -845,7 +845,7 @@ export default function UserManagementClient() {
                   )}
 
                   {(form.assigned_blocks ?? []).length === 0 && (
-                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 font-medium">
+                    <p className="text-xs text-wn mt-2 font-medium">
                       ⚠ Chưa gán dãy — Staff này sẽ không thể Thêm/Sửa/Xóa công nhân nào.
                     </p>
                   )}
@@ -907,7 +907,7 @@ export default function UserManagementClient() {
               <button
                 onClick={handleDelete}
                 disabled={submitting}
-                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-semibold text-sm transition-colors cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-dgr hover:opacity-90 text-tx font-semibold text-sm transition-colors cursor-pointer"
               >
                 {submitting ? 'Đang xóa...' : 'Xóa tài khoản'}
               </button>

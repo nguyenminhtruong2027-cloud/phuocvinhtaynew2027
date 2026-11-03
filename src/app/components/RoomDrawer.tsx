@@ -29,9 +29,9 @@ interface Props {
 
 function StatusDot({ worker }: { worker: Worker }) {
   const s = getProfileStatus(worker);
-  if (s === 'full') return <span className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" title="Đủ hồ sơ" />;
-  if (s === 'missing_cccd_sdt') return <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" title="Thiếu CCCD/SĐT" />;
-  return <span className="w-2 h-2 rounded-full bg-yellow-500 flex-shrink-0" title="Chưa phân phòng" />;
+  if (s === 'full') return <span className="w-2 h-2 rounded-full bg-ok2 flex-shrink-0" title="Đủ hồ sơ" />;
+  if (s === 'missing_cccd_sdt') return <span className="w-2 h-2 rounded-full bg-dgr flex-shrink-0" title="Thiếu CCCD/SĐT" />;
+  return <span className="w-2 h-2 rounded-full bg-wn flex-shrink-0" title="Chưa phân phòng" />;
 }
 
 export default function RoomDrawer({
@@ -225,8 +225,8 @@ export default function RoomDrawer({
     <>
       {/* Toast */}
       {genderToast && (
-        <div className="fixed top-5 right-5 z-[100] flex items-center gap-2 px-4 py-2.5 bg-gray-900 border border-emerald-500/60 text-white rounded-xl shadow-2xl animate-fade-in backdrop-blur-md text-xs font-bold">
-          <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+        <div className="fixed top-5 right-5 z-[100] flex items-center gap-2 px-4 py-2.5 bg-surf border border-bdr2 text-tx rounded-xl shadow-2xl animate-fade-in backdrop-blur-md text-xs font-bold">
+          <CheckCircle2 size={16} className="text-ok shrink-0" />
           <span>{genderToast}</span>
         </div>
       )}
@@ -235,53 +235,53 @@ export default function RoomDrawer({
       <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
       {/* Drawer / Bottom Sheet on Mobile */}
-      <div className="fixed inset-x-0 bottom-0 max-h-[85vh] sm:max-h-full sm:top-0 sm:right-0 sm:left-auto sm:inset-x-auto sm:h-full z-50 w-full sm:max-w-md bg-[#1F2937] border-t sm:border-t-0 sm:border-l border-gray-700/80 text-white shadow-2xl flex flex-col rounded-t-2xl sm:rounded-none overflow-hidden animate-slide-in-right">
+      <div className="fixed inset-x-0 bottom-0 max-h-[85vh] sm:max-h-full sm:top-0 sm:right-0 sm:left-auto sm:inset-x-auto sm:h-full z-50 w-full sm:max-w-md bg-surf border-t sm:border-t-0 sm:border-l border-bdr text-tx shadow-2xl flex flex-col rounded-t-2xl sm:rounded-none overflow-hidden animate-slide-in-right">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700/80 bg-gray-900/60">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-bdr bg-act/60">
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-blue-400" />
+              <h2 className="text-base font-bold text-tx flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-pri2" />
                 {building} — Phòng {room}
               </h2>
               {/* Gender badge */}
               <span
                 className={`px-2 py-0.5 rounded-full text-[11px] font-bold border inline-flex items-center gap-1 ${
                   genderInfo.gender === 'female'
-                    ? 'bg-pink-500/25 text-pink-300 border-pink-500/40'
+                    ? 'bg-bdg text-pri2 border-bdr2'
                     : genderInfo.gender === 'male'
-                    ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
-                    : 'bg-gray-800 text-gray-400 border-gray-700'
+                    ? 'bg-bdg text-lnk border-bdr2'
+                    : 'bg-act text-mu border-bdr'
                 }`}
               >
                 <span>{genderInfo.gender === 'female' ? '♀' : genderInfo.gender === 'male' ? '♂' : '•'}</span>
                 <span>{genderInfo.label}</span>
               </span>
             </div>
-            <p className="text-xs text-gray-400 mt-0.5 font-tabular">
+            <p className="text-xs text-mu mt-0.5 font-tabular">
               {workers.length} công nhân đang lưu trú ({genderInfo.maleCount} Nam · {genderInfo.femaleCount} Nữ)
             </p>
           </div>
-          <button onClick={onClose} className="p-2 rounded-xl text-gray-400 hover:text-white hover:bg-gray-800 transition-colors">
+          <button onClick={onClose} className="p-2 rounded-xl text-mu hover:text-tx hover:bg-act transition-colors">
             <X size={18} />
           </button>
         </div>
 
         {/* ── Room Gender Classification Admin Control ── */}
-        <div className="px-5 py-3.5 border-b border-gray-700/80 bg-gray-850/70">
+        <div className="px-5 py-3.5 border-b border-bdr bg-act/70">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              <VenusAndMars size={14} className="text-indigo-400" />
-              <span className="text-xs font-bold uppercase tracking-wider text-gray-300">
+              <VenusAndMars size={14} className="text-lnk" />
+              <span className="text-xs font-bold uppercase tracking-wider text-mu">
                 Phân Loại Công Năng Phòng
               </span>
             </div>
             {genderInfo.isCustom ? (
-              <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
+              <span className="text-[10px] font-semibold text-ok bg-okbg px-2 py-0.5 rounded border border-bdr2">
                 Admin đã gán
               </span>
             ) : (
-              <span className="text-[10px] font-medium text-gray-400 bg-gray-800 px-2 py-0.5 rounded">
+              <span className="text-[10px] font-medium text-mu bg-act px-2 py-0.5 rounded">
                 Tự động theo nhân sự
               </span>
             )}
@@ -296,8 +296,8 @@ export default function RoomDrawer({
                 disabled={savingGender}
                 className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${
                   selectedGender === 'male'
-                    ? 'bg-blue-600 text-white border-blue-400 shadow-md shadow-blue-600/30 ring-1 ring-blue-400'
-                    : 'bg-gray-800/80 text-gray-300 border-gray-700 hover:bg-gray-750 hover:text-white'
+                    ? 'bg-pri text-tx border-pri2 shadow-md shadow-sh ring-1 ring-pri2'
+                    : 'bg-act/80 text-mu border-bdr hover:bg-act hover:text-tx'
                 }`}
               >
                 <span className="text-sm">♂</span>
@@ -310,8 +310,8 @@ export default function RoomDrawer({
                 disabled={savingGender}
                 className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${
                   selectedGender === 'female'
-                    ? 'bg-pink-600 text-white border-pink-400 shadow-md shadow-pink-600/30 ring-1 ring-pink-400'
-                    : 'bg-gray-800/80 text-gray-300 border-gray-700 hover:bg-gray-750 hover:text-white'
+                    ? 'bg-pri text-tx border-bdr2 shadow-md shadow-pink-600/30 ring-1 ring-pink-400'
+                    : 'bg-act/80 text-mu border-bdr hover:bg-act hover:text-tx'
                 }`}
               >
                 <span className="text-sm">♀</span>
@@ -324,8 +324,8 @@ export default function RoomDrawer({
                 disabled={savingGender}
                 className={`py-2 px-2 rounded-xl text-xs font-medium border transition-all flex items-center justify-center gap-1 ${
                   selectedGender === 'auto'
-                    ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500/50 shadow-sm'
-                    : 'bg-gray-800/80 text-gray-400 border-gray-700 hover:bg-gray-750 hover:text-gray-300'
+                    ? 'bg-okbg text-ok border-bdr2 shadow-sm'
+                    : 'bg-act/80 text-mu border-bdr hover:bg-act hover:text-mu'
                 }`}
               >
                 <span>⚡</span>
@@ -333,7 +333,7 @@ export default function RoomDrawer({
               </button>
             </div>
 
-            <p className="text-[11px] text-gray-400 italic">
+            <p className="text-[11px] text-mu italic">
               {selectedGender === 'male' && 'Đã cố định là Phòng Nam trên sơ đồ và thống kê.'}
               {selectedGender === 'female' && 'Đã cố định là Phòng Nữ trên sơ đồ và thống kê.'}
               {selectedGender === 'auto' && 'Hệ thống tự động nhận diện theo giới tính công nhân trong phòng.'}
@@ -343,25 +343,25 @@ export default function RoomDrawer({
 
         {/* Room Note section */}
         {isAdmin && (
-          <div className="px-5 py-3 border-b border-gray-700/80 bg-amber-950/20">
+          <div className="px-5 py-3 border-b border-bdr tint-wn">
             <div className="flex items-center gap-2 mb-2">
-              <FileText size={13} className="text-amber-400 flex-shrink-0" />
-              <span className="text-xs font-semibold text-amber-300">Ghi chú phòng</span>
-              {loadingNote && <span className="text-[10px] text-amber-400/70 ml-auto">Đang tải...</span>}
+              <FileText size={13} className="text-wn flex-shrink-0" />
+              <span className="text-xs font-semibold text-wn">Ghi chú phòng</span>
+              {loadingNote && <span className="text-[10px] text-wn/70 ml-auto">Đang tải...</span>}
             </div>
             <textarea
               value={noteInput}
               onChange={e => setNoteInput(e.target.value)}
               placeholder="Điền thông tin: loại đơn vị, ghi chú đặc biệt..."
               rows={2}
-              className="w-full text-xs border border-gray-700 rounded-xl px-3 py-2 bg-gray-900/80 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-amber-400 disabled:opacity-50 resize-none"
+              className="w-full text-xs border border-bdr rounded-xl px-3 py-2 bg-act/80 text-tx placeholder-mu focus:outline-none focus:ring-1 focus:ring-amber-400 disabled:opacity-50 resize-none"
               disabled={savingNote || loadingNote}
             />
             <div className="flex items-center justify-between mt-2">
               <div>
-                {noteError && <p className="text-xs text-rose-400">{noteError}</p>}
+                {noteError && <p className="text-xs text-dgr">{noteError}</p>}
                 {noteSuccess && (
-                  <p className="text-xs text-emerald-400 font-semibold flex items-center gap-1">
+                  <p className="text-xs text-ok font-semibold flex items-center gap-1">
                     <span>✓</span> Đã lưu ghi chú thành công!
                   </p>
                 )}
@@ -369,7 +369,7 @@ export default function RoomDrawer({
               <button
                 onClick={handleSaveRoomNote}
                 disabled={savingNote || loadingNote}
-                className="flex-shrink-0 px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition-colors disabled:opacity-50 shadow-md shadow-amber-500/20"
+                className="flex-shrink-0 px-3.5 py-1.5 rounded-lg bg-wn hover:opacity-90 text-[#0B0F17] text-xs font-semibold transition-colors disabled:opacity-50 shadow-md"
               >
                 {savingNote ? 'Đang lưu...' : 'Lưu ghi chú'}
               </button>
@@ -378,21 +378,21 @@ export default function RoomDrawer({
         )}
 
         {/* Legend */}
-        <div className="flex items-center gap-4 px-5 py-2.5 border-b border-gray-700/60 bg-gray-900/40 text-xs text-gray-400">
-          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-400" />Đủ hồ sơ</span>
-          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-rose-400" />Thiếu CCCD/SĐT</span>
-          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400" />Chưa phân phòng</span>
+        <div className="flex items-center gap-4 px-5 py-2.5 border-b border-bdr/60 bg-act/40 text-xs text-mu">
+          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-ok2" />Đủ hồ sơ</span>
+          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-dgr" />Thiếu CCCD/SĐT</span>
+          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-wn" />Chưa phân phòng</span>
         </div>
 
         {/* Worker list */}
         <div className="flex-1 overflow-y-auto scrollbar-thin">
           {workers.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center p-8">
-              <div className="w-14 h-14 rounded-2xl bg-gray-800 border border-gray-700 flex items-center justify-center mb-3">
-                <Users size={28} className="text-gray-500" />
+              <div className="w-14 h-14 rounded-2xl bg-act border border-bdr flex items-center justify-center mb-3">
+                <Users size={28} className="text-ic" />
               </div>
-              <p className="text-sm font-bold text-white">Phòng trống</p>
-              <p className="text-xs text-gray-400 mt-1">Chưa có công nhân nào được xếp vào phòng này</p>
+              <p className="text-sm font-bold text-tx">Phòng trống</p>
+              <p className="text-xs text-mu mt-1">Chưa có công nhân nào được xếp vào phòng này</p>
             </div>
           ) : (
             <div className="divide-y divide-gray-700/50">
@@ -400,15 +400,15 @@ export default function RoomDrawer({
                 const soNgay = calcSoNgay(w.ngayVaoKTX, w.ngayRaKTX);
                 const isFemaleWorker = (w.gioiTinh || '').toLowerCase().includes('nữ') || (w.gioiTinh || '').toLowerCase() === 'nu';
                 return (
-                  <div key={w.id} className="px-5 py-3 hover:bg-gray-750/70 transition-colors">
+                  <div key={w.id} className="px-5 py-3 hover:bg-act/70 transition-colors">
                     <div className="flex items-start gap-3">
                       <div className="flex items-center gap-2 flex-shrink-0 mt-0.5">
-                        <span className="text-xs text-gray-500 w-5 text-right font-tabular">{idx + 1}</span>
+                        <span className="text-xs text-ic w-5 text-right font-tabular">{idx + 1}</span>
                         <StatusDot worker={w} />
                         <div className={`w-8 h-8 rounded-lg border flex items-center justify-center text-xs font-bold ${
                           isFemaleWorker
-                            ? 'bg-pink-500/20 border-pink-500/30 text-pink-300'
-                            : 'bg-blue-500/20 border-blue-500/30 text-blue-400'
+                            ? 'bg-bdg border-bdr2 text-pri2'
+                            : 'bg-bdg border-bdr2 text-lnk'
                         }`}>
                           {w.hoVaTen.split(' ').pop()?.charAt(0) ?? '?'}
                         </div>
@@ -416,46 +416,46 @@ export default function RoomDrawer({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <p className="text-sm font-bold text-white whitespace-normal break-words leading-tight">{w.hoVaTen}</p>
+                            <p className="text-sm font-bold text-tx whitespace-normal break-words leading-tight">{w.hoVaTen}</p>
                             <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${
                               isFemaleWorker
-                                ? 'bg-pink-500/20 text-pink-300 border-pink-500/30'
-                                : 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+                                ? 'bg-bdg text-pri2 border-bdr2'
+                                : 'bg-bdg text-lnk border-bdr2'
                             }`}>
                               {isFemaleWorker ? 'Nữ' : 'Nam'}
                             </span>
                           </div>
                           {w.tieuDoan && (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 whitespace-nowrap shrink-0">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-bdg text-lnk border border-bdr2 whitespace-nowrap shrink-0">
                               TD {w.tieuDoan}
                             </span>
                           )}
                         </div>
-                        <p className="text-xs text-gray-400 font-tabular whitespace-nowrap truncate mt-0.5">{w.maNV ? `#${w.maNV}` : 'Chưa có mã NV'}</p>
+                        <p className="text-xs text-mu font-tabular whitespace-nowrap truncate mt-0.5">{w.maNV ? `#${w.maNV}` : 'Chưa có mã NV'}</p>
                         <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
                           {w.soDienThoai && (
-                            <span className="flex items-center gap-1 text-gray-300 font-tabular whitespace-nowrap">
-                              <Phone size={11} className="text-gray-400 shrink-0" />{w.soDienThoai}
+                            <span className="flex items-center gap-1 text-mu font-tabular whitespace-nowrap">
+                              <Phone size={11} className="text-mu shrink-0" />{w.soDienThoai}
                             </span>
                           )}
                           {w.cccd && (
-                            <span className="flex items-center gap-1 text-gray-400 font-tabular whitespace-nowrap">
+                            <span className="flex items-center gap-1 text-mu font-tabular whitespace-nowrap">
                               <CreditCard size={11} className="shrink-0" />{w.cccd.slice(0,3)}****{w.cccd.slice(-3)}
                             </span>
                           )}
                           {w.hoKhauTinh && (
-                            <span className="flex items-center gap-1 text-gray-400 whitespace-nowrap">
+                            <span className="flex items-center gap-1 text-mu whitespace-nowrap">
                               <MapPin size={11} className="shrink-0" />{w.hoKhauTinh}
                             </span>
                           )}
                           {soNgay !== null && (
-                            <span className="flex items-center gap-1 text-emerald-400 font-semibold font-tabular whitespace-nowrap">
-                              <Calendar size={11} className="text-emerald-500 shrink-0" />{soNgay} ngày
+                            <span className="flex items-center gap-1 text-ok font-semibold font-tabular whitespace-nowrap">
+                              <Calendar size={11} className="text-ok shrink-0" />{soNgay} ngày
                             </span>
                           )}
                         </div>
                         {w.toTruong && (
-                          <p className="text-xs text-gray-400 mt-1">Tổ trưởng: {w.toTruong}</p>
+                          <p className="text-xs text-mu mt-1">Tổ trưởng: {w.toTruong}</p>
                         )}
                       </div>
                     </div>

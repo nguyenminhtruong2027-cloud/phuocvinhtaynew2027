@@ -6,19 +6,61 @@ import { useRouter } from 'next/navigation';
 import { Filter, Clock, User, Activity, Calendar, X } from 'lucide-react';
 
 const ACTION_COLORS: Record<AuditAction, string> = {
-  'Thêm': 'bg-green-100 text-green-700 border-green-200',
-  'Sửa': 'bg-blue-100 text-blue-700 border-blue-200',
-  'Xóa': 'bg-red-100 text-red-700 border-red-200',
-  'Chuyển phòng': 'bg-orange-100 text-orange-700 border-orange-200',
-  'Đổi trạng thái tạm trú': 'bg-purple-100 text-purple-700 border-purple-200',
-  'Import': 'bg-cyan-100 text-cyan-700 border-cyan-200',
-  CREATE: 'bg-green-100 text-green-700 border-green-200',
-  UPDATE: 'bg-blue-100 text-blue-700 border-blue-200',
-  DELETE: 'bg-red-100 text-red-700 border-red-200',
-  IMPORT: 'bg-cyan-100 text-cyan-700 border-cyan-200',
+  'Thêm': 'bg-okbg text-ok border-bdr2',
+  'Sửa': 'bg-bdg text-lnk border-bdr2',
+  'Xóa': 'bg-dgrbg text-dgr border-dgr',
+  'Chuyển phòng': 'tint-wn text-wn border-wn',
+  'Đổi trạng thái tạm trú': 'bg-bdg text-pri2 border-bdr2',
+  'Import': 'bg-bdg text-ok2 border-bdr2',
+  CREATE: 'bg-okbg text-ok border-bdr2',
+  UPDATE: 'bg-bdg text-lnk border-bdr2',
+  DELETE: 'bg-dgrbg text-dgr border-dgr',
+  IMPORT: 'bg-bdg text-ok2 border-bdr2',
 };
 
 const ALL_ACTIONS: AuditAction[] = ['Thêm', 'Sửa', 'Xóa', 'Chuyển phòng', 'Đổi trạng thái tạm trú', 'Import'];
+
+/**
+ * JsonDetail — component trình bày thuần: hiển thị detail dạng code block mono thu gọn,
+ * có nút mở rộng/thu gọn. State cục bộ riêng, không chạm logic tải dữ liệu.
+ */
+function JsonDetail({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  let pretty = text;
+  let isJson = false;
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object') {
+      pretty = JSON.stringify(parsed, null, 2);
+      isJson = true;
+    }
+  } catch {
+    /* không phải JSON — hiển thị nguyên văn */
+  }
+
+  if (!isJson) {
+    return <span className="text-xs text-mu break-words">{text}</span>;
+  }
+
+  return (
+    <div className="max-w-md">
+      <pre
+        className={`bg-act border border-bdr rounded-lg p-2 text-[11px] leading-relaxed font-mono text-tx overflow-hidden transition-all duration-200 ${
+          expanded ? 'max-h-none whitespace-pre-wrap break-words' : 'max-h-16 overflow-hidden whitespace-pre'
+        }`}
+      >
+        {pretty}
+      </pre>
+      <button
+        type="button"
+        onClick={() => setExpanded(e => !e)}
+        className="mt-1 text-[11px] font-semibold text-lnk hover:text-pri2 transition-colors"
+      >
+        {expanded ? '− Thu gọn' : '+ Mở rộng'}
+      </button>
+    </div>
+  );
+}
 
 /** Format ISO timestamp using Vietnam time (UTC+7). */
 function formatTimestamp(iso: string): string {
@@ -94,8 +136,8 @@ export default function AuditLogClient() {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
-          <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-            <Activity size={24} className="text-red-500" />
+          <div className="w-16 h-16 rounded-full bg-dgrbg flex items-center justify-center mx-auto mb-4">
+            <Activity size={24} className="text-dgr" />
           </div>
           <h2 className="text-lg font-bold text-foreground mb-2">Không có quyền truy cập</h2>
           <p className="text-sm text-muted-foreground">Chỉ Admin mới có thể xem Nhật ký Hệ thống</p>
@@ -122,9 +164,9 @@ export default function AuditLogClient() {
           <h1 className="text-xl sm:text-2xl font-bold text-foreground">Nhật Ký Hệ Thống</h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">{filtered.length} bản ghi · Tất cả tài khoản Admin</p>
         </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-50 border border-red-200 w-fit">
-          <span className="w-2 h-2 rounded-full bg-red-500" />
-          <span className="text-xs font-semibold text-red-700">Admin Only</span>
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-dgrbg border border-dgr w-fit">
+          <span className="w-2 h-2 rounded-full bg-dgr" />
+          <span className="text-xs font-semibold text-dgr">Admin Only</span>
         </div>
       </div>
 
@@ -236,11 +278,11 @@ export default function AuditLogClient() {
                     <span className="text-xs font-semibold text-foreground">{log.account}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold border ${ACTION_COLORS[log.action] ?? 'bg-gray-100 text-gray-700 border-gray-200'}`}>
+                    <span className={`badge ${ACTION_COLORS[log.action] ?? 'bg-bdg text-lnk border-bdr2'}`}>
                       {log.action}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground max-w-md">{log.detail}</td>
+                  <td className="px-4 py-3 text-xs text-mu max-w-md"><JsonDetail text={log.detail} /></td>
                 </tr>
               ))}
             </tbody>

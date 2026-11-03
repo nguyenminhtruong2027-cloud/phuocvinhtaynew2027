@@ -18,7 +18,7 @@ export default function ErrorPage({
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-background p-4 text-center" suppressHydrationWarning>
       <div className="max-w-md w-full bg-card border border-border rounded-2xl p-6 shadow-sm space-y-4" suppressHydrationWarning>
-        <div className="w-12 h-12 bg-red-100 dark:bg-red-950/40 text-red-600 rounded-full flex items-center justify-center mx-auto">
+        <div className="w-12 h-12 bg-dgrbg text-dgr rounded-full flex items-center justify-center mx-auto">
           <AlertCircle size={28} />
         </div>
         <h2 className="text-xl font-bold text-foreground">Đã xảy ra lỗi</h2>
@@ -29,7 +29,7 @@ export default function ErrorPage({
           <button
             type="button"
             onClick={() => reset()}
-            className="flex-1 py-2.5 bg-primary text-primary-foreground rounded-xl text-xs font-semibold hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5 cursor-pointer"
+            className="flex-1 py-2.5 bg-pri text-primary-foreground rounded-xl text-xs font-semibold hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5 cursor-pointer"
             suppressHydrationWarning
           >
             <RefreshCw size={14} /> Thử lại

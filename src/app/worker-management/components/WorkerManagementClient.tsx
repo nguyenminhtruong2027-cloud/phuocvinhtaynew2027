@@ -1306,58 +1306,58 @@ export function WorkerManagementClient() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#111827] text-gray-400 p-12 flex flex-col items-center justify-center gap-3">
-        <div className="w-9 h-9 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-page text-mu p-12 flex flex-col items-center justify-center gap-3">
+        <div className="w-9 h-9 border-2 border-pri2 border-t-transparent rounded-full animate-spin" />
         <p className="text-sm font-medium animate-pulse">Đang tải dữ liệu từ Supabase...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#111827] text-[#E5E7EB]">
+    <div className="min-h-screen bg-page text-tx">
       <div className="px-3 sm:px-6 lg:px-8 xl:px-10 py-5 sm:py-7 max-w-screen-2xl mx-auto space-y-5">
         {/* ── Header with Global Subtitle ── */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-gray-800">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-bdr">
           <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 p-0.5 shadow-lg shadow-blue-500/20 flex-shrink-0">
-              <div className="w-full h-full bg-gray-900 rounded-[14px] flex items-center justify-center">
-                <Users size={22} className="text-blue-400" />
+            <div className="w-12 h-12 rounded-2xl bg-bdg border border-bdr2 p-0.5 shadow-lg flex-shrink-0">
+              <div className="w-full h-full bg-page rounded-[14px] flex items-center justify-center">
+                <Users size={22} className="text-pri2" />
               </div>
             </div>
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
-                <h1 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
+                <h1 className="text-xl sm:text-2xl font-extrabold text-tx tracking-tight">
                   KÝ TÚC XÁ PHƯỚC VĨNH TÂY
                 </h1>
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/30">
-                  <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+                <span className="badge">
+                  <span className="w-2 h-2 rounded-full bg-pri2 animate-pulse" />
                   Quản Lý Công Nhân
                 </span>
-                <span className="text-xs text-blue-400 font-bold px-3 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/30 font-tabular">
+                <span className="text-xs text-lnk font-bold px-3 py-0.5 rounded-full bg-bdg border border-bdr2 font-tabular">
                   {workers.length.toLocaleString('vi-VN')}
                 </span>
               </div>
-              <p className="text-xs sm:text-sm text-gray-400 mt-0.5">
+              <p className="text-xs sm:text-sm text-mu mt-0.5">
                 Trung tâm dữ liệu và quản trị vận hành ký túc xá
               </p>
             </div>
           </div>
 
-          {/* ── Clear Action Button Color-Coding (Red delete, Blue add/edit, Green export) ── */}
+          {/* ── Action Buttons (dgr = delete only, pri = add, outline = rest) ── */}
           <div className="flex items-center gap-2 flex-wrap">
             {/* Đỏ xóa: Xóa bộ lọc / Xóa tất cả */}
             {canDeleteAll && (
               <>
                 <button
                   onClick={() => setShowBulkDeleteFilter(true)}
-                  className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs sm:text-sm font-semibold transition-colors duration-100 shadow-md shadow-rose-600/25 active:opacity-85"
+                  className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-dgr hover:opacity-90 text-white text-xs sm:text-sm font-semibold transition-opacity duration-100 active:opacity-85"
                 >
                   <Filter size={15} />
                   <span>Xóa theo bộ lọc</span>
                 </button>
                 <button
                   onClick={() => setShowDeleteAll(true)}
-                  className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-700 hover:bg-rose-600 text-white text-xs sm:text-sm font-semibold transition-colors duration-100 shadow-md shadow-rose-700/25 active:opacity-85"
+                  className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-dgr hover:opacity-90 text-white text-xs sm:text-sm font-semibold transition-opacity duration-100 active:opacity-85"
                 >
                   <Trash2 size={15} />
                   <span>Xóa tất cả</span>
@@ -1369,29 +1369,29 @@ export function WorkerManagementClient() {
             {isAdmin && (
               <button
                 onClick={() => setShowBulkAssignKtx(true)}
-                className="relative flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs sm:text-sm font-semibold transition-colors duration-100 shadow-md shadow-amber-600/25 active:opacity-85"
+                className="relative flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl border border-bdr3 bg-transparent text-tx text-xs sm:text-sm font-semibold hover:bg-act transition-colors duration-100"
               >
                 <Building2 size={15} />
                 <span>Gán KTX</span>
                 {noKtxCount > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-rose-500 text-white text-[10px] font-bold px-1 shadow-sm">
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-dgr text-white text-[10px] font-bold px-1 shadow-sm">
                     {noKtxCount}
                   </span>
                 )}
               </button>
             )}
 
-            {/* Xanh lá xuất file */}
+            {/* Outline exports */}
             <button
               onClick={handleExport}
-              className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-semibold transition-colors duration-100 shadow-md shadow-emerald-600/25 active:opacity-85"
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl border border-bdr3 bg-transparent text-tx text-xs sm:text-sm font-semibold hover:bg-act transition-colors duration-100"
             >
               <Download size={15} />
               <span>Xuất Excel</span>
             </button>
             <button
               onClick={() => setShowTamTruExport(true)}
-              className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs sm:text-sm font-semibold transition-colors duration-100 shadow-md shadow-teal-600/25 active:opacity-85"
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl border border-bdr3 bg-transparent text-tx text-xs sm:text-sm font-semibold hover:bg-act transition-colors duration-100"
             >
               <FileCheck size={15} />
               <span>Xuất Tạm Trú</span>
@@ -1400,17 +1400,17 @@ export function WorkerManagementClient() {
             {/* Nhập từ Excel */}
             <button
               onClick={() => setShowImport(true)}
-              className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs sm:text-sm font-semibold transition-colors duration-100 shadow-md shadow-cyan-600/25 active:opacity-85"
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl border border-bdr3 bg-transparent text-tx text-xs sm:text-sm font-semibold hover:bg-act transition-colors duration-100"
             >
               <Upload size={15} />
               <span>Nhập từ Excel</span>
             </button>
 
-            {/* Xanh dương thêm công nhân */}
+            {/* Nút chính: Thêm công nhân */}
             {(isAdmin || (currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && (
               <button
                 onClick={() => setShowAddModal(true)}
-                className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-semibold transition-colors duration-100 shadow-md shadow-blue-500/25 active:opacity-85"
+                className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-pri hover:opacity-90 text-white text-xs sm:text-sm font-semibold transition-opacity duration-100 active:opacity-85"
               >
                 <Plus size={16} />
                 <span>Thêm Công Nhân</span>

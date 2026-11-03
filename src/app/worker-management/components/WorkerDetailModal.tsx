@@ -62,7 +62,7 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
               </button>
             )}
             {onDelete && (
-              <button onClick={() => onDelete(w)} className="p-2 rounded-lg hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors" title="Xóa">
+              <button onClick={() => onDelete(w)} className="p-2 rounded-lg hover:bg-dgrbg text-mu hover:text-dgr transition-colors" title="Xóa">
                 <Trash2 size={15} />
               </button>
             )}

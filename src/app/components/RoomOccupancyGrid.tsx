@@ -17,10 +17,10 @@ function getRoomClass(pct: number): string {
 }
 
 function getRoomBarColor(pct: number): string {
-  if (pct >= 0.9) return 'bg-red-400';
-  if (pct >= 0.7) return 'bg-amber-400';
-  if (pct >= 0.4) return 'bg-green-400';
-  return 'bg-blue-400';
+  if (pct >= 0.9) return 'bg-dgr';
+  if (pct >= 0.7) return 'bg-wn';
+  if (pct >= 0.4) return 'bg-ok2';
+  return 'bg-pri2';
 }
 
 /** Group key: KTX + Dãy combination to avoid overlap between KTX 1 and KTX 2 */
@@ -290,7 +290,7 @@ export default function RoomOccupancyGrid() {
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold text-foreground">{group.building}</span>
                       {group.ktx && (
-                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${group.ktx === 'KTX 1' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${group.ktx === 'KTX 1' ? 'bg-bdg text-lnk' : 'tint-wn text-wn'}`}>
                           {group.ktx}
                         </span>
                       )}
@@ -338,8 +338,8 @@ export default function RoomOccupancyGrid() {
                         </div>
                         {unitLabel && (
                           <div className="mt-1.5">
-                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-normal break-words max-w-full ${isAdminAssigned ? 'bg-indigo-100 text-indigo-700' : 'bg-teal-100 text-teal-700'}`}>
-                              {isAdminAssigned && <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0" />}
+                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-normal break-words max-w-full ${isAdminAssigned ? 'bg-bdg text-lnk' : 'bg-act text-mu'}`}>
+                              {isAdminAssigned && <span className="w-1.5 h-1.5 rounded-full bg-bdg flex-shrink-0" />}
                               {unitLabel}
                             </span>
                           </div>
@@ -350,7 +350,7 @@ export default function RoomOccupancyGrid() {
                           );
                           return noteData?.room_note ? (
                             <div className="mt-1.5">
-                              <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 leading-tight line-clamp-2 break-words">
+                              <p className="text-[10px] tint-wn text-wn border border-wn rounded px-1.5 py-0.5 leading-tight line-clamp-2 break-words">
                                 {noteData.room_note}
                               </p>
                             </div>
@@ -368,10 +368,10 @@ export default function RoomOccupancyGrid() {
         {/* Legend */}
         <div className="mt-4 flex flex-wrap gap-4 pt-3 border-t border-border">
           {[
-            { label: '≥ 90% (Đầy)', cls: 'bg-red-300' },
-            { label: '70–89% (Cao)', cls: 'bg-amber-300' },
-            { label: '40–69% (Trung bình)', cls: 'bg-green-300' },
-            { label: '< 40% (Thấp)', cls: 'bg-blue-300' },
+            { label: '≥ 90% (Đầy)', cls: 'bg-dgr' },
+            { label: '70–89% (Cao)', cls: 'bg-wn' },
+            { label: '40–69% (Trung bình)', cls: 'bg-ok2' },
+            { label: '< 40% (Thấp)', cls: 'bg-pri2' },
           ].map((leg) => (
             <div key={leg.label} className="flex items-center gap-1.5">
               <span className={`w-3 h-3 rounded-sm ${leg.cls}`} />
@@ -379,11 +379,11 @@ export default function RoomOccupancyGrid() {
             </div>
           ))}
           <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-sm bg-indigo-200" />
+            <span className="w-3 h-3 rounded-sm bg-bdg" />
             <span className="text-xs text-muted-foreground">Đơn vị (Admin gán)</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-sm bg-teal-200" />
+            <span className="w-3 h-3 rounded-sm bg-okbg border border-bdr2" />
             <span className="text-xs text-muted-foreground">Đơn vị (Tự động)</span>
           </div>
         </div>
