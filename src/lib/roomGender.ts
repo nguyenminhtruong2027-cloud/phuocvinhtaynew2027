@@ -194,7 +194,7 @@ export async function syncRoomGenderToSupabase(
 
     return true;
   } catch (err) {
-    console.error('syncRoomGenderToSupabase failed:', err);
+    console.warn('syncRoomGenderToSupabase notice:', err);
     return false;
   }
 }
@@ -226,7 +226,7 @@ export async function fetchRoomLabelsFromSupabase(): Promise<Record<string, 'mal
 
     return map;
   } catch (err) {
-    console.error('fetchRoomLabelsFromSupabase error:', err);
+    console.warn('fetchRoomLabelsFromSupabase notice:', err);
     return {};
   }
 }

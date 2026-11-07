@@ -115,9 +115,9 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
         setTotalWorkerCount(count);
       }
     } catch (err) {
-      console.error('fetchCount error:', err);
+      console.warn('fetchCount warning:', err);
     }
-  }, []);
+  }, [supabase]);
 
   const fetchWorkers = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -152,7 +152,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       setWorkers(allRows);
       setTotalWorkerCount(allRows.length);
     } catch (err: any) {
-      console.error('Load workers failed:', err);
+      console.warn('Load workers warning:', err?.message || err);
       if (!isRefresh) {
         setWorkers([]);
         setTotalWorkerCount(0);
@@ -161,7 +161,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       if (isRefresh) setRefreshing(false);
       else setLoading(false);
     }
-  }, []);
+  }, [supabase]);
 
   useEffect(() => {
     fetchWorkers(false);
@@ -214,7 +214,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       supabase.removeChannel(workersChannel);
       supabase.removeChannel(profilesChannel);
     };
-  }, [fetchWorkers]);
+  }, [fetchWorkers, supabase]);
 
   const refreshWorkers = useCallback(async () => {
     await fetchWorkers(true);
@@ -229,7 +229,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       .insert(dbRow);
     if (error) throw new Error(error.message);
     await fetchWorkers(true);
-  }, [fetchWorkers]);
+  }, [fetchWorkers, supabase]);
 
   const updateWorker = useCallback(async (worker: Worker) => {
     const dbRow = workerToDbRow(worker);
@@ -239,7 +239,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       .eq('id', worker.id);
     if (error) throw new Error(error.message);
     await fetchWorkers(true);
-  }, [fetchWorkers]);
+  }, [fetchWorkers, supabase]);
 
   const deleteWorker = useCallback(async (id: string) => {
     const workerToDelete = workers.find(w => w.id === id);
@@ -261,7 +261,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       .eq('id', id);
     if (error) throw new Error(error.message);
     await fetchWorkers(true);
-  }, [workers, fetchWorkers]);
+  }, [workers, fetchWorkers, supabase]);
 
   const deleteWorkers = useCallback(async (ids: string[]) => {
     if (ids.length === 0) return;
@@ -286,7 +286,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       .in('id', ids);
     if (error) throw new Error(error.message);
     await fetchWorkers(true);
-  }, [workers, fetchWorkers]);
+  }, [workers, fetchWorkers, supabase]);
 
   const deleteAllWorkers = useCallback(async () => {
     const now = new Date().toISOString();
@@ -332,7 +332,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
 
     setWorkers([]);
     setTotalWorkerCount(0);
-  }, [workers]);
+  }, [workers, supabase]);
 
   const importWorkers = useCallback(async (rows: Worker[]) => {
     if (rows.length === 0) return;
@@ -356,7 +356,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       if (error) throw new Error(error.message);
     }
     await fetchWorkers(true);
-  }, [workers, fetchWorkers]);
+  }, [workers, fetchWorkers, supabase]);
 
   const updateTamTruStatus = useCallback(async (id: string, status: 'registered' | 'unregistered') => {
     const { error } = await supabase
@@ -365,7 +365,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       .eq('id', id);
     if (error) throw new Error(error.message);
     setWorkers(prev => prev.map(w => w.id === id ? { ...w, tamTruStatus: status } : w));
-  }, []);
+  }, [supabase]);
 
   const bulkUpdateKtx = useCallback(async (ids: string[], ktxValue: string) => {
     if (ids.length === 0) return;
@@ -379,7 +379,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       if (error) throw new Error(error.message);
     }
     setWorkers(prev => prev.map(w => ids.includes(w.id) ? { ...w, ktx: ktxValue } : w));
-  }, []);
+  }, [supabase]);
 
   return (
     <WorkerContext.Provider value={{

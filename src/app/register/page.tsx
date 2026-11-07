@@ -1,8 +1,8 @@
 'use client';
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useKtxStructure } from '@/lib/ktxStructure';
-import { fetchWorkerHierarchy } from '@/lib/workerHierarchy';
+import { fetchWorkerHierarchy, naturalCompare } from '@/lib/workerHierarchy';
 import { CheckCircle2, AlertCircle, Loader2, User, X, QrCode, Home, ScanLine, CheckCircle, Camera, AlertTriangle, Check, RefreshCw } from 'lucide-react';
 
 interface RegistrationForm {
@@ -456,7 +456,7 @@ const labelCls = 'text-xs text-muted-foreground mb-1 block';
 const sectionTitleCls = 'text-sm font-semibold text-foreground flex items-center gap-2 pt-1';
 
 export default function RegisterPage() {
-  const { ktxNames } = useKtxStructure();
+  const { ktxGroups, ktxNames } = useKtxStructure();
   const [isMounted, setIsMounted] = useState(false);
   const [form, setForm] = useState<RegistrationForm>(INITIAL_FORM);
   const [unitOptions, setUnitOptions] = useState<string[]>([
@@ -464,6 +464,26 @@ export default function RegisterPage() {
   ]);
   const [isCustomUnit, setIsCustomUnit] = useState(false);
   const [customUnit, setCustomUnit] = useState('');
+
+  // Cascading & Fallback states for KTX, Dãy, Phòng
+  const [isCustomKtx, setIsCustomKtx] = useState(false);
+  const [customKtx, setCustomKtx] = useState('');
+  const [isCustomDay, setIsCustomDay] = useState(false);
+  const [customDay, setCustomDay] = useState('');
+  const [isCustomPhong, setIsCustomPhong] = useState(false);
+  const [customPhong, setCustomPhong] = useState('');
+  const [hierarchy, setHierarchy] = useState<{
+    units: string[];
+    ktxList: string[];
+    daysByKtx: Record<string, string[]>;
+    roomsByKtxDay: Record<string, string[]>;
+  }>({
+    units: ['XD', 'ME', 'Vin Alpha', 'Trắc đạc', 'DVVS', 'QC', 'Ép cọc', 'QLVTTB', 'Lái xe', 'Tuyển dụng'],
+    ktxList: [],
+    daysByKtx: {},
+    roomsByKtxDay: {},
+  });
+
   const [showScanner, setShowScanner] = useState(false);
   const [scanSuccess, setScanSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -473,17 +493,127 @@ export default function RegisterPage() {
 
   useEffect(() => {
     setIsMounted(true);
-    fetchWorkerHierarchy().then(data => {
-      if (data.units && data.units.length > 0) {
-        setUnitOptions(data.units);
+    let active = true;
+    fetchWorkerHierarchy(true).then(data => {
+      if (!active) return;
+      if (data) {
+        setHierarchy({
+          units: data.units?.length ? data.units : ['XD', 'ME', 'Vin Alpha', 'Trắc đạc', 'DVVS', 'QC', 'Ép cọc', 'QLVTTB', 'Lái xe', 'Tuyển dụng'],
+          ktxList: data.ktxList || [],
+          daysByKtx: data.daysByKtx || {},
+          roomsByKtxDay: data.roomsByKtxDay || {},
+        });
+        if (data.units?.length) {
+          setUnitOptions(data.units);
+        }
       }
     }).catch(err => {
-      console.warn('Failed to fetch worker units:', err);
+      console.warn('Failed to fetch worker hierarchy:', err);
     });
+    return () => { active = false; };
   }, []);
+
+  // Cascading lists - strictly based on real worker residency hierarchy
+  const availableKtxList = useMemo(() => {
+    const set = new Set<string>();
+    (hierarchy.ktxList || []).forEach(k => { if (k?.trim()) set.add(k.trim()); });
+    (ktxNames || []).forEach(k => { if (k?.trim()) set.add(k.trim()); });
+    return Array.from(set).sort(naturalCompare);
+  }, [hierarchy.ktxList, ktxNames]);
+
+  const availableDayList = useMemo(() => {
+    const currentKtx = (form.ktx || '').trim();
+    if (!currentKtx) return [];
+
+    const set = new Set<string>();
+    const daysFromHierarchy = hierarchy.daysByKtx[currentKtx];
+    if (daysFromHierarchy && daysFromHierarchy.length > 0) {
+      daysFromHierarchy.forEach(d => { if (d?.trim()) set.add(d.trim()); });
+    } else {
+      const group = (ktxGroups || []).find(g => g.ktx.trim().toLowerCase() === currentKtx.toLowerCase());
+      if (group?.days) {
+        group.days.forEach(d => { if (d?.trim()) set.add(d.trim()); });
+      }
+    }
+
+    return Array.from(set).sort(naturalCompare);
+  }, [form.ktx, hierarchy.daysByKtx, ktxGroups]);
+
+  const availableRoomList = useMemo(() => {
+    const currentKtx = (form.ktx || '').trim();
+    const currentDay = (form.day || '').trim();
+    if (!currentKtx || !currentDay) return [];
+
+    const kdKey = `${currentKtx}__${currentDay}`;
+    const rooms = hierarchy.roomsByKtxDay[kdKey] || [];
+    return Array.from(new Set(rooms.filter(Boolean))).sort(naturalCompare);
+  }, [form.ktx, form.day, hierarchy.roomsByKtxDay]);
 
   const handleField = (k: keyof RegistrationForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setForm(f => ({ ...f, [k]: e.target.value }));
+  };
+
+  // Handlers for KTX, Day, Room with Cascading & Fallback
+  const handleKtxSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    if (val === '__other__') {
+      setIsCustomKtx(true);
+      setForm(f => ({ ...f, ktx: customKtx, day: '', phong_so: '' }));
+      setIsCustomDay(false);
+      setCustomDay('');
+      setIsCustomPhong(false);
+      setCustomPhong('');
+    } else {
+      setIsCustomKtx(false);
+      setCustomKtx('');
+      setForm(f => ({ ...f, ktx: val, day: '', phong_so: '' }));
+      setIsCustomDay(false);
+      setCustomDay('');
+      setIsCustomPhong(false);
+      setCustomPhong('');
+    }
+  };
+
+  const handleCustomKtxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setCustomKtx(val);
+    setForm(f => ({ ...f, ktx: val }));
+  };
+
+  const handleDaySelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    if (val === '__other__') {
+      setIsCustomDay(true);
+      setForm(f => ({ ...f, day: customDay }));
+    } else {
+      setIsCustomDay(false);
+      setForm(f => ({ ...f, day: val, phong_so: '' }));
+      setIsCustomPhong(false);
+      setCustomPhong('');
+    }
+  };
+
+  const handleCustomDayChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setCustomDay(val);
+    setForm(f => ({ ...f, day: val }));
+  };
+
+  const handlePhongSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    if (val === '__other__') {
+      setIsCustomPhong(true);
+      setForm(f => ({ ...f, phong_so: customPhong }));
+    } else {
+      setIsCustomPhong(false);
+      setForm(f => ({ ...f, phong_so: val }));
+    }
+  };
+
+  const handleCustomPhongChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setCustomPhong(val);
+    setForm(f => ({ ...f, phong_so: val }));
   };
 
   const handleUnitSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -621,7 +751,17 @@ export default function RegisterPage() {
           </div>
           <button
             type="button"
-            onClick={() => { setSubmitted(false); setForm(INITIAL_FORM); setScanSuccess(false); }}
+            onClick={() => {
+              setSubmitted(false);
+              setForm(INITIAL_FORM);
+              setScanSuccess(false);
+              setIsCustomKtx(false);
+              setCustomKtx('');
+              setIsCustomDay(false);
+              setCustomDay('');
+              setIsCustomPhong(false);
+              setCustomPhong('');
+            }}
             className="w-full py-2.5 bg-primary text-primary-foreground rounded-xl font-medium hover:opacity-90 transition-opacity text-sm cursor-pointer"
             suppressHydrationWarning
           >
@@ -777,20 +917,29 @@ export default function RegisterPage() {
               <div className="grid grid-cols-2 gap-3" suppressHydrationWarning>
                 <div>
                   <label className={labelCls}>Khu KTX <span className="text-dgr">*</span></label>
-                  <input
-                    type="text"
-                    value={form.ktx}
-                    onChange={handleField('ktx')}
-                    placeholder="VD: KTX 1, KTX 2..."
-                    list="ktx-list"
+                  <select
+                    value={isCustomKtx ? '__other__' : form.ktx}
+                    onChange={handleKtxSelect}
                     className={inputCls}
                     suppressHydrationWarning
-                  />
-                  <datalist id="ktx-list">
-                    {ktxNames.map(ktx => (
-                      <option key={ktx} value={ktx} />
+                  >
+                    <option value="">-- Chọn Khu KTX --</option>
+                    {availableKtxList.map(ktx => (
+                      <option key={ktx} value={ktx}>{ktx}</option>
                     ))}
-                  </datalist>
+                    <option value="__other__">➕ Khác (Nhập thủ công)</option>
+                  </select>
+                  {isCustomKtx && (
+                    <input
+                      type="text"
+                      value={customKtx}
+                      onChange={handleCustomKtxChange}
+                      placeholder="Nhập tên Khu KTX mới..."
+                      className={`${inputCls} mt-2 animate-in fade-in`}
+                      autoFocus
+                      suppressHydrationWarning
+                    />
+                  )}
                 </div>
                 <div>
                   <label className={labelCls}>Tiểu đoàn / Trung đoàn</label>
@@ -808,25 +957,67 @@ export default function RegisterPage() {
               <div className="grid grid-cols-3 gap-3" suppressHydrationWarning>
                 <div>
                   <label className={labelCls}>Dãy nhà <span className="text-dgr">*</span></label>
-                  <input
-                    type="text"
-                    value={form.day}
-                    onChange={handleField('day')}
-                    placeholder="Dãy 3"
-                    className={inputCls}
+                  <select
+                    value={isCustomDay ? '__other__' : form.day}
+                    onChange={handleDaySelect}
+                    disabled={!form.ktx && !isCustomKtx}
+                    className={`${inputCls} ${(!form.ktx && !isCustomKtx) ? 'opacity-60 cursor-not-allowed bg-muted/40' : ''}`}
                     suppressHydrationWarning
-                  />
+                  >
+                    <option value="">
+                      {!form.ktx && !isCustomKtx ? '-- Chọn Khu KTX trước --' : '-- Chọn Dãy nhà --'}
+                    </option>
+                    {availableDayList.map(d => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                    <option value="__other__">➕ Khác (Nhập thủ công)</option>
+                  </select>
+                  {isCustomDay && (
+                    <input
+                      type="text"
+                      value={customDay}
+                      onChange={handleCustomDayChange}
+                      placeholder="Nhập tên Dãy nhà mới..."
+                      className={`${inputCls} mt-2 animate-in fade-in`}
+                      autoFocus
+                      suppressHydrationWarning
+                    />
+                  )}
                 </div>
                 <div>
                   <label className={labelCls}>Phòng số <span className="text-dgr">*</span></label>
-                  <input
-                    type="text"
-                    value={form.phong_so}
-                    onChange={handleField('phong_so')}
-                    placeholder="101"
-                    className={inputCls}
+                  <select
+                    value={isCustomPhong ? '__other__' : form.phong_so}
+                    onChange={handlePhongSelect}
+                    disabled={(!form.day && !isCustomDay) || (!form.ktx && !isCustomKtx)}
+                    className={`${inputCls} ${((!form.day && !isCustomDay) || (!form.ktx && !isCustomKtx)) ? 'opacity-60 cursor-not-allowed bg-muted/40' : ''}`}
                     suppressHydrationWarning
-                  />
+                  >
+                    <option value="">
+                      {!form.ktx && !isCustomKtx
+                        ? '-- Chọn Khu KTX trước --'
+                        : (!form.day && !isCustomDay)
+                        ? '-- Chọn Dãy nhà trước --'
+                        : availableRoomList.length === 0
+                        ? '-- Chưa có dữ liệu phòng (chọn Nhập thủ công) --'
+                        : '-- Chọn Phòng --'}
+                    </option>
+                    {availableRoomList.map(p => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                    <option value="__other__">➕ Khác (Nhập thủ công)</option>
+                  </select>
+                  {isCustomPhong && (
+                    <input
+                      type="text"
+                      value={customPhong}
+                      onChange={handleCustomPhongChange}
+                      placeholder="Nhập số phòng mới..."
+                      className={`${inputCls} mt-2 animate-in fade-in`}
+                      autoFocus
+                      suppressHydrationWarning
+                    />
+                  )}
                 </div>
                 <div>
                   <label className={labelCls}>Số giường</label>

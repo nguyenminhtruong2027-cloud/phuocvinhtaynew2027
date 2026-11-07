@@ -1,13 +1,11 @@
 import 'server-only';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-import { normalizeSupabaseUrl, getSupabaseAnonKey } from './client';
+import { getSupabaseConfig } from './client';
 
 export async function createClient() {
   const cookieStore = await cookies();
-
-  const url = normalizeSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
-  const key = getSupabaseAnonKey(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+  const { url, key } = getSupabaseConfig();
 
   return createServerClient(url, key, {
     cookies: {

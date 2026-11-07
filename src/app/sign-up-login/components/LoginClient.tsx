@@ -40,6 +40,8 @@ export default function LoginClient() {
         setError('Email hoặc mật khẩu không đúng. Vui lòng kiểm tra lại.');
       } else if (msg.includes('Email not confirmed')) {
         setError('Email chưa được xác nhận. Vui lòng kiểm tra hộp thư.');
+      } else if (msg.includes('Failed to fetch') || msg.includes('network_error') || msg.includes('Lỗi kết nối') || msg.includes('kết nối')) {
+        setError('Không thể kết nối đến máy chủ xác thực. Vui lòng kiểm tra kết nối mạng và thử lại.');
       } else {
         setError(msg);
       }

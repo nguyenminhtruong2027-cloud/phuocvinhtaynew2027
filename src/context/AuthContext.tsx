@@ -63,15 +63,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const resolveUser = async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        const res = await supabase.auth.getUser();
         if (!mounted) return;
+        const user = res?.data?.user;
         if (user) {
           await loadUserProfile(user.id, user.email ?? '');
         } else {
           setCurrentUserState(null);
           setLoading(false);
         }
-      } catch {
+      } catch (err) {
+        console.warn('[AuthContext] resolveUser notice:', err);
         if (mounted) {
           setCurrentUserState(null);
           setLoading(false);
@@ -81,18 +83,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     resolveUser();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        await loadUserProfile(session.user.id, session.user.email ?? '');
-      } else {
-        setCurrentUserState(null);
-        setLoading(false);
-      }
-    });
+    let subscription: { unsubscribe: () => void } | undefined;
+    try {
+      const authSubRes = supabase.auth.onAuthStateChange(async (_event, session) => {
+        if (session?.user) {
+          await loadUserProfile(session.user.id, session.user.email ?? '');
+        } else {
+          setCurrentUserState(null);
+          setLoading(false);
+        }
+      });
+      subscription = authSubRes?.data?.subscription;
+    } catch (subErr) {
+      console.warn('[AuthContext] onAuthStateChange notice:', subErr);
+    }
 
     return () => {
       mounted = false;
-      subscription.unsubscribe();
+      subscription?.unsubscribe();
     };
   }, []);
 
