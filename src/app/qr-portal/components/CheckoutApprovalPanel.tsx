@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
-import { fetchWorkerHierarchy, WorkerHierarchyData } from '@/lib/workerHierarchy';
+import { fetchWorkerHierarchy, WorkerHierarchyData, invalidateWorkerHierarchyCache } from '@/lib/workerHierarchy';
+import { invalidateKtxStructureCache } from '@/lib/ktxStructure';
 import {
   CheckCircle2,
   Clock,
@@ -428,6 +429,22 @@ export default function CheckoutApprovalPanel({
         setDetailReq(prev => (prev ? { ...prev, status: 'approved', reviewed_at: nowStr } : null));
       }
 
+      // Invalidate caches and refresh hierarchy immediately
+      invalidateWorkerHierarchyCache();
+      invalidateKtxStructureCache();
+      fetchWorkerHierarchy(true).then(updated => {
+        setHierarchy(updated);
+        if (selectedKtx !== 'all' && !updated.ktxList.includes(selectedKtx)) {
+          setSelectedKtx('all');
+          setSelectedDay('all');
+          setSelectedRoom('all');
+        }
+      }).catch(() => {});
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('ktx_workers_updated'));
+      }
+
       const roomLiberatedText = `${req.ktx} - ${req.day} - Phòng ${req.phong_so}`;
       setActionSuccessMsg(
         `✓ Đã duyệt check-out cho "${req.ho_va_ten}". Chỗ ở tại ${roomLiberatedText} đã được giải phóng thành công.`
@@ -484,6 +501,22 @@ export default function CheckoutApprovalPanel({
 
       setCheckouts(prev => prev.filter(c => c.id !== deleteTarget.id));
       setDeleteTarget(null);
+
+      // Invalidate caches and refresh hierarchy
+      invalidateWorkerHierarchyCache();
+      invalidateKtxStructureCache();
+      fetchWorkerHierarchy(true).then(updated => {
+        setHierarchy(updated);
+        if (selectedKtx !== 'all' && !updated.ktxList.includes(selectedKtx)) {
+          setSelectedKtx('all');
+          setSelectedDay('all');
+          setSelectedRoom('all');
+        }
+      }).catch(() => {});
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('ktx_workers_updated'));
+      }
     } catch (err: any) {
       alert(`Lỗi khi xóa: ${err?.message || 'Không thể xóa'}`);
     }

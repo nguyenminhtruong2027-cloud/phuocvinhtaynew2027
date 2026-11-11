@@ -3,14 +3,14 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import { useWorkers } from '@/context/WorkerContext';
-import { getUniqueKTX, getUniqueBuildings, getUniqueRooms, countUniqueBuildings, aggregateKtxOccupancy, DEFAULT_ROOM_CAPACITY } from '@/data/workers';
-import { fetchRoomCapacities, getRoomCapacity, RoomCapacityMap } from '@/lib/facilityCapacity';
+import { getUniqueKTX, getUniqueBuildings, getUniqueRooms, countUniqueBuildings, aggregateKtxOccupancy, DEFAULT_ROOM_CAPACITY, naturalSortCompare, compareKtxNames } from '@/data/workers';
+import { fetchRoomCapacities, fetchFacilitiesList, FacilityItem, getRoomCapacity, RoomCapacityMap, normalizeRoomLabel, formatRoomDisplay } from '@/lib/facilityCapacity';
 import KtxOccupancyBreakdown from './components/KtxOccupancyBreakdown';
 import {
   Users, LayoutGrid, FileSpreadsheet, Wifi,
   ChevronDown, Search, X, Download, UserPlus, AlertTriangle,
   TrendingUp, TrendingDown, XCircle, GitBranch, HardHat,
-  VenusAndMars, Sparkles, Building, Layers, UserCheck
+  VenusAndMars, Sparkles, Building, Layers, UserCheck, CheckCircle, ArrowRight
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabase/client';
@@ -426,7 +426,8 @@ function HeatmapRoomCell({
   };
 
   const occupancyPercent = capacity > 0 ? Math.round((count / capacity) * 100) : 0;
-  const fullTooltip = `P.${room} · ${count}/${capacity} (${occupancyPercent}%) · ${label}${genderInfo.isCustom ? ` (Phòng ${genderInfo.gender === 'male' ? 'Nam' : genderInfo.gender === 'female' ? 'Nữ' : ''})` : ''}${unitName ? ` · ĐV: ${unitName}` : ''}`;
+  const roomLabel = formatRoomDisplay(room);
+  const fullTooltip = `${roomLabel} · ${count}/${capacity} (${occupancyPercent}%) · ${label}${genderInfo.isCustom ? ` (Phòng ${genderInfo.gender === 'male' ? 'Nam' : genderInfo.gender === 'female' ? 'Nữ' : ''})` : ''}${unitName ? ` · ĐV: ${unitName}` : ''}`;
 
   return (
     <div className="relative min-w-0 w-full overflow-visible">
@@ -450,7 +451,7 @@ function HeatmapRoomCell({
           <div className="flex items-center gap-1 min-w-0 truncate">
             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
             <span className="text-xs font-bold text-tx tracking-tight tabular-nums truncate">
-              P.{room}
+              {roomLabel}
             </span>
           </div>
 
@@ -481,7 +482,7 @@ function HeatmapRoomCell({
                 className="absolute right-0 top-full mt-1 z-50 w-36 rounded-xl bg-act border border-bdr shadow-2xl p-1 space-y-1 backdrop-blur-md"
               >
                 <div className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-mu border-b border-gray-800 pb-0.5 mb-0.5">
-                  Đổi công năng P.{room}
+                  Đổi công năng {roomLabel}
                 </div>
                 <button
                   type="button"
@@ -602,6 +603,9 @@ export default function OccupancyDashboardPage() {
   const [roomUnitMap, setRoomUnitMap] = useState<Record<string, string>>({});
   const [roomGenderMap, setRoomGenderMap] = useState<Record<string, 'male' | 'female' | 'auto'>>({});
   const [capacities, setCapacities] = useState<RoomCapacityMap>({});
+  const [facilitiesList, setFacilitiesList] = useState<FacilityItem[]>([]);
+  const [roomFilterMode, setRoomFilterMode] = useState<'all' | 'overloaded' | 'empty'>('all');
+  const [showOverloadedModal, setShowOverloadedModal] = useState(false);
 
   // Load and sync room gender designations
   useEffect(() => {
@@ -619,12 +623,22 @@ export default function OccupancyDashboardPage() {
     });
   }, []);
 
-  // Load room capacities from facilities + realtime
+  // Load room capacities and physical facilities catalog + realtime
   useEffect(() => {
     let active = true;
     const load = async () => {
-      const map = await fetchRoomCapacities();
-      if (active) setCapacities(map);
+      try {
+        const [map, facs] = await Promise.all([
+          fetchRoomCapacities(),
+          fetchFacilitiesList(),
+        ]);
+        if (active) {
+          setCapacities(map);
+          setFacilitiesList(facs);
+        }
+      } catch (err) {
+        console.warn('[Dashboard] load facilities error:', err);
+      }
     };
     load();
     const supabase = createClient();
@@ -640,13 +654,13 @@ export default function OccupancyDashboardPage() {
     };
   }, []);
 
-  const isEmpty = !loading && workers.length === 0;
+  const isEmpty = !loading && workers.length === 0 && facilitiesList.length === 0;
 
   // ── Unified Single Source of Truth for all operational metrics ───────────
   const systemMetrics = useMemo(() => {
     const getCap = (k: string, b: string, r: string) => getRoomCapacity(capacities, k, b, r) || DEFAULT_ROOM_CAPACITY;
-    return computeSystemMetrics(workers, roomGenderMap, selectedKTX, ktxNames, getCap);
-  }, [workers, roomGenderMap, selectedKTX, ktxNames, capacities]);
+    return computeSystemMetrics(workers, roomGenderMap, selectedKTX, ktxNames, getCap, facilitiesList);
+  }, [workers, roomGenderMap, selectedKTX, ktxNames, capacities, facilitiesList]);
 
   // Dynamically retrieved KTX list that actually exist in the database (Supabase)
   // Guaranteed NO hardcoded, virtual, or empty KTXs (no KTX 4, KTX 5).
@@ -694,7 +708,23 @@ export default function OccupancyDashboardPage() {
     [workers, selectedKTX]
   );
 
-  const allBuildings = useMemo(() => getUniqueBuildings(filteredWorkers), [filteredWorkers]);
+  // Active accommodation facilities (excluding functional and hidden)
+  const accommodationFacilities = useMemo(() => {
+    return (facilitiesList || []).filter(f =>
+      (f.room_type || 'accommodation') === 'accommodation' &&
+      f.is_visible !== false
+    );
+  }, [facilitiesList]);
+
+  const allBuildings = useMemo(() => {
+    const set = new Set<string>();
+    accommodationFacilities.forEach(f => {
+      if (selectedKTX === 'all' || f.ktx === selectedKTX) {
+        if (f.day) set.add(f.day);
+      }
+    });
+    return Array.from(set).sort(naturalSortCompare);
+  }, [accommodationFacilities, selectedKTX]);
 
   // ── Load block assignments & specialists from profiles ───────────────────
   useEffect(() => {
@@ -793,10 +823,17 @@ export default function OccupancyDashboardPage() {
   const workersWithRoom = useMemo(() => workers.filter(w => w.day && w.phongSo), [workers]);
   const fillRateAll = systemMetrics.fillRate;
 
-  const ktxOccupancy = useMemo(() =>
-    aggregateKtxOccupancy(workers, (k, b, r) => getRoomCapacity(capacities, k, b, r) || DEFAULT_ROOM_CAPACITY),
-    [workers, capacities]
-  );
+  const ktxOccupancy = useMemo(() => {
+    return systemMetrics.ktxBreakdown.map(k => ({
+      ktx: k.ktx,
+      rooms: k.totalRooms,
+      capacity: k.capacity,
+      occupied: k.totalWorkers,
+      vacant: k.vacant,
+      overflow: k.overflow,
+      fillRate: k.capacity > 0 ? k.totalWorkers / k.capacity : 0,
+    }));
+  }, [systemMetrics.ktxBreakdown]);
   const totalVacant = systemMetrics.vacantSpots;
 
   const filteredBuildingCount = systemMetrics.buildingCount;
@@ -830,6 +867,25 @@ export default function OccupancyDashboardPage() {
     return count;
   }, [roomWorkerMap, capacities]);
 
+  const overloadedRoomsList = useMemo(() => {
+    const list: { ktx: string; building: string; room: string; count: number; capacity: number; overflow: number }[] = [];
+    roomWorkerMap.forEach((v, key) => {
+      const [k, b, r] = key.split('||');
+      const cap = getRoomCapacity(capacities, k, b, r) || DEFAULT_ROOM_CAPACITY;
+      if (v > cap) {
+        list.push({
+          ktx: k,
+          building: b,
+          room: r,
+          count: v,
+          capacity: cap,
+          overflow: v - cap,
+        });
+      }
+    });
+    return list.sort((a, b) => b.overflow - a.overflow);
+  }, [roomWorkerMap, capacities]);
+
   useEffect(() => {
     const today = new Date();
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -855,16 +911,20 @@ export default function OccupancyDashboardPage() {
   }, [workers]);
 
   const ktxListForGrid = useMemo(() => {
-    if (selectedKTX !== 'all') return [selectedKTX];
-    return allKTX;
-  }, [selectedKTX, allKTX]);
+    const facKtxs = Array.from(new Set(accommodationFacilities.map(f => f.ktx).filter(Boolean))).sort(compareKtxNames);
+    if (selectedKTX !== 'all') {
+      return facKtxs.filter(k => k === selectedKTX);
+    }
+    return facKtxs;
+  }, [selectedKTX, accommodationFacilities]);
 
   const drawerWorkers = useMemo(() => {
     if (!drawerRoom) return [];
+    const normR = normalizeRoomLabel(drawerRoom.room);
     return workers.filter(w =>
       w.ktx === drawerRoom.ktx &&
       w.day === drawerRoom.building &&
-      w.phongSo === drawerRoom.room
+      (w.phongSo === drawerRoom.room || normalizeRoomLabel(w.phongSo) === normR)
     );
   }, [drawerRoom, workers]);
 
@@ -1116,7 +1176,7 @@ export default function OccupancyDashboardPage() {
                   colorBg="bg-act"
                   colorText="text-mu"
                   colorBorder="border-bdr"
-                  onClick={handleEmptyRoomsClick}
+                  onClick={() => setRoomFilterMode(prev => prev === 'empty' ? 'all' : 'empty')}
                 />
                 <ExecutiveAlertCard
                   icon={AlertTriangle}
@@ -1125,6 +1185,10 @@ export default function OccupancyDashboardPage() {
                   colorBg={overloadedRooms > 0 ? "tint-dgr" : "bg-act"}
                   colorText={overloadedRooms > 0 ? "text-dgr" : "text-mu"}
                   colorBorder={overloadedRooms > 0 ? "border-dgr" : "border-bdr"}
+                  onClick={() => {
+                    setShowOverloadedModal(true);
+                    setRoomFilterMode('overloaded');
+                  }}
                 />
                 <ExecutiveAlertCard
                   icon={TrendingUp}
@@ -1368,33 +1432,79 @@ export default function OccupancyDashboardPage() {
                 </div>
               </div>
 
-              {!isEmpty && allBuildings.length > 0 && (
-                <div className="flex items-center gap-1.5 flex-wrap">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5 flex-wrap">
+                {/* Status Filter Tabs */}
+                <div className="flex items-center gap-1 bg-act p-1 rounded-xl border border-bdr">
                   <button
-                    onClick={() => setSelectedBuilding(null)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
-                      selectedBuilding === null
-                        ? 'bg-pri text-white border-pri2 shadow-md shadow-blue-500/20'
-                        : 'bg-act text-mu border-bdr hover:bg-act'
+                    onClick={() => setRoomFilterMode('all')}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                      roomFilterMode === 'all'
+                        ? 'bg-pri text-white shadow-sm'
+                        : 'text-mu hover:text-tx'
                     }`}
                   >
-                    Tất cả dãy
+                    Tất cả ({systemMetrics.roomCount})
                   </button>
-                  {allBuildings.map(b => (
+                  <button
+                    onClick={() => setRoomFilterMode('overloaded')}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      roomFilterMode === 'overloaded'
+                        ? 'bg-rose-600 text-white shadow-sm'
+                        : overloadedRooms > 0
+                        ? 'text-dgr hover:bg-rose-500/10'
+                        : 'text-mu hover:text-tx'
+                    }`}
+                  >
+                    <span>Quá tải</span>
+                    {overloadedRooms > 0 && (
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                        roomFilterMode === 'overloaded' ? 'bg-white/20 text-white' : 'tint-dgr text-dgr border border-dgr'
+                      }`}>
+                        {overloadedRooms}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setRoomFilterMode('empty')}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                      roomFilterMode === 'empty'
+                        ? 'bg-gray-600 text-white shadow-sm'
+                        : 'text-mu hover:text-tx'
+                    }`}
+                  >
+                    Trống ({systemMetrics.emptyRooms})
+                  </button>
+                </div>
+
+                {/* Building Filters */}
+                {!isEmpty && allBuildings.length > 0 && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <button
-                      key={b}
-                      onClick={() => setSelectedBuilding(b)}
+                      onClick={() => setSelectedBuilding(null)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
-                        selectedBuilding === b
+                        selectedBuilding === null
                           ? 'bg-pri text-white border-pri2 shadow-md shadow-blue-500/20'
                           : 'bg-act text-mu border-bdr hover:bg-act'
                       }`}
                     >
-                      {b}
+                      Tất cả dãy
                     </button>
-                  ))}
-                </div>
-              )}
+                    {allBuildings.map(b => (
+                      <button
+                        key={b}
+                        onClick={() => setSelectedBuilding(b)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                          selectedBuilding === b
+                            ? 'bg-pri text-white border-pri2 shadow-md shadow-blue-500/20'
+                            : 'bg-act text-mu border-bdr hover:bg-act'
+                        }`}
+                      >
+                        {b}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Heatmap Legend: Room Gender Function & Occupancy */}
@@ -1464,11 +1574,36 @@ export default function OccupancyDashboardPage() {
             )}
 
             {/* Heatmap Grid */}
-            {!isEmpty && !loading && ktxListForGrid.length > 0 && (
+            {!loading && accommodationFacilities.length === 0 && (
+              <div className="p-8 sm:p-12 rounded-2xl bg-act/40 border border-bdr text-center space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-bdg text-lnk flex items-center justify-center mx-auto">
+                  <Building size={24} />
+                </div>
+                <h3 className="text-base font-bold text-tx">Sơ đồ phòng đang trống (0 phòng)</h3>
+                <p className="text-sm text-mu max-w-md mx-auto">
+                  Hiện tại danh mục cơ sở vật chất chưa có phòng ở nào. Sơ đồ phòng được quét trực tiếp 100% từ bảng cơ sở vật chất, tuyệt đối không tự sinh phòng ảo.
+                </p>
+                <div className="pt-1">
+                  <button
+                    onClick={() => router.push('/facilities')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-pri text-white text-xs font-semibold hover:bg-pri2 transition-colors shadow-md"
+                  >
+                    <span>Đến Quản lý Cơ sở vật chất để thêm phòng</span>
+                    <ArrowRight size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!isEmpty && !loading && ktxListForGrid.length > 0 && accommodationFacilities.length > 0 && (
               <div className="space-y-6">
                 {ktxListForGrid.map(ktx => {
                   const ktxWorkers = workers.filter(w => w.ktx === ktx);
-                  const ktxBuildings = getUniqueBuildings(ktxWorkers).filter(b => !selectedBuilding || b === selectedBuilding);
+                  const ktxFacilities = accommodationFacilities.filter(f => f.ktx === ktx);
+                  const ktxBuildings = Array.from(new Set(ktxFacilities.map(f => f.day).filter(Boolean)))
+                    .filter(b => !selectedBuilding || b === selectedBuilding)
+                    .sort(naturalSortCompare);
+
                   if (ktxBuildings.length === 0) {
                     if (selectedKTX === ktx) {
                       return (
@@ -1477,10 +1612,10 @@ export default function OccupancyDashboardPage() {
                             <span className="text-xs font-bold px-3 py-1 rounded-lg border bg-bdg text-lnk border-bdr2">
                               {ktx}
                             </span>
-                            <span className="text-xs text-mu font-medium">0 công nhân · 0 dãy phòng</span>
+                            <span className="text-xs text-mu font-medium">0 phòng cơ sở vật chất</span>
                           </div>
                           <p className="text-sm text-mu max-w-md mx-auto">
-                            Khu vực {ktx} hiện đang sẵn sàng tiếp nhận nhân sự và chưa có dữ liệu lưu trú. Bạn có thể sử dụng tính năng &quot;Xếp phòng nhanh&quot; hoặc &quot;Import Excel&quot; để bổ sung công nhân vào {ktx}.
+                            Khu vực {ktx} chưa được cấu hình phòng trong danh mục cơ sở vật chất. Vui lòng thêm phòng tại trang Quản lý Cơ sở vật chất.
                           </p>
                         </div>
                       );
@@ -1544,13 +1679,39 @@ export default function OccupancyDashboardPage() {
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6 min-w-0 w-full items-start">
                         {ktxBuildings.map(building => {
                           const buildingWorkers = ktxWorkers.filter(w => w.day === building);
-                          const rooms = getUniqueRooms(ktxWorkers, building);
-                          const totalCap = rooms.reduce(
+                          const facRooms = ktxFacilities
+                            .filter(f => f.day === building && f.phong_khu_vuc)
+                            .map(f => f.phong_khu_vuc);
+                          const allRooms = Array.from(new Set(facRooms)).sort(naturalSortCompare);
+
+                          const totalCap = allRooms.reduce(
                             (sum, room) => sum + (getRoomCapacity(capacities, ktx, building, room) || DEFAULT_ROOM_CAPACITY),
                             0
                           );
                           const occupancyPct = totalCap > 0 ? buildingWorkers.length / totalCap : 0;
                           const barColor = occupancyPct > 1 ? 'bg-dgr' : occupancyPct >= 1 ? 'bg-wn' : occupancyPct >= 0.5 ? 'bg-ok2' : 'bg-pri2';
+
+                          // Apply active roomFilterMode
+                          let displayRooms = allRooms;
+                          if (roomFilterMode === 'overloaded') {
+                            displayRooms = allRooms.filter(room => {
+                              const normR = normalizeRoomLabel(room);
+                              const count = buildingWorkers.filter(w => w.phongSo === room || normalizeRoomLabel(w.phongSo) === normR).length;
+                              const cap = getRoomCapacity(capacities, ktx, building, room) || DEFAULT_ROOM_CAPACITY;
+                              return count > cap;
+                            });
+                          } else if (roomFilterMode === 'empty') {
+                            displayRooms = allRooms.filter(room => {
+                              const normR = normalizeRoomLabel(room);
+                              const count = buildingWorkers.filter(w => w.phongSo === room || normalizeRoomLabel(w.phongSo) === normR).length;
+                              return count === 0;
+                            });
+                          }
+
+                          if (displayRooms.length === 0 && roomFilterMode !== 'all') {
+                            return null;
+                          }
+
                           return (
                             <div key={building} className="rounded-2xl bg-act border border-gray-800/90 p-3 sm:p-4 flex flex-col justify-start shadow-md hover:border-bdr/80 transition-all h-auto self-start">
                               <BlockTitle
@@ -1563,8 +1724,9 @@ export default function OccupancyDashboardPage() {
                                 barColor={barColor}
                               />
                               <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-[repeat(auto-fill,minmax(88px,1fr))] sm:gap-2 mt-2.5 items-start">
-                                {rooms.map(room => {
-                                  const roomWorkers = buildingWorkers.filter(w => w.phongSo === room);
+                                {displayRooms.map(room => {
+                                  const normR = normalizeRoomLabel(room);
+                                  const roomWorkers = buildingWorkers.filter(w => w.phongSo === room || normalizeRoomLabel(w.phongSo) === normR);
                                   const roomKey = `${ktx}||${building}||${room}`;
                                   const unitName = roomUnitMap[roomKey];
                                   const adminGender = roomGenderMap[roomKey];
@@ -1636,6 +1798,101 @@ export default function OccupancyDashboardPage() {
             }}
             onClose={() => setDrawerRoom(null)}
           />
+        )}
+
+        {/* Overloaded Rooms Modal */}
+        {showOverloadedModal && (
+          <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-surf border border-bdr rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              <div className="p-4 sm:p-5 border-b border-bdr flex items-center justify-between bg-act/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl tint-dgr border border-dgr flex items-center justify-center text-dgr">
+                    <AlertTriangle size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-base sm:text-lg font-bold text-tx">
+                      Danh Sách Phòng Quá Tải
+                    </h3>
+                    <p className="text-xs text-mu mt-0.5">
+                      {overloadedRoomsList.length} phòng có số công nhân vượt định mức số giường
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowOverloadedModal(false)}
+                  className="p-2 rounded-xl text-mu hover:text-tx hover:bg-act transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="p-4 sm:p-5 overflow-y-auto space-y-3 flex-1 scrollbar-thin">
+                {overloadedRoomsList.length === 0 ? (
+                  <div className="text-center py-10 space-y-2">
+                    <div className="w-12 h-12 rounded-full bg-okbg text-ok border border-bdr2 flex items-center justify-center mx-auto">
+                      <CheckCircle size={24} />
+                    </div>
+                    <p className="text-sm font-semibold text-tx">Không có phòng quá tải</p>
+                    <p className="text-xs text-mu">Tất cả các phòng trong hệ thống đều nằm trong giới hạn sức chứa thiết kế.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {overloadedRoomsList.map((item, idx) => {
+                      const pct = Math.round((item.count / item.capacity) * 100);
+                      return (
+                        <div
+                          key={`${item.ktx}-${item.building}-${item.room}-${idx}`}
+                          className="rounded-xl border border-rose-500/30 bg-rose-950/20 p-3.5 flex flex-col justify-between gap-3 hover:border-rose-500/60 transition-all"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <span className="text-xs font-bold text-tx">
+                                {item.ktx} · {item.building}
+                              </span>
+                              <p className="text-base font-extrabold text-dgr mt-0.5">
+                                Phòng {item.room}
+                              </p>
+                            </div>
+                            <span className="px-2 py-0.5 rounded-full text-[11px] font-bold tint-dgr text-dgr border border-dgr">
+                              +{item.overflow} người ({pct}%)
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-2 border-t border-rose-500/20 text-xs">
+                            <span className="text-mu">
+                              Đang ở: <strong className="text-tx font-tabular">{item.count}</strong> / {item.capacity} chỗ
+                            </span>
+                            <button
+                              onClick={() => {
+                                setShowOverloadedModal(false);
+                                handleRoomClick(item.ktx, item.building, item.room);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-pri hover:bg-pri2 text-white font-semibold text-xs transition-colors flex items-center gap-1 shadow-sm"
+                            >
+                              <span>Xem phòng</span>
+                              <ArrowRight size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3.5 sm:p-4 border-t border-bdr bg-act/50 flex items-center justify-between">
+                <span className="text-xs text-mu">
+                  Định mức: Căn cứ theo số giường thực tế tại Quản lý Cơ sở vật chất
+                </span>
+                <button
+                  onClick={() => setShowOverloadedModal(false)}
+                  className="px-4 py-2 rounded-xl bg-act hover:bg-act border border-bdr text-xs font-bold text-tx transition-colors"
+                >
+                  Đóng
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Quick Add Modal */}

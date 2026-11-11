@@ -242,7 +242,7 @@ export default function RoomDrawer({
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-base font-bold text-tx flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-pri2" />
-                {building} — Phòng {room}
+                {building} — {room?.trim().startsWith('Phòng') || room?.trim().startsWith('P.') ? room.trim() : `Phòng ${room}`}
               </h2>
               {/* Gender badge */}
               <span

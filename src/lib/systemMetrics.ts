@@ -1,5 +1,6 @@
 import { Worker, DEFAULT_ROOM_CAPACITY, compareKtxNames, RoomCapacityLookup } from '@/data/workers';
 import { getRoomGenderInfo, normalizeGender } from '@/lib/roomGender';
+import { FacilityItem, normalizeRoomLabel } from '@/lib/facilityCapacity';
 
 export interface KtxMetricItem {
   ktx: string;
@@ -55,35 +56,67 @@ export interface SystemMetrics {
 
 /**
  * Returns strictly the list of KTX areas that actually exist and have active data
- * in the database / system.
+ * in the database / system (from workers or physical facilities).
  */
 export function getActiveKtxList(
   workers: Worker[] = [],
-  knownKtxList: string[] = []
+  knownKtxList: string[] = [],
+  facilitiesList: FacilityItem[] = []
 ): string[] {
-  const safeWorkers = Array.isArray(workers) ? workers : [];
-  const ktxSet = new Set<string>(knownKtxList);
-  safeWorkers.forEach(w => {
-    const k = (w.ktx ?? '').trim();
-    if (k) ktxSet.add(k);
+  const ktxSet = new Set<string>();
+  const isCleanKtx = (k: string) => {
+    if (!k) return false;
+    const l = k.toLowerCase();
+    return !l.includes('tổng') && !l.includes('tong') && !l.includes('cơ sở vật chất') && !l.includes('chưa phân');
+  };
+
+  (facilitiesList || []).forEach(f => {
+    if ((f.room_type || 'accommodation') === 'accommodation' && f.is_visible !== false) {
+      const k = (f.ktx ?? '').trim();
+      if (isCleanKtx(k)) ktxSet.add(k);
+    }
   });
+  // If facilities list is empty, fallback to knownKtxList or workers for safety
+  if (ktxSet.size === 0) {
+    const safeWorkers = Array.isArray(workers) ? workers : [];
+    safeWorkers.forEach(w => {
+      const k = (w.ktx ?? '').trim();
+      if (isCleanKtx(k)) ktxSet.add(k);
+    });
+    knownKtxList.forEach(k => {
+      const s = (k ?? '').trim();
+      if (isCleanKtx(s)) ktxSet.add(s);
+    });
+  }
   return Array.from(ktxSet).sort(compareKtxNames);
 }
 
 /**
  * Single Source of Truth for all operational numbers across Dashboard,
  * Reports ("Tổng quan đa chiều"), and Heatmap.
+ * Renders from physical facilities inventory, excluding functional and hidden rooms.
  */
 export function computeSystemMetrics(
   workers: Worker[] = [],
   roomGenderMap: Record<string, 'male' | 'female' | 'auto'> = {},
   selectedKtx: string = 'all',
   knownKtxList: string[] = [],
-  getCapacity: RoomCapacityLookup = () => DEFAULT_ROOM_CAPACITY
+  getCapacity: RoomCapacityLookup = () => DEFAULT_ROOM_CAPACITY,
+  facilitiesList: FacilityItem[] = []
 ): SystemMetrics {
   const safeWorkers = Array.isArray(workers) ? workers : [];
   const safeRoomGenderMap = roomGenderMap && typeof roomGenderMap === 'object' ? roomGenderMap : {};
-  const activeKtxList = getActiveKtxList(safeWorkers, knownKtxList);
+  
+  // Filter only active physical accommodation rooms (exclude functional, hidden, and summary rows)
+  const activeFacilities = (facilitiesList || []).filter(f => {
+    if ((f.room_type || 'accommodation') !== 'accommodation' || f.is_visible === false) return false;
+    const k = (f.ktx || '').toLowerCase();
+    const d = (f.day || '').toLowerCase();
+    const r = (f.phong_khu_vuc || '').toLowerCase();
+    return !k.includes('tổng') && !k.includes('tong') && !d.includes('tổng') && !r.includes('tổng') && !/^\d+\s*phòng$/i.test(r.trim());
+  });
+
+  const activeKtxList = getActiveKtxList(safeWorkers, knownKtxList, facilitiesList);
 
   // Defensive capacity lookup: never throw / NaN even if facilities data is incomplete.
   const safeCap = (k: string, b: string, r: string): number => {
@@ -112,46 +145,60 @@ export function computeSystemMetrics(
     else if (g === 'nu') femaleWorkers++;
   });
 
-  // Buildings and rooms for filtered selection
+  // Buildings and rooms for filtered selection — strictly driven by activeFacilities
   const buildingSet = new Set<string>();
   const buildingPairSet = new Set<string>();
   const roomSet = new Set<string>();
   const roomOccupancyMap = new Map<string, Worker[]>();
   let workersWithRoom = 0;
 
-  filteredWorkers.forEach(w => {
-    const b = (w.day ?? '').trim();
-    const r = (w.phongSo ?? '').trim();
-    const k = (w.ktx ?? '').trim();
-
-    if (b) buildingSet.add(b);
-    if (b && k) buildingPairSet.add(`${k}||${b}`);
-
-    if (b && r) {
-      workersWithRoom++;
+  // 1. Populate rooms and buildings 100% from physical facilities inventory
+  activeFacilities.forEach(f => {
+    const k = (f.ktx ?? '').trim();
+    const b = (f.day ?? '').trim();
+    const r = (f.phong_khu_vuc ?? '').trim();
+    if (!k || !b || !r) return;
+    if (selectedKtx === 'all' || k === selectedKtx) {
+      buildingSet.add(b);
+      buildingPairSet.add(`${k}||${b}`);
       const roomKey = `${k}||${b}||${r}`;
       roomSet.add(roomKey);
       if (!roomOccupancyMap.has(roomKey)) {
         roomOccupancyMap.set(roomKey, []);
       }
-      roomOccupancyMap.get(roomKey)!.push(w);
     }
   });
 
-  // Also include any rooms recorded in safeRoomGenderMap for the filtered selection
-  Object.keys(safeRoomGenderMap).forEach(key => {
-    const [k, b, r] = key.split('||');
-    if (!k || !b || !r) return;
-    if (selectedKtx === 'all' || k === selectedKtx) {
-      buildingSet.add(b);
-      roomSet.add(key);
-      if (!roomOccupancyMap.has(key)) {
-        roomOccupancyMap.set(key, []);
+  // 2. Count workers into rooms that exist in activeFacilities
+  filteredWorkers.forEach(w => {
+    const b = (w.day ?? '').trim();
+    const r = (w.phongSo ?? '').trim();
+    const k = (w.ktx ?? '').trim();
+
+    if (b && r) {
+      const exactKey = `${k}||${b}||${r}`;
+      let matchedKey: string | null = null;
+      if (roomOccupancyMap.has(exactKey)) {
+        matchedKey = exactKey;
+      } else {
+        const normR = normalizeRoomLabel(r);
+        for (const key of roomSet) {
+          const [fk, fb, fr] = key.split('||');
+          if (fk === k && fb === b && normalizeRoomLabel(fr) === normR) {
+            matchedKey = key;
+            break;
+          }
+        }
+      }
+
+      if (matchedKey) {
+        workersWithRoom++;
+        roomOccupancyMap.get(matchedKey)!.push(w);
       }
     }
   });
 
-  const uniqueBuildings = Array.from(buildingSet).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }));
+  const uniqueBuildings = Array.from(buildingSet).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true, sensitivity: 'base' }));
   const buildingCount = buildingPairSet.size;
   const uniqueRooms = Array.from(roomSet);
   const roomCount = uniqueRooms.length;
@@ -226,6 +273,21 @@ export function computeSystemMetrics(
     const ktxBuildings = new Set<string>();
     let withRoomCount = 0;
 
+    // 1. Populate physical facility rooms for this KTX
+    activeFacilities.forEach(f => {
+      const k = (f.ktx ?? '').trim();
+      const b = (f.day ?? '').trim();
+      const r = (f.phong_khu_vuc ?? '').trim();
+      if (k === ktx && b && r) {
+        ktxBuildings.add(b);
+        const rKey = `${ktx}||${b}||${r}`;
+        if (!ktxRooms.has(rKey)) {
+          ktxRooms.set(rKey, []);
+        }
+      }
+    });
+
+    // 2. Count workers into rooms that exist in activeFacilities
     ktxWorkers.forEach(w => {
       const g = normalizeGender(w.gioiTinh);
       if (g === 'nam') male++;
@@ -233,23 +295,26 @@ export function computeSystemMetrics(
 
       const b = (w.day ?? '').trim();
       const r = (w.phongSo ?? '').trim();
-      if (b) ktxBuildings.add(b);
 
       if (b && r) {
-        withRoomCount++;
-        const rKey = `${ktx}||${b}||${r}`;
-        if (!ktxRooms.has(rKey)) ktxRooms.set(rKey, []);
-        ktxRooms.get(rKey)!.push(w);
-      }
-    });
+        const exactKey = `${ktx}||${b}||${r}`;
+        let matchedKey: string | null = null;
+        if (ktxRooms.has(exactKey)) {
+          matchedKey = exactKey;
+        } else {
+          const normR = normalizeRoomLabel(r);
+          for (const key of ktxRooms.keys()) {
+            const [, fb, fr] = key.split('||');
+            if (fb === b && normalizeRoomLabel(fr) === normR) {
+              matchedKey = key;
+              break;
+            }
+          }
+        }
 
-    // Also include any rooms recorded in safeRoomGenderMap for this KTX
-    Object.keys(safeRoomGenderMap).forEach(key => {
-      const [k, b] = key.split('||');
-      if (k === ktx && b) {
-        ktxBuildings.add(b);
-        if (!ktxRooms.has(key)) {
-          ktxRooms.set(key, []);
+        if (matchedKey) {
+          withRoomCount++;
+          ktxRooms.get(matchedKey)!.push(w);
         }
       }
     });
@@ -314,6 +379,8 @@ export function computeSystemMetrics(
     overallTotalRooms += k.totalRooms;
   });
 
+  const currentKtxBreakdown = selectedKtx !== 'all' ? ktxBreakdown.find(k => k.ktx === selectedKtx) : null;
+
   return {
     activeKtxList,
     totalWorkersAll,
@@ -331,11 +398,11 @@ export function computeSystemMetrics(
     vacantSpots,
     overloadedRooms,
     emptyRoomsCount,
-    maleRooms: overallMaleRooms,
-    femaleRooms: overallFemaleRooms,
-    mixedRooms: overallMixedRooms,
-    emptyRooms: overallEmptyRooms,
-    totalRooms: overallTotalRooms,
+    maleRooms: currentKtxBreakdown ? currentKtxBreakdown.maleRooms : overallMaleRooms,
+    femaleRooms: currentKtxBreakdown ? currentKtxBreakdown.femaleRooms : overallFemaleRooms,
+    mixedRooms: currentKtxBreakdown ? currentKtxBreakdown.mixedRooms : overallMixedRooms,
+    emptyRooms: currentKtxBreakdown ? currentKtxBreakdown.emptyRooms : overallEmptyRooms,
+    totalRooms: currentKtxBreakdown ? currentKtxBreakdown.totalRooms : overallTotalRooms,
     contractors,
     contractorByKtx,
     genderByKtx,

@@ -144,13 +144,14 @@ function normalizeDayNha(raw: string): string {
   return trimmed;
 }
 
-/** Normalize room number: strip leading zeros, keep as string */
+/** Normalize room number: strip "Phòng", "P.", leading zeros: "Phòng 1" -> "1", "P.02" -> "2", "1" -> "1" */
 function normalizePhong(raw: string): string {
-  if (!raw) return raw;
+  if (!raw) return '';
   const trimmed = raw.trim();
-  const num = parseInt(trimmed, 10);
-  if (!isNaN(num)) return String(num);
-  return trimmed;
+  const clean = trimmed.replace(/^(?:phòng|p[.\s]*)\s*/i, '').trim();
+  const num = parseInt(clean, 10);
+  if (!isNaN(num) && /^\d+$/.test(clean)) return String(num);
+  return clean || trimmed;
 }
 
 /** Normalize KTX value from Excel to standard format (e.g. "KTX 1", "KTX 2", "KTX 10") */
@@ -1091,7 +1092,10 @@ export function WorkerManagementClient() {
     }
     if (filters.ktx) list = list.filter(w => w.ktx === filters.ktx);
     if (filters.building) list = list.filter(w => w.day === filters.building);
-    if (filters.room) list = list.filter(w => w.phongSo === filters.room);
+    if (filters.room) {
+      const normR = normalizePhong(filters.room);
+      list = list.filter(w => w.phongSo === filters.room || normalizePhong(w.phongSo) === normR);
+    }
     if (filters.platoon === '__none__') list = list.filter(w => !w.tieuDoan);
     else if (filters.platoon) list = list.filter(w => w.tieuDoan === filters.platoon);
     if (filters.profileStatus) list = list.filter(w => getProfileStatus(w) === filters.profileStatus);
@@ -1122,8 +1126,9 @@ export function WorkerManagementClient() {
   }, [sortKey]);
 
   const checkRoomCapacity = useCallback((ktx: string, day: string, phongSo: string, excludeId?: string): { count: number; overCapacity: boolean } => {
+    const normP = normalizePhong(phongSo);
     const count = workers.filter(w =>
-      w.ktx === ktx && w.day === day && w.phongSo === phongSo && w.id !== excludeId
+      w.ktx === ktx && w.day === day && (w.phongSo === phongSo || normalizePhong(w.phongSo) === normP) && w.id !== excludeId
     ).length;
     return { count, overCapacity: count >= DEFAULT_ROOM_CAPACITY };
   }, [workers]);

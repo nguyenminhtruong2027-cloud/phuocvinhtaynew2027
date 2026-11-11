@@ -57,6 +57,11 @@ export function normalizeDayLabel(raw: string): string {
 let _cachedKtxStructure: KtxBlockGroup[] | null = null;
 let _inflightPromise: Promise<KtxBlockGroup[]> | null = null;
 
+export function invalidateKtxStructureCache(): void {
+  _cachedKtxStructure = null;
+  _inflightPromise = null;
+}
+
 /**
  * Fetches dynamic KTX & block structure 100% directly from Supabase (Single Source of Truth):
  * 1. `room_units` table (ktx, day_nha) - Physical room units registered in the database
@@ -94,6 +99,22 @@ export async function fetchDynamicKtxStructure(forceRefresh = false): Promise<Kt
       };
 
       const PAGE_SIZE = 1000;
+
+      // Source 0: facilities table (ktx, day, room_type, is_visible)
+      try {
+        const { data: facilityRows } = await supabase
+          .from('facilities')
+          .select('ktx, day, room_type, is_visible');
+        if (facilityRows && facilityRows.length > 0) {
+          facilityRows.forEach(row => {
+            if ((row.room_type || 'accommodation') === 'accommodation' && row.is_visible !== false) {
+              addEntry(row.ktx, row.day);
+            }
+          });
+        }
+      } catch (err) {
+        console.warn('[ktxStructure] Warning fetching facilities:', err);
+      }
 
       // Source 1: room_units table (ktx, day_nha)
       let from = 0;
@@ -249,16 +270,29 @@ export function useKtxStructure() {
       channel = supabase
         .channel('ktx_structure_realtime')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'workers' }, () => reload(true))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, () => reload(true))
         .on('postgres_changes', { event: '*', schema: 'public', table: 'room_units' }, () => reload(true))
         .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => reload(true))
         .subscribe();
     } catch (err) {
       console.warn('[ktxStructure] Realtime subscribe failed (table may be missing):', err);
     }
+
+    const onWorkersUpdated = () => reload(true);
+    const onFacilitiesUpdated = () => reload(true);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('ktx_workers_updated', onWorkersUpdated);
+      window.addEventListener('ktx_facilities_updated', onFacilitiesUpdated);
+    }
+
     return () => {
       try {
         if (channel) supabase!.removeChannel(channel);
       } catch {}
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('ktx_workers_updated', onWorkersUpdated);
+        window.removeEventListener('ktx_facilities_updated', onFacilitiesUpdated);
+      }
     };
   }, [reload]);
 

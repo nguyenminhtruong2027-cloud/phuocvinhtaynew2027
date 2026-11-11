@@ -24,6 +24,11 @@ let cachedData: WorkerHierarchyData | null = null;
 let lastFetchTime = 0;
 const CACHE_TTL_MS = 15000; // 15s
 
+export function invalidateWorkerHierarchyCache(): void {
+  cachedData = null;
+  lastFetchTime = 0;
+}
+
 /** Natural sort comparator for Vietnamese text and numbers (e.g. "KTX 1" < "KTX 2", "Dãy 2" < "Dãy 10") */
 export function naturalCompare(a: string, b: string): number {
   return a.localeCompare(b, 'vi', { numeric: true, sensitivity: 'base' });

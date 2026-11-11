@@ -10,15 +10,17 @@ const STORAGE_PREFIX = 'ktx_mock_db_';
 // Initial Seed Data
 const INITIAL_FACILITIES: MockRow[] = [
   // KTX 1 - Dãy 1
-  { id: 'fac-101', ktx: 'KTX 1', day: 'Dãy 1', phong_khu_vuc: '1', giuong: 20, dieu_hoa: 2, tu: 4, quat: 4, o_cam_dien: 8, remote: 2, bong_tuyp: 4, ban_an: 1, ghe_an: 8, tinh_trang: 'Hoạt động tốt', ghi_chu: 'Phòng nam' },
-  { id: 'fac-102', ktx: 'KTX 1', day: 'Dãy 1', phong_khu_vuc: '2', giuong: 20, dieu_hoa: 2, tu: 4, quat: 4, o_cam_dien: 8, remote: 2, bong_tuyp: 4, ban_an: 1, ghe_an: 8, tinh_trang: 'Hoạt động tốt', ghi_chu: 'Phòng nam' },
-  { id: 'fac-103', ktx: 'KTX 1', day: 'Dãy 1', phong_khu_vuc: '3', giuong: 20, dieu_hoa: 2, tu: 4, quat: 4, o_cam_dien: 8, remote: 2, bong_tuyp: 4, ban_an: 1, ghe_an: 8, tinh_trang: 'Hoạt động tốt', ghi_chu: 'Phòng nam' },
+  { id: 'fac-101', ktx: 'KTX 1', day: 'Dãy 1', phong_khu_vuc: '1', giuong: 20, dieu_hoa: 2, tu: 4, quat: 4, o_cam_dien: 8, remote: 2, bong_tuyp: 4, ban_an: 1, ghe_an: 8, tinh_trang: 'Hoạt động tốt', ghi_chu: 'Phòng nam', room_type: 'accommodation', is_visible: true },
+  { id: 'fac-102', ktx: 'KTX 1', day: 'Dãy 1', phong_khu_vuc: '2', giuong: 20, dieu_hoa: 2, tu: 4, quat: 4, o_cam_dien: 8, remote: 2, bong_tuyp: 4, ban_an: 1, ghe_an: 8, tinh_trang: 'Hoạt động tốt', ghi_chu: 'Phòng nam', room_type: 'accommodation', is_visible: true },
+  { id: 'fac-103', ktx: 'KTX 1', day: 'Dãy 1', phong_khu_vuc: '3', giuong: 20, dieu_hoa: 2, tu: 4, quat: 4, o_cam_dien: 8, remote: 2, bong_tuyp: 4, ban_an: 1, ghe_an: 8, tinh_trang: 'Hoạt động tốt', ghi_chu: 'Phòng nam', room_type: 'accommodation', is_visible: true },
+  { id: 'fac-bql-1', ktx: 'KTX 1', day: 'Dãy 1', phong_khu_vuc: 'Phòng BQL', giuong: 0, dieu_hoa: 1, tu: 2, quat: 2, o_cam_dien: 6, remote: 1, bong_tuyp: 2, ban_an: 1, ghe_an: 4, tinh_trang: 'Hoạt động tốt', ghi_chu: 'Văn phòng Ban Quản Lý', room_type: 'functional', is_visible: true },
   // KTX 1 - Dãy 2
-  { id: 'fac-104', ktx: 'KTX 1', day: 'Dãy 2', phong_khu_vuc: '1', giuong: 20, dieu_hoa: 2, tu: 4, quat: 4, o_cam_dien: 8, remote: 2, bong_tuyp: 4, ban_an: 1, ghe_an: 8, tinh_trang: 'Hoạt động tốt', ghi_chu: 'Phòng nam' },
-  { id: 'fac-105', ktx: 'KTX 1', day: 'Dãy 2', phong_khu_vuc: '2', giuong: 20, dieu_hoa: 2, tu: 4, quat: 4, o_cam_dien: 8, remote: 2, bong_tuyp: 4, ban_an: 1, ghe_an: 8, tinh_trang: 'Hoạt động tốt', ghi_chu: 'Phòng nữ' },
+  { id: 'fac-104', ktx: 'KTX 1', day: 'Dãy 2', phong_khu_vuc: '1', giuong: 20, dieu_hoa: 2, tu: 4, quat: 4, o_cam_dien: 8, remote: 2, bong_tuyp: 4, ban_an: 1, ghe_an: 8, tinh_trang: 'Hoạt động tốt', ghi_chu: 'Phòng nam', room_type: 'accommodation', is_visible: true },
+  { id: 'fac-105', ktx: 'KTX 1', day: 'Dãy 2', phong_khu_vuc: '2', giuong: 20, dieu_hoa: 2, tu: 4, quat: 4, o_cam_dien: 8, remote: 2, bong_tuyp: 4, ban_an: 1, ghe_an: 8, tinh_trang: 'Hoạt động tốt', ghi_chu: 'Phòng nữ', room_type: 'accommodation', is_visible: true },
+  { id: 'fac-yte-1', ktx: 'KTX 1', day: 'Dãy 2', phong_khu_vuc: 'Phòng Y Tế', giuong: 0, dieu_hoa: 1, tu: 2, quat: 2, o_cam_dien: 4, remote: 1, bong_tuyp: 2, ban_an: 1, ghe_an: 2, tinh_trang: 'Hoạt động tốt', ghi_chu: 'Sơ cấp cứu & Khám bệnh', room_type: 'functional', is_visible: true },
   // KTX 2 - Dãy 1
-  { id: 'fac-201', ktx: 'KTX 2', day: 'Dãy 1', phong_khu_vuc: '1', giuong: 20, dieu_hoa: 2, tu: 4, quat: 4, o_cam_dien: 8, remote: 2, bong_tuyp: 4, ban_an: 1, ghe_an: 8, tinh_trang: 'Hoạt động tốt', ghi_chu: 'Phòng nam' },
-  { id: 'fac-202', ktx: 'KTX 2', day: 'Dãy 1', phong_khu_vuc: '2', giuong: 20, dieu_hoa: 2, tu: 4, quat: 4, o_cam_dien: 8, remote: 2, bong_tuyp: 4, ban_an: 1, ghe_an: 8, tinh_trang: 'Hoạt động tốt', ghi_chu: 'Phòng nam' },
+  { id: 'fac-201', ktx: 'KTX 2', day: 'Dãy 1', phong_khu_vuc: '1', giuong: 20, dieu_hoa: 2, tu: 4, quat: 4, o_cam_dien: 8, remote: 2, bong_tuyp: 4, ban_an: 1, ghe_an: 8, tinh_trang: 'Hoạt động tốt', ghi_chu: 'Phòng nam', room_type: 'accommodation', is_visible: true },
+  { id: 'fac-202', ktx: 'KTX 2', day: 'Dãy 1', phong_khu_vuc: '2', giuong: 20, dieu_hoa: 2, tu: 4, quat: 4, o_cam_dien: 8, remote: 2, bong_tuyp: 4, ban_an: 1, ghe_an: 8, tinh_trang: 'Hoạt động tốt', ghi_chu: 'Phòng nam', room_type: 'accommodation', is_visible: true },
 ];
 
 const INITIAL_PROFILES: MockRow[] = [
@@ -189,7 +191,16 @@ class MockDatabase {
       const stored = localStorage.getItem(STORAGE_PREFIX + table);
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          if (table === 'facilities') {
+            return parsed.map(r => ({
+              ...r,
+              room_type: r.room_type || 'accommodation',
+              is_visible: r.is_visible !== false,
+            }));
+          }
+          return parsed;
+        }
       }
     } catch {}
     return defaults.map(r => ({ ...r }));

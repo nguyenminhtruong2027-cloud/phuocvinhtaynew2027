@@ -11,7 +11,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
 import { compareKtxNames, DEFAULT_ROOM_CAPACITY } from '@/data/workers';
-import { fetchRoomCapacities, getRoomCapacity, RoomCapacityMap } from '@/lib/facilityCapacity';
+import { fetchRoomCapacities, getRoomCapacity, RoomCapacityMap, formatRoomDisplay } from '@/lib/facilityCapacity';
 import BedQrPrintModal from './BedQrPrintModal';
 import BedTransferModal from './BedTransferModal';
 
@@ -115,17 +115,38 @@ export default function BedManagementClient() {
     else setRefreshing(true);
     try {
       const rows = await fetchAllRows<Record<string, unknown>>(supabase, 'beds', '*');
-      const mapped: BedRow[] = (rows || []).map((r, i) => ({
-        id: String(r?.id ?? `bed-${i}`),
-        ktx: String(r?.ktx ?? ''),
-        day: String(r?.day ?? ''),
-        phong_so: String(r?.phong_so ?? ''),
-        giuong: String(r?.giuong ?? ''),
-        status: r?.status === 'occupied' ? 'occupied' : r?.status === 'maintenance' ? 'maintenance' : 'empty',
-        ma_nv: r?.ma_nv ? String(r.ma_nv) : null,
-        ho_va_ten: r?.ho_va_ten ? String(r.ho_va_ten) : null,
-        worker_id: r?.worker_id ? String(r.worker_id) : null,
-      }));
+      const mapped: BedRow[] = (rows || [])
+        .filter(r => {
+          const ktx = String(r?.ktx ?? '').trim().toLowerCase();
+          const day = String(r?.day ?? '').trim();
+          const room = String(r?.phong_so ?? '').trim();
+          const bedNo = String(r?.giuong ?? '').trim();
+          if (!ktx || !day || !room || !bedNo) return false;
+          if (
+            ktx.includes('tổng') ||
+            ktx.includes('tong') ||
+            ktx.includes('cơ sở vật chất') ||
+            ktx.includes('chưa phân') ||
+            ['ktx 5', 'ktx 12', 'ktx 999'].includes(ktx) ||
+            room === 'ở' ||
+            room === 'chức năng' ||
+            /^\d+\s*phòng$/i.test(room)
+          ) {
+            return false;
+          }
+          return true;
+        })
+        .map((r, i) => ({
+          id: String(r?.id ?? `bed-${i}`),
+          ktx: String(r?.ktx ?? ''),
+          day: String(r?.day ?? ''),
+          phong_so: String(r?.phong_so ?? '').replace(/^(?:phòng|p[.\s]*)\s*/i, '').trim(),
+          giuong: String(r?.giuong ?? ''),
+          status: r?.status === 'occupied' ? 'occupied' : r?.status === 'maintenance' ? 'maintenance' : 'empty',
+          ma_nv: r?.ma_nv ? String(r.ma_nv) : null,
+          ho_va_ten: r?.ho_va_ten ? String(r.ho_va_ten) : null,
+          worker_id: r?.worker_id ? String(r.worker_id) : null,
+        }));
       setBeds(mapped);
       setActionError('');
     } catch (err) {
@@ -236,25 +257,37 @@ export default function BedManagementClient() {
   }, [beds, filterKtx, filterDay, filterRoom, searchQuery, workerById]);
 
   const ktxList = useMemo(
-    () => [...new Set((beds || []).map(b => String(b?.ktx ?? '').trim()).filter(Boolean))].sort(compareKtxNames),
+    () =>
+      [...new Set((beds || []).map(b => String(b?.ktx ?? '').trim()).filter(Boolean))]
+        .filter(k => {
+          const l = k.toLowerCase();
+          return (
+            !l.includes('tổng') &&
+            !l.includes('tong') &&
+            !l.includes('cơ sở vật chất') &&
+            !l.includes('chưa phân') &&
+            !['ktx 5', 'ktx 12', 'ktx 999'].includes(l)
+          );
+        })
+        .sort(compareKtxNames),
     [beds]
   );
 
   const dayList = useMemo(
     () =>
       [...new Set(
-        (beds || [])
+        bedsFiltered
           .filter(b => String(b?.ktx ?? '').trim() === (filterKtx || '').trim())
           .map(b => String(b?.day ?? '').trim())
           .filter(Boolean)
       )].sort((a, b) => a.localeCompare(b, 'vi', { numeric: true })),
-    [beds, filterKtx]
+    [bedsFiltered, filterKtx]
   );
 
   const roomList = useMemo(
     () =>
       [...new Set(
-        (beds || [])
+        bedsFiltered
           .filter(b => String(b?.ktx ?? '').trim() === (filterKtx || '').trim() && String(b?.day ?? '').trim() === (filterDay || '').trim())
           .map(b => String(b?.phong_so ?? '').trim())
           .filter(Boolean)
@@ -264,7 +297,7 @@ export default function BedManagementClient() {
         if (!isNaN(na) && !isNaN(nb)) return na - nb;
         return a.localeCompare(b, 'vi', { numeric: true });
       }),
-    [beds, filterKtx, filterDay]
+    [bedsFiltered, filterKtx, filterDay]
   );
 
   interface RoomGroup {
@@ -698,7 +731,7 @@ export default function BedManagementClient() {
                 className="bg-surf border border-bdr text-tx rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 min-w-[110px] cursor-pointer"
               >
                 <option value="">Tất cả phòng</option>
-                {roomList.map(r => <option key={r} value={r}>Phòng {r}</option>)}
+                {roomList.map(r => <option key={r} value={r}>{formatRoomDisplay(r)}</option>)}
               </select>
             </div>
           )}
@@ -810,7 +843,7 @@ export default function BedManagementClient() {
                         <div className="flex items-center justify-between gap-2 mb-2.5">
                           <div className="flex items-center gap-2 min-w-0">
                             <span className="text-sm font-extrabold text-tx bg-act border border-bdr px-2.5 py-1 rounded-xl">
-                              Phòng {g.room}
+                              {formatRoomDisplay(g.room)}
                             </span>
                             {g.overloaded && (
                               <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full tint-dgr text-dgr border border-dgr">

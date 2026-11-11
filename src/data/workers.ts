@@ -124,13 +124,17 @@ export function countUniqueBuildings(workers: Worker[] = []): number {
   return getUniqueBuildingKeys(workers).length;
 }
 
+export function naturalSortCompare(a: string, b: string): number {
+  return (a || '').localeCompare(b || '', 'vi', { numeric: true, sensitivity: 'base' });
+}
+
 export function getUniqueBuildings(workers: Worker[] = []): string[] {
-  return [...new Set((workers || []).map(w => w.day).filter(Boolean))].sort();
+  return [...new Set((workers || []).map(w => w.day).filter(Boolean))].sort(naturalSortCompare);
 }
 
 export function getUniqueRooms(workers: Worker[] = [], day?: string): string[] {
   const list = day ? (workers || []).filter(w => w.day === day) : (workers || []);
-  return [...new Set(list.map(w => w.phongSo).filter(Boolean))].sort((a, b) => Number(a) - Number(b));
+  return [...new Set(list.map(w => w.phongSo).filter(Boolean))].sort(naturalSortCompare);
 }
 
 export function getUniquePlatoons(workers: Worker[] = []): string[] {
