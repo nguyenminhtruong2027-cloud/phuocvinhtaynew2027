@@ -569,16 +569,16 @@ export class MockQueryBuilder {
     };
   }
 
-  then(resolve: (value: any) => any, reject?: (reason: any) => any) {
+  then(resolve?: ((value: any) => any) | null, reject?: ((reason: any) => any) | null) {
     try {
       const res = this.execute();
-      return Promise.resolve(res).then(resolve, reject);
+      return Promise.resolve(res).then(resolve ?? undefined, reject ?? undefined);
     } catch (err) {
-      return Promise.resolve({ data: null, error: err, count: 0 }).then(resolve, reject);
+      return Promise.resolve({ data: null, error: err, count: 0 }).then(resolve ?? undefined, reject ?? undefined);
     }
   }
 
-  catch(reject: (reason: any) => any) {
+  catch(reject?: ((reason: any) => any) | null) {
     return this.then(null, reject);
   }
 }

@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { Worker } from '@/data/workers';
 import { createClient } from '@/lib/supabase/client';
+import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
 
 // ─── DB row ↔ Worker mapping ───────────────────────────────────────────────
 
@@ -37,6 +38,7 @@ function dbRowToWorker(row: Record<string, unknown>): Worker {
     khoaTraCuu: String(row.khoa_tra_cuu ?? ''),
     avatar: row.avatar ? String(row.avatar) : undefined,
     tamTruStatus: (row.status ?? row.tam_tru_status ?? 'unregistered') as 'registered' | 'unregistered',
+    createdAt: row.created_at ? String(row.created_at) : undefined,
   };
 }
 
@@ -105,6 +107,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
   const [refreshing, setRefreshing] = useState(false);
   const supabase = createClient();
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const workerMetaByIdRef = useRef<Map<string, Worker>>(new Map());
 
   const fetchCount = useCallback(async () => {
     try {
@@ -149,6 +152,9 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       }
 
       allRows.sort((a, b) => (a.stt ?? 0) - (b.stt ?? 0) || a.hoVaTen.localeCompare(b.hoVaTen));
+      const metaMap = new Map<string, Worker>();
+      allRows.forEach(w => { if (w.id) metaMap.set(w.id, w); });
+      workerMetaByIdRef.current = metaMap;
       setWorkers(allRows);
       setTotalWorkerCount(allRows.length);
     } catch (err: any) {
@@ -176,6 +182,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
         (payload) => {
           if (payload.eventType === 'INSERT') {
             const newWorker = dbRowToWorker(payload.new as Record<string, unknown>);
+            if (newWorker.id) workerMetaByIdRef.current.set(newWorker.id, newWorker);
             setWorkers(prev => {
               if (prev.some(w => w.id === newWorker.id)) return prev;
               const next = [...prev, newWorker].sort((a, b) => (a.stt ?? 0) - (b.stt ?? 0) || a.hoVaTen.localeCompare(b.hoVaTen));
@@ -184,9 +191,15 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
             });
           } else if (payload.eventType === 'UPDATE') {
             const updated = dbRowToWorker(payload.new as Record<string, unknown>);
+            if (updated.id) workerMetaByIdRef.current.set(updated.id, updated);
             setWorkers(prev => prev.map(w => w.id === updated.id ? updated : w));
           } else if (payload.eventType === 'DELETE') {
             const deletedId = (payload.old as Record<string, unknown>).id as string;
+            const prevMeta = workerMetaByIdRef.current.get(deletedId);
+            if (prevMeta) {
+              preserveDeletedWorkerEntries([prevMeta]);
+              workerMetaByIdRef.current.delete(deletedId);
+            }
             setWorkers(prev => {
               const next = prev.filter(w => w.id !== deletedId);
               setTotalWorkerCount(next.length);
@@ -244,6 +257,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
   const deleteWorker = useCallback(async (id: string) => {
     const workerToDelete = workers.find(w => w.id === id);
     if (workerToDelete) {
+      preserveDeletedWorkerEntries([workerToDelete]);
       await supabase
         .from('worker_deletion_log')
         .insert({
@@ -266,6 +280,12 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
   const deleteWorkers = useCallback(async (ids: string[]) => {
     if (ids.length === 0) return;
     const now = new Date().toISOString();
+    const workersToDelete = ids
+      .map(id => workers.find(wk => wk.id === id))
+      .filter((w): w is Worker => Boolean(w));
+    if (workersToDelete.length > 0) {
+      preserveDeletedWorkerEntries(workersToDelete);
+    }
     const logRows = ids.map(id => {
       const w = workers.find(wk => wk.id === id);
       return {
@@ -290,6 +310,9 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
 
   const deleteAllWorkers = useCallback(async () => {
     const now = new Date().toISOString();
+    if (workers && workers.length > 0) {
+      preserveDeletedWorkerEntries(workers);
+    }
     const ids = (workers || []).map(w => w?.id).filter(Boolean) as string[];
     if (ids.length === 0) {
       setWorkers([]);

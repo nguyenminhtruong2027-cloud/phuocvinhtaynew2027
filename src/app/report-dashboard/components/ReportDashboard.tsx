@@ -1,15 +1,24 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
   Users, LayoutGrid, Percent, AlertCircle, VenusAndMars, HardHat,
   Building2, TrendingUp, TrendingDown, UserPlus, UserMinus, ArrowRightLeft,
-  Calendar, Clock, RefreshCw, Filter, X, Building, BarChart2, CheckCircle2
+  Calendar, Clock, RefreshCw, Filter, X, Building, BarChart2, CheckCircle2,
+  ChevronDown, ChevronRight
 } from 'lucide-react';
 import { useWorkers } from '@/context/WorkerContext';
 import { Worker, DEFAULT_ROOM_CAPACITY, getUniqueBuildings, getUniqueRooms, countUniqueBuildings } from '@/data/workers';
 import { getActiveKtxList } from '@/lib/systemMetrics';
 import { createClient } from '@/lib/supabase/client';
+import {
+  DailyFluctuation,
+  FluctuationSummary,
+  FluctuationCutoffMode,
+  fetchWorkerFluctuationReport,
+  getDefaultVNDateRange,
+  getVNDateString,
+} from '@/lib/workerFluctuation';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, LineChart, Line, ReferenceLine,
@@ -21,7 +30,7 @@ type UnitFilter = 'all' | 'xd' | 'me' | 'vinalpha' | 'other';
 type KtxFilter = string;
 type ActiveTab = 'tong-quan' | 'bien-dong';
 type FluctuationType = 'all' | 'tang' | 'giam' | 'rong';
-type CutoffMode = 'realtime' | '14h';
+type CutoffMode = FluctuationCutoffMode;
 
 interface FilterState {
   gender: GenderFilter;
@@ -38,20 +47,6 @@ interface FluctuationFilter {
   day: string;
   type: FluctuationType;
   cutoffMode: CutoffMode;
-}
-
-interface DailyFluctuation {
-  ngay: string;
-  so_tang: number;
-  so_giam: number;
-  bien_dong_rong: number;
-}
-
-interface FluctuationSummary {
-  tong_tang: number;
-  tong_giam: number;
-  bien_dong_rong: number;
-  so_ngay_co_bien_dong: number;
 }
 
 const DEFAULT_FILTERS: FilterState = {
@@ -87,10 +82,7 @@ function matchesKtx(w: Worker, k: string): boolean {
 }
 
 function getDefaultDateRange(): { from: string; to: string } {
-  const now = new Date();
-  const to = now.toISOString().slice(0, 10);
-  const from = new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  return { from, to };
+  return getDefaultVNDateRange(30);
 }
 
 function formatDateVN(dateStr: string): string {
@@ -129,109 +121,142 @@ export default function ReportDashboard() {
     setFilters(prev => ({ ...prev, [key]: val }));
 
   // ── Biến động filters ──
-  const defaultRange = getDefaultDateRange();
+  const defaultRange = useMemo(() => getDefaultDateRange(), []);
   const [flFilter, setFlFilter] = useState<FluctuationFilter>({
     dateFrom: defaultRange.from,
     dateTo: defaultRange.to,
     ktx: '',
     day: '',
     type: 'all',
-    cutoffMode: '14h',
+    cutoffMode: 'realtime',
   });
 
   // ── Biến động data ──
   const [dailyData, setDailyData] = useState<DailyFluctuation[]>([]);
   const [summary, setSummary] = useState<FluctuationSummary | null>(null);
+  const [todayFluctuation, setTodayFluctuation] = useState<DailyFluctuation | null>(null);
+  const [flAvailableKtx, setFlAvailableKtx] = useState<string[]>([]);
+  const [flAvailableDays, setFlAvailableDays] = useState<string[]>([]);
+  const [expandedDate, setExpandedDate] = useState<string | null>(null);
   const [flLoading, setFlLoading] = useState(false);
   const [flError, setFlError] = useState<string | null>(null);
   const [lastFetched, setLastFetched] = useState<string>('');
+  const realtimeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Unique buildings from workers for filter ──
   const activeKtxList = useMemo(() => getActiveKtxList(workers), [workers]);
   const allBuildings = useMemo(() => getUniqueBuildings(workers), [workers]);
+  const flKtxOptions = useMemo(() => {
+    const merged = new Set([...activeKtxList, ...flAvailableKtx]);
+    return Array.from(merged).filter(Boolean);
+  }, [activeKtxList, flAvailableKtx]);
   const flBuildings = useMemo(() => {
-    if (!flFilter.ktx) return allBuildings;
-    return getUniqueBuildings(workers.filter(w => (w.ktx ?? '').trim() === flFilter.ktx.trim()));
-  }, [workers, flFilter.ktx, allBuildings]);
+    const base = !flFilter.ktx
+      ? allBuildings
+      : getUniqueBuildings(workers.filter(w => (w.ktx ?? '').trim() === flFilter.ktx.trim()));
+    const merged = new Set([...base, ...flAvailableDays]);
+    return Array.from(merged).filter(Boolean);
+  }, [workers, flFilter.ktx, allBuildings, flAvailableDays]);
 
-  // ── Fetch fluctuation data ──
-  const fetchFluctuation = useCallback(async () => {
-    setFlLoading(true);
+  // ── Fetch fluctuation data directly & paginated from Supabase ──
+  const fetchFluctuation = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent);
+    if (!silent) setFlLoading(true);
     setFlError(null);
-    const supabase = createClient();
-    const cutoffHour = flFilter.cutoffMode === 'realtime' ? -1 : 14;
 
     try {
-      const [dailyRes, summaryRes] = await Promise.all([
-        supabase.rpc('get_worker_fluctuation', {
-          p_date_from: flFilter.dateFrom || null,
-          p_date_to: flFilter.dateTo || null,
-          p_ktx: flFilter.ktx || null,
-          p_day: flFilter.day || null,
-          p_cutoff_hour: cutoffHour,
-        }),
-        supabase.rpc('get_worker_fluctuation_summary', {
-          p_date_from: flFilter.dateFrom || null,
-          p_date_to: flFilter.dateTo || null,
-          p_ktx: flFilter.ktx || null,
-          p_day: flFilter.day || null,
-          p_cutoff_hour: cutoffHour,
-        }),
-      ]);
+      const report = await fetchWorkerFluctuationReport({
+        dateFrom: flFilter.dateFrom,
+        dateTo: flFilter.dateTo,
+        ktx: flFilter.ktx,
+        day: flFilter.day,
+        cutoffMode: flFilter.cutoffMode,
+      });
 
-      if (dailyRes.error) throw new Error(dailyRes.error.message);
-      if (summaryRes.error) throw new Error(summaryRes.error.message);
-
-      const rawDaily: DailyFluctuation[] = (dailyRes.data || []).map((r: any) => ({
-        ngay: r.ngay,
-        so_tang: Number(r.so_tang) || 0,
-        so_giam: Number(r.so_giam) || 0,
-        bien_dong_rong: Number(r.bien_dong_rong) || 0,
-      }));
-
-      setDailyData(rawDaily);
-
-      const s = summaryRes.data?.[0];
-      setSummary(s ? {
-        tong_tang: Number(s.tong_tang) || 0,
-        tong_giam: Number(s.tong_giam) || 0,
-        bien_dong_rong: Number(s.bien_dong_rong) || 0,
-        so_ngay_co_bien_dong: Number(s.so_ngay_co_bien_dong) || 0,
-      } : { tong_tang: 0, tong_giam: 0, bien_dong_rong: 0, so_ngay_co_bien_dong: 0 });
+      setDailyData(report.daily);
+      setSummary(report.summary);
+      setTodayFluctuation(report.today);
+      setFlAvailableKtx(report.availableKtx);
+      setFlAvailableDays(report.availableDays);
 
       const now = new Date();
       setLastFetched(now.toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }));
     } catch (err: any) {
-      setFlError(err.message || 'Lỗi tải dữ liệu biến động');
+      setFlError(err?.message || 'Lỗi tải dữ liệu biến động');
     } finally {
-      setFlLoading(false);
+      if (!silent) setFlLoading(false);
     }
   }, [flFilter]);
 
+  // Fetch when tab or filter changes
   useEffect(() => {
     if (activeTab === 'bien-dong') {
       fetchFluctuation();
     }
   }, [activeTab, fetchFluctuation]);
 
-  // ── Filtered chart data by type ──
-  const chartData = useMemo(() => {
-    return dailyData.map(d => ({
-      date: formatDateVN(d.ngay),
-      rawDate: d.ngay,
-      'Tăng thực tế': d.so_tang,
-      'Giảm thực tế': d.so_giam,
-      'Biến động ròng': d.bien_dong_rong,
-    }));
-  }, [dailyData]);
+  // Auto-sync silently whenever workers context updates (add / import / delete)
+  useEffect(() => {
+    if (activeTab === 'bien-dong') {
+      fetchFluctuation({ silent: true });
+    }
+  }, [activeTab, workers.length, fetchFluctuation]);
 
-  const filteredDailyData = useMemo(() => {
+  // Instant Supabase Realtime subscription on workers & worker_deletion_log
+  useEffect(() => {
+    if (activeTab !== 'bien-dong') return;
+    const supabase = createClient();
+
+    const scheduleSilentRefresh = () => {
+      if (realtimeTimerRef.current) clearTimeout(realtimeTimerRef.current);
+      realtimeTimerRef.current = setTimeout(() => {
+        fetchFluctuation({ silent: true });
+      }, 250);
+    };
+
+    const channel = supabase
+      .channel('report_fluctuation_realtime_v1')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'workers' }, scheduleSilentRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_deletion_log' }, scheduleSilentRefresh)
+      .subscribe();
+
+    return () => {
+      if (realtimeTimerRef.current) {
+        clearTimeout(realtimeTimerRef.current);
+        realtimeTimerRef.current = null;
+      }
+      supabase.removeChannel(channel);
+    };
+  }, [activeTab, fetchFluctuation]);
+
+  const applyQuickRange = useCallback((days: number) => {
+    const r = getDefaultVNDateRange(days);
+    setFlFilter(prev => ({ ...prev, dateFrom: r.from, dateTo: r.to }));
+  }, []);
+
+  // ── Filtered chart & table data by type ──
+  const filteredDailyAsc = useMemo(() => {
     if (flFilter.type === 'all') return dailyData;
     if (flFilter.type === 'tang') return dailyData.filter(d => d.so_tang > 0);
     if (flFilter.type === 'giam') return dailyData.filter(d => d.so_giam > 0);
     if (flFilter.type === 'rong') return dailyData.filter(d => d.bien_dong_rong !== 0);
     return dailyData;
   }, [dailyData, flFilter.type]);
+
+  const chartData = useMemo(() => {
+    return filteredDailyAsc.map(d => ({
+      date: formatDateVN(d.ngay),
+      rawDate: d.ngay,
+      'Tăng thực tế': d.so_tang,
+      'Giảm thực tế': d.so_giam,
+      'Biến động ròng': d.bien_dong_rong,
+    }));
+  }, [filteredDailyAsc]);
+
+  // Newest date first in detail table so today's live updates appear at the top
+  const filteredDailyData = useMemo(() => {
+    return [...filteredDailyAsc].sort((a, b) => b.ngay.localeCompare(a.ngay));
+  }, [filteredDailyAsc]);
 
   // ── Tổng quan computed ──
   const filtered = useMemo(() => {
@@ -629,23 +654,99 @@ export default function ReportDashboard() {
         {activeTab === 'bien-dong' && (
           <div className="space-y-6">
 
+            {/* ── Today Live Real-Time Summary Strip ── */}
+            {todayFluctuation && (
+              <div className="bg-surf rounded-2xl border border-emerald-500/30 shadow-xl px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-okbg border border-bdr2 flex items-center justify-center text-ok flex-shrink-0">
+                    <ArrowRightLeft size={17} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-bold text-tx">
+                        Biến động hôm nay ({formatDateVN(todayFluctuation.ngay)})
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-okbg text-ok border border-bdr2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-ok2 animate-pulse" />
+                        Cập nhật tức thì
+                      </span>
+                    </div>
+                    <p className="text-xs text-mu mt-0.5">
+                      Ghi nhận tự động mọi công nhân mới vào ở và công nhân rời khỏi KTX trong ngày
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2.5 flex-wrap font-tabular">
+                  <div className="px-3.5 py-2 rounded-xl bg-okbg/30 border border-bdr2 text-xs">
+                    <span className="text-mu mr-1.5">Vào ở:</span>
+                    <strong className="text-ok text-sm">+{todayFluctuation.so_tang.toLocaleString('vi-VN')}</strong>
+                  </div>
+                  <div className="px-3.5 py-2 rounded-xl tint-wn border border-wn text-xs">
+                    <span className="text-mu mr-1.5">Rời khỏi:</span>
+                    <strong className="text-wn text-sm">-{todayFluctuation.so_giam.toLocaleString('vi-VN')}</strong>
+                  </div>
+                  <div className="px-3.5 py-2 rounded-xl bg-act border border-bdr text-xs">
+                    <span className="text-mu mr-1.5">Ròng:</span>
+                    <strong className={`text-sm ${todayFluctuation.bien_dong_rong >= 0 ? 'text-lnk' : 'text-wn'}`}>
+                      {todayFluctuation.bien_dong_rong > 0
+                        ? `+${todayFluctuation.bien_dong_rong.toLocaleString('vi-VN')}`
+                        : todayFluctuation.bien_dong_rong.toLocaleString('vi-VN')}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* ── Compact & Spacious Filter Bar (Green/Orange Highlights) ── */}
             <div className="bg-surf rounded-2xl border border-bdr/60 shadow-xl p-5">
-              <div className="flex items-center justify-between mb-4 pb-3 border-b border-bdr/60">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-bdr/60">
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-lg tint-wn border border-wn flex items-center justify-center text-wn">
                     <Filter size={16} />
                   </div>
                   <span className="text-sm font-bold text-tx">Bộ lọc phân tích biến động quân số</span>
                 </div>
-                {hasFlFilter && (
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
-                    onClick={() => setFlFilter(prev => ({ ...prev, ktx: '', day: '', type: 'all' }))}
-                    className="flex items-center gap-1 text-xs text-mu hover:text-tx px-2.5 py-1 rounded-lg bg-act border border-bdr transition-colors"
+                    onClick={() => applyQuickRange(1)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                      flFilter.dateFrom === getVNDateString() && flFilter.dateTo === getVNDateString()
+                        ? 'bg-ok2 text-tx border-ok2'
+                        : 'bg-act text-mu hover:text-tx border-bdr'
+                    }`}
                   >
-                    <X size={12} /> Đặt lại lọc
+                    Hôm nay
                   </button>
-                )}
+                  <button
+                    onClick={() => applyQuickRange(7)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                      flFilter.dateFrom === getDefaultVNDateRange(7).from && flFilter.dateTo === getDefaultVNDateRange(7).to
+                        ? 'bg-ok2 text-tx border-ok2'
+                        : 'bg-act text-mu hover:text-tx border-bdr'
+                    }`}
+                  >
+                    7 ngày
+                  </button>
+                  <button
+                    onClick={() => applyQuickRange(30)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                      flFilter.dateFrom === getDefaultVNDateRange(30).from && flFilter.dateTo === getDefaultVNDateRange(30).to
+                        ? 'bg-ok2 text-tx border-ok2'
+                        : 'bg-act text-mu hover:text-tx border-bdr'
+                    }`}
+                  >
+                    30 ngày
+                  </button>
+                  {hasFlFilter && (
+                    <button
+                      onClick={() => setFlFilter(prev => ({ ...prev, ktx: '', day: '', type: 'all' }))}
+                      className="flex items-center gap-1 text-xs text-mu hover:text-tx px-2.5 py-1 rounded-lg bg-act border border-bdr transition-colors"
+                    >
+                      <X size={12} /> Đặt lại lọc
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
@@ -680,7 +781,7 @@ export default function ReportDashboard() {
                     className="bg-act border border-bdr text-gray-100 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                   >
                     <option value="">Tất cả KTX</option>
-                    {activeKtxList.map(k => (
+                    {flKtxOptions.map(k => (
                       <option key={k} value={k}>{k}</option>
                     ))}
                   </select>
@@ -718,7 +819,7 @@ export default function ReportDashboard() {
                 <div className="flex flex-col gap-1">
                   <label className="text-[11px] font-bold text-transparent select-none uppercase">Áp dụng</label>
                   <button
-                    onClick={fetchFluctuation}
+                    onClick={() => fetchFluctuation()}
                     disabled={flLoading}
                     className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-tx text-xs font-bold rounded-xl transition-all shadow-md shadow-emerald-500/20 disabled:opacity-60"
                   >
@@ -734,16 +835,6 @@ export default function ReportDashboard() {
                   <span className="text-mu font-medium">Chế độ chốt dữ liệu:</span>
                   <div className="inline-flex rounded-xl bg-act p-0.5 border border-bdr">
                     <button
-                      onClick={() => setFlFilter(prev => ({ ...prev, cutoffMode: '14h' }))}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                        flFilter.cutoffMode === '14h'
-                          ? 'bg-wn text-tx shadow-sm'
-                          : 'text-mu hover:text-tx'
-                      }`}
-                    >
-                      <Clock size={12} /> Chốt 14:00
-                    </button>
-                    <button
                       onClick={() => setFlFilter(prev => ({ ...prev, cutoffMode: 'realtime' }))}
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                         flFilter.cutoffMode === 'realtime'
@@ -753,17 +844,27 @@ export default function ReportDashboard() {
                     >
                       <RefreshCw size={12} /> Thời gian thực
                     </button>
+                    <button
+                      onClick={() => setFlFilter(prev => ({ ...prev, cutoffMode: '14h' }))}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        flFilter.cutoffMode === '14h'
+                          ? 'bg-wn text-tx shadow-sm'
+                          : 'text-mu hover:text-tx'
+                      }`}
+                    >
+                      <Clock size={12} /> Chốt 14:00
+                    </button>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2 text-mu">
                   {flFilter.cutoffMode === '14h' ? (
                     <span className="text-wn flex items-center gap-1">
-                      <Clock size={12} /> Chốt số liệu 14:00 hàng ngày (phản ánh buổi chiều)
+                      <Clock size={12} /> Chốt số liệu đến 14:00 hàng ngày (giờ VN)
                     </span>
                   ) : (
                     <span className="text-ok flex items-center gap-1">
-                      <CheckCircle2 size={12} /> Thời gian thực (bao gồm mọi thay đổi tức thì)
+                      <CheckCircle2 size={12} /> Thời gian thực (cập nhật tức thì mọi thay đổi vào / ra)
                     </span>
                   )}
                   {lastFetched && <span className="text-ic font-tabular">· Lúc {lastFetched}</span>}
@@ -776,7 +877,7 @@ export default function ReportDashboard() {
               <div className="flex items-center gap-2 px-4 py-3 rounded-xl tint-dgr border border-dgr text-sm text-dgr">
                 <AlertCircle size={16} className="flex-shrink-0" />
                 <span>{flError}</span>
-                <button onClick={fetchFluctuation} className="ml-auto text-xs underline hover:no-underline">Thử lại</button>
+                <button onClick={() => fetchFluctuation()} className="ml-auto text-xs underline hover:no-underline">Thử lại</button>
               </div>
             )}
 
@@ -873,8 +974,12 @@ export default function ReportDashboard() {
                       <YAxis tick={{ fontSize: 10, fill: '#9CA3AF' }} allowDecimals={false} axisLine={false} tickLine={false} />
                       <Tooltip content={<CustomBarTooltip />} />
                       <Legend wrapperStyle={{ fontSize: 11, color: '#D1D5DB' }} />
-                      <Bar dataKey="Tăng thực tế" fill="#10b981" radius={[3, 3, 0, 0]} maxBarSize={28} />
-                      <Bar dataKey="Giảm thực tế" fill="#f97316" radius={[3, 3, 0, 0]} maxBarSize={28} />
+                      {flFilter.type !== 'giam' && (
+                        <Bar dataKey="Tăng thực tế" fill="#10b981" radius={[3, 3, 0, 0]} maxBarSize={28} />
+                      )}
+                      {flFilter.type !== 'tang' && (
+                        <Bar dataKey="Giảm thực tế" fill="#f97316" radius={[3, 3, 0, 0]} maxBarSize={28} />
+                      )}
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -924,53 +1029,138 @@ export default function ReportDashboard() {
                   <table className="w-full text-sm min-w-[550px]">
                     <thead>
                       <tr className="bg-act/90 border-b border-bdr">
-                        <th className="text-left px-5 py-3 text-xs font-bold text-mu uppercase tracking-wider">Ngày</th>
-                        <th className="text-center px-4 py-3 text-xs font-bold text-ok uppercase tracking-wider">Tăng thực tế</th>
-                        <th className="text-center px-4 py-3 text-xs font-bold text-wn uppercase tracking-wider">Giảm thực tế</th>
+                        <th className="text-left px-5 py-3 text-xs font-bold text-mu uppercase tracking-wider">Ngày (nhấp để xem chi tiết)</th>
+                        <th className="text-center px-4 py-3 text-xs font-bold text-ok uppercase tracking-wider">Tăng thực tế (Vào)</th>
+                        <th className="text-center px-4 py-3 text-xs font-bold text-wn uppercase tracking-wider">Giảm thực tế (Ra)</th>
                         <th className="text-center px-4 py-3 text-xs font-bold text-lnk uppercase tracking-wider">Biến động ròng</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-750">
-                      {filteredDailyData.map((row, idx) => (
-                        <tr
-                          key={row.ngay}
-                          className={`hover:bg-act/70 hover:border-l-2 hover:border-l-emerald-500 transition-colors duration-150 ${
-                            idx % 2 === 0 ? 'bg-surf' : 'bg-act/40'
-                          }`}
-                        >
-                          <td className="px-5 py-3 font-semibold text-tx font-tabular">{formatDateVN(row.ngay)}</td>
-                          <td className="px-4 py-3 text-center">
-                            {row.so_tang > 0 ? (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-okbg/20 text-ok border border-bdr2 font-tabular">
-                                <UserPlus size={11} /> +{row.so_tang}
-                              </span>
-                            ) : (
-                              <span className="text-ic text-xs">—</span>
+                      {filteredDailyData.map((row, idx) => {
+                        const isToday = row.ngay === getVNDateString();
+                        const isExpanded = expandedDate === row.ngay;
+                        return (
+                          <React.Fragment key={row.ngay}>
+                            <tr
+                              onClick={() => setExpandedDate(prev => (prev === row.ngay ? null : row.ngay))}
+                              className={`cursor-pointer hover:bg-act/70 hover:border-l-2 hover:border-l-emerald-500 transition-colors duration-150 ${
+                                isToday ? 'bg-okbg/10' : idx % 2 === 0 ? 'bg-surf' : 'bg-act/40'
+                              }`}
+                            >
+                              <td className="px-5 py-3 font-semibold text-tx font-tabular">
+                                <div className="flex items-center gap-2">
+                                  {isExpanded ? <ChevronDown size={14} className="text-ok" /> : <ChevronRight size={14} className="text-mu" />}
+                                  <span>{formatDateVN(row.ngay)}</span>
+                                  {isToday && (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-okbg text-ok border border-bdr2">
+                                      Hôm nay
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                {row.so_tang > 0 ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-okbg/20 text-ok border border-bdr2 font-tabular">
+                                    <UserPlus size={11} /> +{row.so_tang.toLocaleString('vi-VN')}
+                                  </span>
+                                ) : (
+                                  <span className="text-ic text-xs">—</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                {row.so_giam > 0 ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold tint-wn text-wn border border-orange-500/30 font-tabular">
+                                    <UserMinus size={11} /> -{row.so_giam.toLocaleString('vi-VN')}
+                                  </span>
+                                ) : (
+                                  <span className="text-ic text-xs">—</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold font-tabular ${
+                                  row.bien_dong_rong > 0
+                                    ? 'bg-bdg/20 text-lnk border border-bdr2'
+                                    : row.bien_dong_rong < 0
+                                    ? 'tint-wn text-wn border border-wn'
+                                    : 'bg-act text-mu border border-bdr'
+                                }`}>
+                                  {row.bien_dong_rong > 0 ? <TrendingUp size={11} /> : row.bien_dong_rong < 0 ? <TrendingDown size={11} /> : null}
+                                  {row.bien_dong_rong > 0 ? `+${row.bien_dong_rong.toLocaleString('vi-VN')}` : row.bien_dong_rong.toLocaleString('vi-VN')}
+                                </span>
+                              </td>
+                            </tr>
+                            {isExpanded && (
+                              <tr className="bg-act/60">
+                                <td colSpan={4} className="px-5 py-4 border-t border-bdr/60">
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                                    {/* Danh sách vào */}
+                                    <div className="bg-surf/90 rounded-xl border border-bdr/60 p-3">
+                                      <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-bdr/60">
+                                        <span className="font-bold text-ok flex items-center gap-1.5">
+                                          <UserPlus size={13} /> Công nhân vào ở ({row.entries.length.toLocaleString('vi-VN')})
+                                        </span>
+                                      </div>
+                                      {row.entries.length === 0 ? (
+                                        <p className="text-mu py-2">Không có công nhân vào trong ngày này</p>
+                                      ) : (
+                                        <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
+                                          {row.entries.slice(0, 100).map((p, i) => (
+                                            <div key={`${p.id}-${i}`} className="flex items-center justify-between gap-2 py-1 px-2 rounded-lg bg-act/60">
+                                              <div className="min-w-0">
+                                                <span className="font-semibold text-tx truncate block">{p.ho_va_ten}</span>
+                                                <span className="text-[11px] text-mu">
+                                                  Mã: {p.ma_nv}{p.ktx ? ` · ${p.ktx}` : ''}{p.day ? ` · ${p.day}` : ''}
+                                                </span>
+                                              </div>
+                                              <span className="text-[11px] font-tabular text-ok flex-shrink-0">{p.time_vn}</span>
+                                            </div>
+                                          ))}
+                                          {row.entries.length > 100 && (
+                                            <p className="text-[11px] text-mu text-center pt-1">
+                                              Hiển thị 100/{row.entries.length.toLocaleString('vi-VN')} lượt vào gần nhất
+                                            </p>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* Danh sách ra */}
+                                    <div className="bg-surf/90 rounded-xl border border-bdr/60 p-3">
+                                      <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-bdr/60">
+                                        <span className="font-bold text-wn flex items-center gap-1.5">
+                                          <UserMinus size={13} /> Công nhân rời khỏi KTX ({row.exits.length.toLocaleString('vi-VN')})
+                                        </span>
+                                      </div>
+                                      {row.exits.length === 0 ? (
+                                        <p className="text-mu py-2">Không có công nhân rời khỏi trong ngày này</p>
+                                      ) : (
+                                        <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
+                                          {row.exits.slice(0, 100).map((p, i) => (
+                                            <div key={`${p.id}-${i}`} className="flex items-center justify-between gap-2 py-1 px-2 rounded-lg bg-act/60">
+                                              <div className="min-w-0">
+                                                <span className="font-semibold text-tx truncate block">{p.ho_va_ten}</span>
+                                                <span className="text-[11px] text-mu">
+                                                  Mã: {p.ma_nv}{p.ktx ? ` · ${p.ktx}` : ''}{p.day ? ` · ${p.day}` : ''}
+                                                </span>
+                                              </div>
+                                              <span className="text-[11px] font-tabular text-wn flex-shrink-0">{p.time_vn}</span>
+                                            </div>
+                                          ))}
+                                          {row.exits.length > 100 && (
+                                            <p className="text-[11px] text-mu text-center pt-1">
+                                              Hiển thị 100/{row.exits.length.toLocaleString('vi-VN')} lượt rời gần nhất
+                                            </p>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
                             )}
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            {row.so_giam > 0 ? (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold tint-wn text-wn border border-orange-500/30 font-tabular">
-                                <UserMinus size={11} /> -{row.so_giam}
-                              </span>
-                            ) : (
-                              <span className="text-ic text-xs">—</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold font-tabular ${
-                              row.bien_dong_rong > 0
-                                ? 'bg-bdg/20 text-lnk border border-bdr2'
-                                : row.bien_dong_rong < 0
-                                ? 'tint-wn text-wn border border-wn'
-                                : 'bg-act text-mu border border-bdr'
-                            }`}>
-                              {row.bien_dong_rong > 0 ? <TrendingUp size={11} /> : row.bien_dong_rong < 0 ? <TrendingDown size={11} /> : null}
-                              {row.bien_dong_rong > 0 ? `+${row.bien_dong_rong}` : row.bien_dong_rong}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                          </React.Fragment>
+                        );
+                      })}
                     </tbody>
                     {/* Summary row */}
                     <tfoot>
@@ -1007,10 +1197,9 @@ export default function ReportDashboard() {
             <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-act/70 border border-bdr/60 text-xs text-mu">
               <TrendingUp size={15} className="text-ok flex-shrink-0 mt-0.5" />
               <div>
-                <span className="font-bold text-tx">Nguồn dữ liệu thời gian thực:</span> Số liệu biến động được tính toán tự động từ bảng{' '}
-                <code className="bg-act text-ok px-1 py-0.5 rounded font-mono">workers</code> dựa trên thời điểm vào ({' '}
-                <code className="bg-act text-mu px-1 py-0.5 rounded font-mono">created_at</code>) và ngày ra ({' '}
-                <code className="bg-act text-mu px-1 py-0.5 rounded font-mono">deleted_at</code>).
+                <span className="font-bold text-tx">Nguồn dữ liệu thời gian thực (giờ Việt Nam UTC+7):</span> Số liệu vào ở được tổng hợp tức thì từ bảng{' '}
+                <code className="bg-act text-ok px-1 py-0.5 rounded font-mono">workers</code> và số liệu rời khỏi KTX được ghi nhận ngay lập tức từ bảng{' '}
+                <code className="bg-act text-wn px-1 py-0.5 rounded font-mono">worker_deletion_log</code> theo từng ngày, tự động đồng bộ khi thêm hoặc xóa công nhân.
               </div>
             </div>
           </div>
