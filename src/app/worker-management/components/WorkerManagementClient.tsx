@@ -8,7 +8,7 @@ import WorkerFormModal from './WorkerFormModal';
 import WorkerDetailModal from './WorkerDetailModal';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import BulkActionBar from './BulkActionBar';
-import { Plus, Download, Upload, X, FileText, AlertCircle, FileCheck, ChevronLeft, ChevronRight, Trash2, Building2, CheckSquare, Filter, Users } from 'lucide-react';
+import { Plus, Download, Upload, X, FileText, AlertCircle, AlertTriangle, FileCheck, ChevronLeft, ChevronRight, Trash2, Building2, CheckSquare, Filter, Users, ArrowRightLeft } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { exportToExcel } from '@/lib/exportExcel';
 import { useAuth } from '@/context/AuthContext';
@@ -16,6 +16,7 @@ import { useAudit } from '@/context/AuditContext';
 import { useWorkers } from '@/context/WorkerContext';
 import { useSearchParams } from 'next/navigation';
 import { useKtxStructure } from '@/lib/ktxStructure';
+import { fetchRoomCapacities, getRoomCapacity, normalizeRoomLabel, RoomCapacityMap } from '@/lib/facilityCapacity';
 
 export interface FilterState {
   search: string;
@@ -184,10 +185,48 @@ interface ParsedWorkerRow {
   giuong: string;
 }
 
-const PREVIEW_HEADERS = ['KTX', 'Họ và Tên', 'Mã NV', 'CCCD', 'SĐT', 'Dãy', 'Phòng', 'Ngày Sinh', 'Quê Quán', 'Tổ Trưởng', 'Ngày Vào KTX', 'Ghi Chú'];
+const PREVIEW_HEADERS = ['Trạng thái', 'KTX', 'Họ và Tên', 'Mã NV', 'CCCD', 'SĐT', 'Dãy', 'Phòng', 'Ngày Sinh', 'Quê Quán', 'Tổ Trưởng', 'Ngày Vào KTX', 'Ghi Chú'];
 const PREVIEW_PAGE_SIZE = 20;
 
-function ExcelImportModal({ onClose, onImport }: { onClose: () => void; onImport: (rows: Worker[]) => Promise<void> }) {
+type DuplicateResolutionMode = 'skip' | 'update' | 'add_all';
+
+function normDupMaNV(val?: string | null): string {
+  const s = (val || '').trim().toLowerCase();
+  if (!s || s === '-' || s === 'chờ mã' || s === 'cho ma') return '';
+  return s;
+}
+
+function normDupCCCD(val?: string | null): string {
+  const s = (val || '').trim().replace(/\s+/g, '');
+  if (!s || s === '-') return '';
+  return s;
+}
+
+interface RowAnalysis {
+  status: 'new' | 'dup_system' | 'dup_in_file';
+  reason: string;
+  matchedWorker?: Worker;
+}
+
+interface OverloadPreviewItem {
+  ktx: string;
+  day: string;
+  room: string;
+  existingCount: number;
+  incomingCount: number;
+  projectedCount: number;
+  capacity: number;
+}
+
+function ExcelImportModal({
+  onClose,
+  onImport,
+  existingWorkers,
+}: {
+  onClose: () => void;
+  onImport: (rows: Worker[]) => Promise<void>;
+  existingWorkers: Worker[];
+}) {
   const { ktxNames } = useKtxStructure();
   const [parsedRows, setParsedRows] = useState<ParsedWorkerRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -198,7 +237,87 @@ function ExcelImportModal({ onClose, onImport }: { onClose: () => void; onImport
   const [importing, setImporting] = useState(false);
   const [selectedKtx, setSelectedKtx] = useState<string>('');
   const [hasKtxColumn, setHasKtxColumn] = useState(false);
+  const [dupMode, setDupMode] = useState<DuplicateResolutionMode>('skip');
+  const [capacities, setCapacities] = useState<RoomCapacityMap>({});
+  const [showOverloadDetails, setShowOverloadDetails] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetchRoomCapacities()
+      .then(map => {
+        if (active) setCapacities(map);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const existingByMaNV = useMemo(() => {
+    const map = new Map<string, Worker>();
+    existingWorkers.forEach(w => {
+      const k = normDupMaNV(w.maNV);
+      if (k && !map.has(k)) map.set(k, w);
+    });
+    return map;
+  }, [existingWorkers]);
+
+  const existingByCCCD = useMemo(() => {
+    const map = new Map<string, Worker>();
+    existingWorkers.forEach(w => {
+      const k = normDupCCCD(w.cccd);
+      if (k && !map.has(k)) map.set(k, w);
+    });
+    return map;
+  }, [existingWorkers]);
+
+  const rowAnalyses = useMemo<RowAnalysis[]>(() => {
+    const seenMaNV = new Set<string>();
+    const seenCCCD = new Set<string>();
+
+    return parsedRows.map(row => {
+      const mKey = normDupMaNV(row.maCongNhan);
+      const cKey = normDupCCCD(row.soCCCD);
+
+      const inFileMa = mKey ? seenMaNV.has(mKey) : false;
+      const inFileCCCD = cKey ? seenCCCD.has(cKey) : false;
+      if (mKey) seenMaNV.add(mKey);
+      if (cKey) seenCCCD.add(cKey);
+
+      if (inFileMa || inFileCCCD) {
+        return {
+          status: 'dup_in_file',
+          reason: inFileMa && inFileCCCD ? 'Trùng Mã NV & CCCD trong file' : inFileMa ? 'Trùng Mã NV trong file' : 'Trùng CCCD trong file',
+        };
+      }
+
+      const matchMa = mKey ? existingByMaNV.get(mKey) : undefined;
+      const matchCCCD = cKey ? existingByCCCD.get(cKey) : undefined;
+      const matched = matchMa || matchCCCD;
+      if (matched) {
+        return {
+          status: 'dup_system',
+          reason: matchMa && matchCCCD ? 'Trùng Mã NV & CCCD' : matchMa ? 'Trùng Mã NV' : 'Trùng CCCD',
+          matchedWorker: matched,
+        };
+      }
+
+      return { status: 'new', reason: 'Mới' };
+    });
+  }, [parsedRows, existingByMaNV, existingByCCCD]);
+
+  const dupStats = useMemo(() => {
+    let newCount = 0;
+    let sysDupCount = 0;
+    let fileDupCount = 0;
+    rowAnalyses.forEach(a => {
+      if (a.status === 'new') newCount++;
+      else if (a.status === 'dup_system') sysDupCount++;
+      else fileDupCount++;
+    });
+    return { newCount, sysDupCount, fileDupCount };
+  }, [rowAnalyses]);
 
   const previewTotalPages = Math.ceil(parsedRows.length / PREVIEW_PAGE_SIZE);
   const previewRows = parsedRows.slice((previewPage - 1) * PREVIEW_PAGE_SIZE, previewPage * PREVIEW_PAGE_SIZE);
@@ -345,49 +464,131 @@ function ExcelImportModal({ onClose, onImport }: { onClose: () => void; onImport
     if (file) parseExcelFile(file);
   };
 
-  const getEffectiveKtx = (row: ParsedWorkerRow): string => {
+  const getEffectiveKtx = useCallback((row: ParsedWorkerRow): string => {
     if (hasKtxColumn && row.ktxFromExcel) return row.ktxFromExcel;
     return selectedKtx || (ktxNames[0] || '');
-  };
+  }, [hasKtxColumn, selectedKtx, ktxNames]);
 
-  const canConfirm = parsedRows.length > 0 && (hasKtxColumn || selectedKtx !== '');
+  const effectiveImportIndices = useMemo(() => {
+    const idxs: number[] = [];
+    parsedRows.forEach((_, idx) => {
+      const analysis = rowAnalyses[idx];
+      if (!analysis) return;
+      if (dupMode === 'skip') {
+        if (analysis.status === 'new') idxs.push(idx);
+      } else if (dupMode === 'update') {
+        if (analysis.status === 'new' || analysis.status === 'dup_system') idxs.push(idx);
+      } else {
+        idxs.push(idx);
+      }
+    });
+    return idxs;
+  }, [parsedRows, rowAnalyses, dupMode]);
+
+  const capacityCheck = useMemo(() => {
+    const updatedExistingIds = new Set<string>();
+    if (dupMode === 'update') {
+      effectiveImportIndices.forEach(idx => {
+        const matched = rowAnalyses[idx]?.matchedWorker;
+        if (matched?.id) updatedExistingIds.add(matched.id);
+      });
+    }
+
+    const existingByRoom = new Map<string, number>();
+    existingWorkers.forEach(w => {
+      if (updatedExistingIds.has(w.id)) return;
+      if (!w.ktx || !w.day || !w.phongSo) return;
+      const key = `${w.ktx.trim()}||${w.day.trim()}||${normalizeRoomLabel(w.phongSo)}`;
+      existingByRoom.set(key, (existingByRoom.get(key) || 0) + 1);
+    });
+
+    const incomingByRoom = new Map<string, { ktx: string; day: string; room: string; count: number }>();
+    effectiveImportIndices.forEach(idx => {
+      const row = parsedRows[idx];
+      const ktx = getEffectiveKtx(row).trim();
+      const day = normalizeDayNha(row.dayNha).trim();
+      const roomNormDisplay = normalizePhong(row.soPhong).trim();
+      if (!ktx || !day || !roomNormDisplay) return;
+      const key = `${ktx}||${day}||${normalizeRoomLabel(roomNormDisplay)}`;
+      const cur = incomingByRoom.get(key);
+      if (cur) cur.count++;
+      else incomingByRoom.set(key, { ktx, day, room: roomNormDisplay, count: 1 });
+    });
+
+    const overloadedList: OverloadPreviewItem[] = [];
+    const overloadedRoomKeys = new Set<string>();
+    incomingByRoom.forEach((info, key) => {
+      const existingCount = existingByRoom.get(key) || 0;
+      const projectedCount = existingCount + info.count;
+      const cap = getRoomCapacity(capacities, info.ktx, info.day, info.room) || DEFAULT_ROOM_CAPACITY;
+      if (projectedCount > cap) {
+        overloadedRoomKeys.add(key);
+        overloadedList.push({
+          ktx: info.ktx,
+          day: info.day,
+          room: info.room,
+          existingCount,
+          incomingCount: info.count,
+          projectedCount,
+          capacity: cap,
+        });
+      }
+    });
+
+    overloadedList.sort((a, b) => (b.projectedCount - b.capacity) - (a.projectedCount - a.capacity));
+    return { overloadedList, overloadedRoomKeys };
+  }, [effectiveImportIndices, rowAnalyses, dupMode, existingWorkers, parsedRows, getEffectiveKtx, capacities]);
+
+  const canConfirm = parsedRows.length > 0 && effectiveImportIndices.length > 0 && (hasKtxColumn || selectedKtx !== '');
 
   const handleConfirm = async () => {
-    if (!canConfirm) {
+    if (!hasKtxColumn && selectedKtx === '') {
       toast.error('Vui lòng chọn KTX trước khi nhập dữ liệu.');
       return;
     }
-    const workers: Worker[] = parsedRows.map((r, i) => {
+    if (effectiveImportIndices.length === 0) {
+      toast.warning('Không có dòng hợp lệ nào để nhập theo chế độ xử lý trùng lặp hiện tại.');
+      return;
+    }
+    const batchTs = Date.now();
+    const workersToCommit: Worker[] = effectiveImportIndices.map((idx, seq) => {
+      const r = parsedRows[idx];
+      const analysis = rowAnalyses[idx];
+      const matched = dupMode === 'update' ? analysis?.matchedWorker : undefined;
       const ktxValue = getEffectiveKtx(r);
       const dayNorm = normalizeDayNha(r.dayNha);
       const phongNorm = normalizePhong(r.soPhong);
       return {
-        id: `import-${Date.now()}-${i}`,
-        stt: 0,
+        id: matched?.id || `import-${batchTs}-${seq}`,
+        stt: matched?.stt || 0,
         hoVaTen: r.hoTen,
-        maNV: r.maCongNhan,
-        tieuDoan: r.tieuDoan || '',
+        maNV: r.maCongNhan || matched?.maNV || '',
+        tieuDoan: r.tieuDoan || matched?.tieuDoan || '',
         ktx: ktxValue,
-        donVi: r.donVi || '',
-        gioiTinh: r.gioiTinh || '',
-        ngaySinh: r.ngaySinh,
-        soDienThoai: r.soDienThoai,
-        day: dayNorm,
-        phongSo: phongNorm,
-        giuong: r.giuong || '',
-        cccd: r.soCCCD,
-        hoKhauTinh: r.queQuan,
-        toTruong: r.toTruong,
-        sdtToTruong: r.sdtToTruong,
-        ngayVaoKTX: r.ngayVao,
-        ghiChu: r.ghiChu,
-        khoaTraCuu: `${ktxValue}|${dayNorm}|${phongNorm}`,
-        tamTruStatus: 'unregistered' as const,
+        donVi: r.donVi || matched?.donVi || '',
+        gioiTinh: r.gioiTinh || matched?.gioiTinh || '',
+        ngaySinh: r.ngaySinh || matched?.ngaySinh || '',
+        soDienThoai: r.soDienThoai || matched?.soDienThoai || '',
+        day: dayNorm || matched?.day || '',
+        phongSo: phongNorm || matched?.phongSo || '',
+        giuong: r.giuong || matched?.giuong || '',
+        cccd: r.soCCCD || matched?.cccd || '',
+        hoKhauTinh: r.queQuan || matched?.hoKhauTinh || '',
+        toTruong: r.toTruong || matched?.toTruong || '',
+        sdtToTruong: r.sdtToTruong || matched?.sdtToTruong || '',
+        ngayVaoKTX: r.ngayVao || matched?.ngayVaoKTX || '',
+        ghiChu: r.ghiChu || matched?.ghiChu || '',
+        khoaTraCuu: `${ktxValue}|${dayNorm || matched?.day || ''}|${phongNorm || matched?.phongSo || ''}`,
+        tamTruStatus: matched?.tamTruStatus ?? ('unregistered' as const),
       };
     });
+
     setImporting(true);
     try {
-      await onImport(workers);
+      await onImport(workersToCommit);
+      if (capacityCheck.overloadedList.length > 0) {
+        toast.warning(`Lưu ý: Có ${capacityCheck.overloadedList.length} phòng vượt sức chứa sau khi nhập.`);
+      }
       onClose();
     } catch {
       toast.error('Lỗi khi nhập dữ liệu. Vui lòng thử lại.');
@@ -470,15 +671,85 @@ function ExcelImportModal({ onClose, onImport }: { onClose: () => void; onImport
           )}
 
           {parsedRows.length > 0 && (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-100 text-green-700 text-xs font-bold border border-green-200">
-                    ✓ Đã tìm thấy {total} công nhân
-                  </span>
+            <div className="space-y-3">
+              {/* Smart diagnostics summary */}
+              <div className="rounded-xl border border-border bg-muted/20 p-3.5 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-100 text-green-700 text-xs font-bold border border-green-200">
+                      ✓ Đọc {total} dòng · Mới hợp lệ: {dupStats.newCount}
+                    </span>
+                    {dupStats.sysDupCount > 0 && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-bold border border-amber-300">
+                        <AlertTriangle size={12} /> Trùng hệ thống: {dupStats.sysDupCount}
+                      </span>
+                    )}
+                    {dupStats.fileDupCount > 0 && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-orange-100 text-orange-800 text-xs font-bold border border-orange-300">
+                        <AlertCircle size={12} /> Trùng trong file: {dupStats.fileDupCount}
+                      </span>
+                    )}
+                    {capacityCheck.overloadedList.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowOverloadDetails(v => !v)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold border border-red-300 hover:bg-red-200 transition-colors"
+                      >
+                        <AlertTriangle size={12} />
+                        <span>Cảnh báo quá tải: {capacityCheck.overloadedList.length} phòng</span>
+                      </button>
+                    )}
+                  </div>
                   <span className="text-xs text-muted-foreground">(Trang {previewPage}/{previewTotalPages})</span>
                 </div>
+
+                {/* Duplicate resolution options */}
+                {(dupStats.sysDupCount > 0 || dupStats.fileDupCount > 0) && (
+                  <div className="pt-2 border-t border-border/70 flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
+                    <span className="text-xs font-semibold text-foreground">Xử lý dòng trùng Mã NV / CCCD:</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {([
+                        { id: 'skip', label: 'Bỏ qua dòng trùng (Khuyến nghị)' },
+                        { id: 'update', label: 'Cập nhật ghi đè hồ sơ cũ' },
+                        { id: 'add_all', label: 'Vẫn thêm mới tất cả' },
+                      ] as { id: DuplicateResolutionMode; label: string }[]).map(opt => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setDupMode(opt.id)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                            dupMode === opt.id
+                              ? 'bg-primary text-primary-foreground border-primary'
+                              : 'bg-card text-foreground border-border hover:border-primary/50'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Expandable overloaded rooms preview */}
+                {capacityCheck.overloadedList.length > 0 && showOverloadDetails && (
+                  <div className="pt-2 border-t border-red-200 space-y-1.5 max-h-36 overflow-y-auto">
+                    <p className="text-xs font-semibold text-red-700">
+                      Các phòng dự kiến vượt định mức giường (hệ thống vẫn cho phép lưu nếu cần thiết):
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                      {capacityCheck.overloadedList.map((item, idx) => (
+                        <div key={idx} className="text-xs px-2.5 py-1.5 rounded-lg bg-red-50 border border-red-200 text-red-800 flex items-center justify-between">
+                          <span className="font-semibold">{item.ktx} · {item.day} · P.{item.room}</span>
+                          <span className="font-tabular font-bold">
+                            {item.existingCount}+{item.incomingCount} = {item.projectedCount}/{item.capacity}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
+
               <div className="overflow-x-auto rounded-lg border border-border">
                 <table className="w-full text-xs">
                   <thead className="bg-muted/50 sticky top-0">
@@ -491,10 +762,40 @@ function ExcelImportModal({ onClose, onImport }: { onClose: () => void; onImport
                   </thead>
                   <tbody>
                     {previewRows.map((row, i) => {
+                      const absIdx = (previewPage - 1) * PREVIEW_PAGE_SIZE + i;
+                      const analysis = rowAnalyses[absIdx];
                       const effectiveKtx = getEffectiveKtx(row);
+                      const dayNorm = normalizeDayNha(row.dayNha);
+                      const phongNorm = normalizePhong(row.soPhong);
+                      const roomKey = `${effectiveKtx.trim()}||${dayNorm.trim()}||${normalizeRoomLabel(phongNorm)}`;
+                      const isOverloadedRoom = capacityCheck.overloadedRoomKeys.has(roomKey);
+                      const willSkip =
+                        (dupMode === 'skip' && analysis?.status !== 'new') ||
+                        (dupMode === 'update' && analysis?.status === 'dup_in_file');
+
                       return (
-                        <tr key={i} className="border-t border-border hover:bg-muted/20">
-                          <td className="px-2 py-1.5 text-muted-foreground">{(previewPage - 1) * PREVIEW_PAGE_SIZE + i + 1}</td>
+                        <tr key={i} className={`border-t border-border hover:bg-muted/20 ${willSkip ? 'opacity-50' : ''}`}>
+                          <td className="px-2 py-1.5 text-muted-foreground">{absIdx + 1}</td>
+                          <td className="px-2 py-1.5 whitespace-nowrap">
+                            <div className="flex items-center gap-1">
+                              {analysis?.status === 'new' ? (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-700 border border-green-200">Mới</span>
+                              ) : analysis?.status === 'dup_system' ? (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300" title={analysis.reason}>
+                                  {analysis.reason}
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800 border border-orange-300" title={analysis?.reason}>
+                                  Trùng file
+                                </span>
+                              )}
+                              {isOverloadedRoom && !willSkip && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 border border-red-200" title="Phòng sẽ quá tải">
+                                  Quá tải
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-2 py-1.5 whitespace-nowrap">
                             <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold bg-primary/10 text-primary border border-primary/20">
                               {effectiveKtx || '—'}
@@ -504,8 +805,8 @@ function ExcelImportModal({ onClose, onImport }: { onClose: () => void; onImport
                           <td className="px-2 py-1.5 text-foreground whitespace-nowrap">{row.maCongNhan || '—'}</td>
                           <td className="px-2 py-1.5 font-tabular text-foreground whitespace-nowrap">{row.soCCCD || '—'}</td>
                           <td className="px-2 py-1.5 font-tabular text-foreground whitespace-nowrap">{row.soDienThoai || '—'}</td>
-                          <td className="px-2 py-1.5 text-foreground whitespace-nowrap">{normalizeDayNha(row.dayNha) || '—'}</td>
-                          <td className="px-2 py-1.5 text-foreground whitespace-nowrap">{normalizePhong(row.soPhong) || '—'}</td>
+                          <td className="px-2 py-1.5 text-foreground whitespace-nowrap">{dayNorm || '—'}</td>
+                          <td className="px-2 py-1.5 text-foreground whitespace-nowrap">{phongNorm || '—'}</td>
                           <td className="px-2 py-1.5 text-foreground whitespace-nowrap">{row.ngaySinh || '—'}</td>
                           <td className="px-2 py-1.5 text-foreground whitespace-nowrap max-w-[120px] truncate">{row.queQuan || '—'}</td>
                           <td className="px-2 py-1.5 text-foreground whitespace-nowrap max-w-[120px] truncate">{row.toTruong || '—'}</td>
@@ -535,7 +836,11 @@ function ExcelImportModal({ onClose, onImport }: { onClose: () => void; onImport
         <div className="px-5 py-3 border-t border-border flex items-center justify-between flex-shrink-0">
           <p className="text-xs text-muted-foreground">
             {total > 0 ? (
-              <span className="text-green-700 font-semibold">{total} công nhân sẵn sàng nhập</span>
+              <span className={effectiveImportIndices.length > 0 ? 'text-green-700 font-semibold' : 'text-amber-600 font-semibold'}>
+                {effectiveImportIndices.length > 0
+                  ? `${effectiveImportIndices.length}/${total} công nhân sẽ được ${dupMode === 'update' ? 'thêm / cập nhật' : 'nhập'}`
+                  : 'Không có dòng nào sẽ được nhập (tất cả bị trùng đang ở chế độ Bỏ qua)'}
+              </span>
             ) : 'Chưa có file nào được chọn'}
           </p>
           <div className="flex gap-2">
@@ -546,7 +851,7 @@ function ExcelImportModal({ onClose, onImport }: { onClose: () => void; onImport
               className="btn-primary text-xs disabled:opacity-50"
             >
               <FileCheck size={14} />
-              {importing ? 'Đang nhập...' : `Xác nhận nhập ${total > 0 ? `${total} công nhân` : ''}`}
+              {importing ? 'Đang nhập...' : `Xác nhận nhập ${effectiveImportIndices.length > 0 ? `${effectiveImportIndices.length} công nhân` : ''}`}
             </button>
           </div>
         </div>
@@ -1014,8 +1319,264 @@ function BulkDeleteByFilterModal({
   );
 }
 
+// ─── Bulk Transfer Workers Modal (Room / Building / Battalion) ───────────────
+function BulkTransferWorkersModal({
+  selectedWorkers,
+  allWorkers,
+  onClose,
+  onTransfer,
+  isAdmin,
+  canWriteBlock,
+}: {
+  selectedWorkers: Worker[];
+  allWorkers: Worker[];
+  onClose: () => void;
+  onTransfer: (target: {
+    ktx: string;
+    day: string;
+    phongSo: string;
+    tieuDoanMode: 'keep' | 'clear' | 'set';
+    tieuDoan: string;
+  }) => Promise<void>;
+  isAdmin: boolean;
+  canWriteBlock: (day: string, ktx?: string) => boolean;
+}) {
+  const { ktxGroups, ktxNames } = useKtxStructure();
+
+  const ktxOptions = useMemo(() => {
+    const set = new Set<string>(ktxNames);
+    allWorkers.forEach(w => { if (w.ktx?.trim()) set.add(w.ktx.trim()); });
+    return [...set].sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }));
+  }, [ktxNames, allWorkers]);
+
+  const authorizedSelected = useMemo(
+    () => selectedWorkers.filter(w => isAdmin || canWriteBlock(w.day, w.ktx)),
+    [selectedWorkers, isAdmin, canWriteBlock]
+  );
+  const skippedCount = selectedWorkers.length - authorizedSelected.length;
+
+  const [targetKtx, setTargetKtx] = useState<string>(() => ktxOptions[0] || 'KTX 1');
+  const [targetDay, setTargetDay] = useState<string>('');
+  const [targetRoom, setTargetRoom] = useState<string>('');
+  const [tieuDoanMode, setTieuDoanMode] = useState<'keep' | 'clear' | 'set'>('keep');
+  const [targetTieuDoan, setTargetTieuDoan] = useState<string>('8');
+  const [submitting, setSubmitting] = useState(false);
+
+  const dayOptions = useMemo(() => {
+    const set = new Set<string>();
+    const group = ktxGroups.find(g => g.ktx === targetKtx);
+    if (group) {
+      group.blocks.forEach(b => {
+        const d = b.includes(' - ') ? b.split(' - ').slice(1).join(' - ').trim() : b;
+        if (d) set.add(d);
+      });
+    }
+    allWorkers.forEach(w => {
+      if (w.ktx === targetKtx && w.day?.trim()) set.add(w.day.trim());
+    });
+    return [...set]
+      .filter(d => isAdmin || canWriteBlock(d, targetKtx))
+      .sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }));
+  }, [ktxGroups, allWorkers, targetKtx, isAdmin, canWriteBlock]);
+
+  useEffect(() => {
+    if (dayOptions.length > 0 && (!targetDay || !dayOptions.includes(targetDay))) {
+      setTargetDay(dayOptions[0]);
+    }
+  }, [dayOptions, targetDay]);
+
+  const roomOptions = useMemo(() => {
+    const set = new Set<string>();
+    allWorkers.forEach(w => {
+      if (w.ktx === targetKtx && w.day === targetDay && w.phongSo?.trim()) {
+        set.add(w.phongSo.trim());
+      }
+    });
+    return [...set].sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }));
+  }, [allWorkers, targetKtx, targetDay]);
+
+  const currentTargetCount = useMemo(() => {
+    if (!targetKtx || !targetDay || !targetRoom.trim()) return 0;
+    const normR = normalizePhong(targetRoom.trim());
+    const authIds = new Set(authorizedSelected.map(w => w.id));
+    return allWorkers.filter(
+      w =>
+        !authIds.has(w.id) &&
+        w.ktx === targetKtx &&
+        w.day === targetDay &&
+        normalizePhong(w.phongSo) === normR
+    ).length;
+  }, [allWorkers, authorizedSelected, targetKtx, targetDay, targetRoom]);
+
+  const projectedCount = currentTargetCount + authorizedSelected.length;
+  const targetAuthorized = isAdmin || (targetDay.trim() ? canWriteBlock(targetDay.trim(), targetKtx.trim()) : false);
+  const canSubmit =
+    authorizedSelected.length > 0 &&
+    Boolean(targetKtx.trim() && targetDay.trim() && targetRoom.trim()) &&
+    targetAuthorized &&
+    !submitting;
+
+  const handleConfirm = async () => {
+    if (!canSubmit) return;
+    setSubmitting(true);
+    try {
+      await onTransfer({
+        ktx: targetKtx.trim(),
+        day: targetDay.trim(),
+        phongSo: targetRoom.trim(),
+        tieuDoanMode,
+        tieuDoan: targetTieuDoan.trim(),
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm fade-in">
+      <div className="modal-enter bg-card border border-border rounded-2xl shadow-modal w-full max-w-lg overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-bdg border border-bdr2 flex items-center justify-center text-lnk">
+              <ArrowRightLeft size={17} />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-foreground">Chuyển phòng / Dãy / Tiểu đoàn hàng loạt</h2>
+              <p className="text-xs text-muted-foreground">Áp dụng cho {selectedWorkers.length} công nhân đã chọn</p>
+            </div>
+          </div>
+          <button onClick={onClose} disabled={submitting} className="p-2 rounded-lg hover:bg-muted text-muted-foreground">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+          {skippedCount > 0 && (
+            <div className="p-3 rounded-xl tint-wn border border-wn text-xs text-wn">
+              Có <strong>{skippedCount}</strong> công nhân thuộc khu vực ngoài phạm vi phụ trách sẽ được bỏ qua. Chỉ chuyển <strong>{authorizedSelected.length}</strong> công nhân hợp lệ.
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-muted-foreground mb-1">KTX đích *</label>
+              <select
+                value={targetKtx}
+                onChange={e => { setTargetKtx(e.target.value); setTargetDay(''); }}
+                className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background text-foreground"
+              >
+                {ktxOptions.map(k => <option key={k} value={k}>{k}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-muted-foreground mb-1">Dãy đích *</label>
+              {dayOptions.length > 0 ? (
+                <select
+                  value={targetDay}
+                  onChange={e => setTargetDay(e.target.value)}
+                  className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background text-foreground"
+                >
+                  {dayOptions.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              ) : (
+                <input
+                  value={targetDay}
+                  onChange={e => setTargetDay(e.target.value)}
+                  placeholder="VD: Dãy 1"
+                  className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background text-foreground"
+                />
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-muted-foreground mb-1">Phòng đích * (chọn nhanh hoặc nhập tên phòng)</label>
+            <input
+              list="bulk-transfer-room-list"
+              value={targetRoom}
+              onChange={e => setTargetRoom(e.target.value)}
+              placeholder="VD: Phòng 1 hoặc 1"
+              className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background text-foreground"
+            />
+            <datalist id="bulk-transfer-room-list">
+              {roomOptions.map(r => <option key={r} value={r} />)}
+            </datalist>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-muted-foreground mb-1">Tiểu đoàn</label>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { value: 'keep', label: 'Giữ nguyên' },
+                { value: 'set', label: 'Gán TĐ mới' },
+                { value: 'clear', label: 'Xóa TĐ' },
+              ] as const).map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setTieuDoanMode(opt.value)}
+                  className={`py-2 px-2 rounded-lg text-xs font-semibold border transition-colors ${
+                    tieuDoanMode === opt.value
+                      ? 'bg-bdg text-lnk border-bdr2'
+                      : 'bg-background text-muted-foreground border-border hover:bg-muted/40'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {tieuDoanMode === 'set' && (
+              <input
+                value={targetTieuDoan}
+                onChange={e => setTargetTieuDoan(e.target.value)}
+                placeholder="VD: 8, 111, 113..."
+                className="mt-2 w-full border border-border rounded-lg px-3 py-2 text-sm bg-background text-foreground"
+              />
+            )}
+          </div>
+
+          {targetRoom.trim() && targetDay.trim() && (
+            <div className={`p-3 rounded-xl border text-xs space-y-1 ${
+              projectedCount > DEFAULT_ROOM_CAPACITY
+                ? 'tint-wn border-wn text-wn'
+                : 'bg-muted/40 border-border text-muted-foreground'
+            }`}>
+              <p>
+                Phòng đích <strong className="text-foreground">{targetKtx} · {targetDay} · {targetRoom}</strong> hiện có{' '}
+                <strong className="text-foreground font-tabular">{currentTargetCount}</strong> người → sau khi chuyển:{' '}
+                <strong className="font-tabular">{projectedCount}/{DEFAULT_ROOM_CAPACITY}</strong> người.
+              </p>
+              {projectedCount > DEFAULT_ROOM_CAPACITY && (
+                <p className="font-semibold">⚠ Sẽ vượt sức chứa mặc định ({DEFAULT_ROOM_CAPACITY} người) — hệ thống vẫn cho phép lưu.</p>
+              )}
+              <p className="opacity-80">Giường cũ của các công nhân được chuyển sẽ tự động được giải phóng.</p>
+            </div>
+          )}
+
+          {!targetAuthorized && targetDay.trim() && (
+            <p className="text-xs text-dgr font-medium">Bạn không có quyền ghi vào {targetKtx} - {targetDay}.</p>
+          )}
+        </div>
+
+        <div className="px-5 py-3 border-t border-border flex justify-end gap-2 bg-muted/20">
+          <button type="button" onClick={onClose} disabled={submitting} className="btn-secondary text-xs">Hủy</button>
+          <button
+            type="button"
+            onClick={handleConfirm}
+            disabled={!canSubmit}
+            className="btn-primary text-xs disabled:opacity-50"
+          >
+            <ArrowRightLeft size={13} />
+            {submitting ? 'Đang chuyển...' : `Chuyển ${authorizedSelected.length} công nhân`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function WorkerManagementClient() {
-  const { workers, loading, addWorker, updateWorker, deleteWorkers, deleteAllWorkers, importWorkers, updateTamTruStatus, bulkUpdateKtx, refreshWorkers } = useWorkers();
+  const { workers, loading, addWorker, updateWorker, deleteWorkers, deleteAllWorkers, importWorkers, updateTamTruStatus, bulkUpdateKtx, bulkUpdateWorkers, refreshWorkers } = useWorkers();
   const searchParams = useSearchParams();
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [sortKey, setSortKey] = useState<keyof Worker>('stt');
@@ -1029,6 +1590,7 @@ export function WorkerManagementClient() {
   const [showImport, setShowImport] = useState(false);
   const [showTamTruExport, setShowTamTruExport] = useState(false);
   const [showBulkAssignKtx, setShowBulkAssignKtx] = useState(false);
+  const [showBulkTransfer, setShowBulkTransfer] = useState(false);
   const [showBulkDeleteFilter, setShowBulkDeleteFilter] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Worker | Worker[] | null>(null);
   const [showDeleteAll, setShowDeleteAll] = useState(false);
@@ -1048,18 +1610,24 @@ export function WorkerManagementClient() {
     }
   }, [addLog, currentUser]);
 
-  // Handle URL filter param from dashboard
+  // Handle URL filter params from dashboard / operational alerts
   useEffect(() => {
     const filterParam = searchParams?.get('filter');
     const ktxParam = searchParams?.get('ktx');
-    if (filterParam === 'missing_room' || filterParam === 'no_room') {
+    const tamTruParam = searchParams?.get('tamTru');
+    if (filterParam || ktxParam || tamTruParam) {
       setFilters(prev => ({
         ...prev,
-        profileStatus: 'no_room',
+        ...(filterParam === 'missing_room' || filterParam === 'no_room'
+          ? { profileStatus: 'no_room' }
+          : filterParam === 'missing_cccd_sdt' || filterParam === 'full'
+          ? { profileStatus: filterParam }
+          : {}),
         ...(ktxParam ? { ktx: ktxParam } : {}),
+        ...(tamTruParam === 'registered' || tamTruParam === 'unregistered'
+          ? { tamTruStatus: tamTruParam }
+          : {}),
       }));
-    } else if (ktxParam) {
-      setFilters(prev => ({ ...prev, ktx: ktxParam }));
     }
   }, [searchParams]);
 
@@ -1261,11 +1829,104 @@ export function WorkerManagementClient() {
 
   const handleBulkAssignKtx = useCallback(async (ids: string[], ktxValue: string) => {
     await bulkUpdateKtx(ids, ktxValue);
+    writeAuditLog('UPDATE', `Gán ${ids.length} công nhân về ${ktxValue}`);
+  }, [bulkUpdateKtx, writeAuditLog]);
+
+  const handleBulkTamTru = useCallback(async (status: 'registered' | 'unregistered') => {
+    const selected = workers.filter(w => selectedIds.has(w.id));
+    const authorized = selected.filter(w => isAdmin || canWriteBlock(w.day, w.ktx));
+    if (authorized.length === 0) {
+      toast.error('Bạn không có quyền cập nhật trạng thái tạm trú cho các công nhân đã chọn.');
+      return;
+    }
+    const ids = authorized.map(w => w.id);
     const userEmail = currentUser?.email ?? 'unknown';
     const userName = currentUser?.name ?? userEmail;
     const now = formatDateVN(nowVN());
-    writeAuditLog('UPDATE', `Gán ${ids.length} công nhân về ${ktxValue}`);
-  }, [bulkUpdateKtx, writeAuditLog, currentUser]);
+    try {
+      await bulkUpdateWorkers(ids, { tamTruStatus: status });
+      addLog(
+        `${userName} (${userEmail})`,
+        'Đổi trạng thái tạm trú',
+        `[${now}] Cập nhật hàng loạt ${ids.length} công nhân → ${status === 'registered' ? 'Đã ĐK tạm trú' : 'Chưa ĐK tạm trú'}`
+      );
+      setSelectedIds(new Set());
+      toast.success(
+        `Đã cập nhật ${ids.length} công nhân sang "${status === 'registered' ? 'Đã ĐK tạm trú' : 'Chưa ĐK tạm trú'}"`
+      );
+    } catch (err) {
+      toast.error(`Lỗi cập nhật hàng loạt: ${err instanceof Error ? err.message : 'Không thể cập nhật'}`);
+    }
+  }, [workers, selectedIds, isAdmin, canWriteBlock, currentUser, bulkUpdateWorkers, addLog]);
+
+  const handleBulkTransfer = useCallback(async (target: {
+    ktx: string;
+    day: string;
+    phongSo: string;
+    tieuDoanMode: 'keep' | 'clear' | 'set';
+    tieuDoan: string;
+  }) => {
+    const selected = workers.filter(w => selectedIds.has(w.id));
+    const authorized = selected.filter(w => isAdmin || canWriteBlock(w.day, w.ktx));
+    if (authorized.length === 0) {
+      toast.error('Không có công nhân hợp lệ trong phạm vi quyền của bạn.');
+      return;
+    }
+    if (!isAdmin && !canWriteBlock(target.day, target.ktx)) {
+      toast.error(`Bạn không có quyền chuyển công nhân sang ${target.ktx} - ${target.day}.`);
+      return;
+    }
+
+    const ids = authorized.map(w => w.id);
+    const authIdSet = new Set(ids);
+    const normR = normalizePhong(target.phongSo);
+    const currentDestCount = workers.filter(
+      w =>
+        !authIdSet.has(w.id) &&
+        w.ktx === target.ktx &&
+        w.day === target.day &&
+        normalizePhong(w.phongSo) === normR
+    ).length;
+
+    const userEmail = currentUser?.email ?? 'unknown';
+    const userName = currentUser?.name ?? userEmail;
+    const now = formatDateVN(nowVN());
+
+    try {
+      await bulkUpdateWorkers(ids, {
+        ktx: target.ktx,
+        day: target.day,
+        phongSo: target.phongSo,
+        ...(target.tieuDoanMode === 'set'
+          ? { tieuDoan: target.tieuDoan }
+          : target.tieuDoanMode === 'clear'
+          ? { tieuDoan: '' }
+          : {}),
+        clearBedOnMove: true,
+      });
+
+      addLog(
+        `${userName} (${userEmail})`,
+        'Chuyển phòng',
+        `[${now}] Chuyển hàng loạt ${ids.length} công nhân sang ${target.ktx} · ${target.day} · ${target.phongSo}${
+          target.tieuDoanMode === 'set' ? ` (TĐ ${target.tieuDoan})` : target.tieuDoanMode === 'clear' ? ' (Xóa TĐ)' : ''
+        }`
+      );
+
+      setSelectedIds(new Set());
+      setShowBulkTransfer(false);
+
+      if (currentDestCount + ids.length > DEFAULT_ROOM_CAPACITY) {
+        toast.warning(
+          `Đã chuyển ${ids.length} công nhân sang ${target.day} - ${target.phongSo} (Quá tải: ${currentDestCount + ids.length}/${DEFAULT_ROOM_CAPACITY} người)`
+        );
+      } else {
+        toast.success(`Đã chuyển ${ids.length} công nhân sang ${target.ktx} · ${target.day} · ${target.phongSo}`);
+      }
+    } catch (err) {
+      toast.error(`Lỗi chuyển phòng hàng loạt: ${err instanceof Error ? err.message : 'Không thể cập nhật'}`);
+    }
+  }, [workers, selectedIds, isAdmin, canWriteBlock, currentUser, bulkUpdateWorkers, addLog]);
 
   const handleExport = useCallback(() => {
     const data = filtered.map((w, idx) => {
@@ -1429,6 +2090,8 @@ export function WorkerManagementClient() {
       <BulkActionBar
         selectedCount={selectedIds.size}
         onDelete={canBulkDelete ? () => setDeleteTarget(workers.filter(w => selectedIds.has(w.id))) : undefined}
+        onBulkTamTru={handleBulkTamTru}
+        onBulkMove={() => setShowBulkTransfer(true)}
         onClear={() => setSelectedIds(new Set())}
       />
 
@@ -1475,9 +2138,19 @@ export function WorkerManagementClient() {
       {editingWorker && <WorkerFormModal worker={editingWorker} onSave={handleSave} onClose={() => setEditingWorker(null)} allWorkers={workers} />}
       {viewingWorker && <WorkerDetailModal worker={viewingWorker} onClose={() => setViewingWorker(null)} onEdit={w => { setViewingWorker(null); setEditingWorker(w); }} canEdit={canWriteBlock(viewingWorker.day, viewingWorker.ktx)} onDelete={canDeleteSingle && canWriteBlock(viewingWorker.day, viewingWorker.ktx) ? w => { setViewingWorker(null); setDeleteTarget(w); } : undefined} />}
       {deleteTarget && canDeleteSingle && <DeleteConfirmModal target={deleteTarget} onConfirm={() => handleDelete(deleteTarget)} onClose={() => setDeleteTarget(null)} />}
-      {showImport && <ExcelImportModal onClose={() => setShowImport(false)} onImport={handleImport} />}
+      {showImport && <ExcelImportModal onClose={() => setShowImport(false)} onImport={handleImport} existingWorkers={workers} />}
       {showTamTruExport && <TamTruExportModal workers={filtered} onClose={() => setShowTamTruExport(false)} />}
       {showBulkAssignKtx && isAdmin && <BulkAssignKtxModal workers={workers} onClose={() => setShowBulkAssignKtx(false)} onAssign={handleBulkAssignKtx} />}
+      {showBulkTransfer && (
+        <BulkTransferWorkersModal
+          selectedWorkers={workers.filter(w => selectedIds.has(w.id))}
+          allWorkers={workers}
+          onClose={() => setShowBulkTransfer(false)}
+          onTransfer={handleBulkTransfer}
+          isAdmin={isAdmin}
+          canWriteBlock={canWriteBlock}
+        />
+      )}
       {showDeleteAll && isAdmin && <DeleteAllConfirmModal onConfirm={handleDeleteAll} onClose={() => setShowDeleteAll(false)} loading={deleteAllLoading} />}
       {showBulkDeleteFilter && isAdmin && <BulkDeleteByFilterModal workers={workers} onClose={() => setShowBulkDeleteFilter(false)} onDelete={handleBulkDeleteByFilter} />}
       </div>

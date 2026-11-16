@@ -1,28 +1,340 @@
 'use client';
-import React from 'react';
-import { AlertTriangle } from 'lucide-react';
-import { getProfileStatus } from '@/data/workers';
+import React, { useMemo, useState } from 'react';
+import Link from 'next/link';
+import {
+  AlertTriangle, ShieldAlert, FileWarning, Users, X, ArrowRight, CheckCircle2,
+} from 'lucide-react';
+import { getProfileStatus, Worker } from '@/data/workers';
 import { useWorkers } from '@/context/WorkerContext';
+import { normalizeGender } from '@/lib/roomGender';
+import { formatRoomDisplay, normalizeRoomLabel } from '@/lib/facilityCapacity';
 
-export default function DataQualityAlert() {
+interface GenderConflictRoom {
+  ktx: string;
+  day: string;
+  room: string;
+  maleCount: number;
+  femaleCount: number;
+  adminLabel?: 'male' | 'female' | 'auto';
+  reason: string;
+}
+
+interface DataQualityAlertProps {
+  selectedKtx?: string;
+  roomGenderMap?: Record<string, 'male' | 'female' | 'auto'>;
+  onSelectRoom?: (ktx: string, building: string, room: string) => void;
+}
+
+/** Parses DD/MM/YYYY or ISO YYYY-MM-DD into a Date normalized to VN calendar midnight (UTC+7). */
+function parseDateSafe(raw?: string | null): Date | null {
+  if (!raw) return null;
+  const s = raw.trim();
+  if (!s) return null;
+
+  const ddmmyyyy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (ddmmyyyy) {
+    const d = parseInt(ddmmyyyy[1], 10);
+    const m = parseInt(ddmmyyyy[2], 10) - 1;
+    const y = parseInt(ddmmyyyy[3], 10);
+    const dt = new Date(Date.UTC(y, m, d));
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  const yyyymmdd = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (yyyymmdd) {
+    const y = parseInt(yyyymmdd[1], 10);
+    const m = parseInt(yyyymmdd[2], 10) - 1;
+    const d = parseInt(yyyymmdd[3], 10);
+    const dt = new Date(Date.UTC(y, m, d));
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  const parsed = new Date(s);
+  return isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function daysSinceVN(rawDate?: string | null): number | null {
+  const dt = parseDateSafe(rawDate);
+  if (!dt) return null;
+  const nowVN = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  const todayUtc = Date.UTC(nowVN.getUTCFullYear(), nowVN.getUTCMonth(), nowVN.getUTCDate());
+  const targetUtc = Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate());
+  return Math.floor((todayUtc - targetUtc) / (24 * 60 * 60 * 1000));
+}
+
+export default function DataQualityAlert({
+  selectedKtx = 'all',
+  roomGenderMap = {},
+  onSelectRoom,
+}: DataQualityAlertProps) {
   const { workers } = useWorkers();
-  const missingCCCD = workers?.filter(w => !w?.cccd)?.length;
-  const missingEntry = workers?.filter(w => !w?.ngayVaoKTX)?.length;
-  const pendingCode = workers?.filter(w => w?.maNV === 'Chờ mã' || w?.maNV === 'Chờ Mã' || w?.maNV === '')?.length;
-  const noRoom = workers?.filter(w => getProfileStatus(w) === 'no_room')?.length;
+  const [showConflictModal, setShowConflictModal] = useState(false);
+
+  const scopedWorkers = useMemo(() => {
+    const list = Array.isArray(workers) ? workers : [];
+    const active = list.filter(
+      w =>
+        !w?.ngayRaKTX &&
+        !w?.ghiChu?.includes('[Đã Check-out') &&
+        !w?.ghiChu?.includes('[CHECKOUT]')
+    );
+    if (!selectedKtx || selectedKtx === 'all') return active;
+    return active.filter(w => (w?.ktx || '').trim() === selectedKtx.trim());
+  }, [workers, selectedKtx]);
+
+  const metrics = useMemo(() => {
+    let missingCCCD = 0;
+    let missingEntry = 0;
+    let pendingCode = 0;
+    let noRoom = 0;
+    let unregisteredTamTru = 0;
+    let overdueTamTru = 0;
+
+    const roomBuckets = new Map<
+      string,
+      { ktx: string; day: string; room: string; maleCount: number; femaleCount: number }
+    >();
+
+    for (const w of scopedWorkers) {
+      if (!w?.cccd) missingCCCD++;
+      if (!w?.ngayVaoKTX) missingEntry++;
+      if (!w?.maNV || w.maNV === 'Chờ mã' || w.maNV === 'Chờ Mã') pendingCode++;
+      if (getProfileStatus(w) === 'no_room') noRoom++;
+
+      if (w?.tamTruStatus !== 'registered') {
+        unregisteredTamTru++;
+        const days = daysSinceVN(w?.ngayVaoKTX || w?.createdAt);
+        if (days !== null && days > 7) {
+          overdueTamTru++;
+        }
+      }
+
+      if (w?.ktx && w?.day && w?.phongSo) {
+        const normRoom = normalizeRoomLabel(w.phongSo) || w.phongSo.trim();
+        const key = `${w.ktx.trim()}||${w.day.trim()}||${normRoom}`;
+        if (!roomBuckets.has(key)) {
+          roomBuckets.set(key, {
+            ktx: w.ktx.trim(),
+            day: w.day.trim(),
+            room: w.phongSo.trim(),
+            maleCount: 0,
+            femaleCount: 0,
+          });
+        }
+        const bucket = roomBuckets.get(key)!;
+        const g = normalizeGender(w.gioiTinh);
+        if (g === 'nam') bucket.maleCount++;
+        else if (g === 'nu') bucket.femaleCount++;
+      }
+    }
+
+    const genderConflicts: GenderConflictRoom[] = [];
+    roomBuckets.forEach((b) => {
+      const exactKey = `${b.ktx}||${b.day}||${b.room}`;
+      const normKey = `${b.ktx}||${b.day}||${normalizeRoomLabel(b.room)}`;
+      const adminLabel = roomGenderMap[exactKey] ?? roomGenderMap[normKey];
+
+      if (b.maleCount > 0 && b.femaleCount > 0) {
+        genderConflicts.push({
+          ...b,
+          adminLabel,
+          reason: `Có cả ${b.maleCount} Nam & ${b.femaleCount} Nữ trong phòng`,
+        });
+      } else if (adminLabel === 'male' && b.femaleCount > 0) {
+        genderConflicts.push({
+          ...b,
+          adminLabel,
+          reason: `Gán Phòng Nam nhưng có ${b.femaleCount} công nhân Nữ`,
+        });
+      } else if (adminLabel === 'female' && b.maleCount > 0) {
+        genderConflicts.push({
+          ...b,
+          adminLabel,
+          reason: `Gán Phòng Nữ nhưng có ${b.maleCount} công nhân Nam`,
+        });
+      }
+    });
+
+    return {
+      missingCCCD,
+      missingEntry,
+      pendingCode,
+      noRoom,
+      unregisteredTamTru,
+      overdueTamTru,
+      genderConflicts,
+    };
+  }, [scopedWorkers, roomGenderMap]);
+
+  const hasAnyAlert =
+    metrics.unregisteredTamTru > 0 ||
+    metrics.genderConflicts.length > 0 ||
+    metrics.missingCCCD > 0 ||
+    metrics.missingEntry > 0 ||
+    metrics.pendingCode > 0 ||
+    metrics.noRoom > 0;
+
+  if (!hasAnyAlert || scopedWorkers.length === 0) {
+    return null;
+  }
 
   return (
-    <div className="mb-5 flex items-start gap-3 bg-okbg border border-wn rounded-lg px-4 py-3">
-      <AlertTriangle size={16} className="text-wn mt-0.5 flex-shrink-0" />
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-wn">Dữ liệu cần bổ sung</p>
-        <p className="text-xs text-wn mt-0.5">
-          {missingCCCD} thiếu CCCD · {missingEntry} thiếu ngày vào · {pendingCode} chờ mã NV · {noRoom} chưa phân phòng
-        </p>
+    <>
+      <div className="rounded-2xl border border-wn/60 bg-surf px-4 py-3.5 shadow-lg">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5">
+            <div className="w-8 h-8 rounded-xl tint-wn border border-wn flex items-center justify-center text-wn shrink-0 mt-0.5">
+              <ShieldAlert size={16} />
+            </div>
+            <div>
+              <p className="text-xs sm:text-sm font-bold text-tx flex items-center gap-2 flex-wrap">
+                <span>Cảnh báo vận hành tự động</span>
+                {selectedKtx !== 'all' && (
+                  <span className="text-[11px] font-semibold text-mu">({selectedKtx})</span>
+                )}
+              </p>
+              <p className="text-[11px] text-mu mt-0.5">
+                Phát hiện nhanh tạm trú quá hạn, phòng lệch giới tính và hồ sơ công nhân còn thiếu thông tin.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {metrics.unregisteredTamTru > 0 && (
+              <Link
+                href={`/worker-management?tamTru=unregistered${selectedKtx !== 'all' ? `&ktx=${encodeURIComponent(selectedKtx)}` : ''}`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl tint-wn border border-wn text-wn text-xs font-bold hover:opacity-90 transition-opacity"
+              >
+                <FileWarning size={13} />
+                <span>
+                  {metrics.unregisteredTamTru.toLocaleString('vi-VN')} chưa ĐK tạm trú
+                  {metrics.overdueTamTru > 0 ? ` (${metrics.overdueTamTru.toLocaleString('vi-VN')} quá 7 ngày)` : ''}
+                </span>
+              </Link>
+            )}
+
+            {metrics.genderConflicts.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowConflictModal(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl tint-dgr border border-dgr text-dgr text-xs font-bold hover:opacity-90 transition-opacity"
+              >
+                <Users size={13} />
+                <span>{metrics.genderConflicts.length} phòng lệch / hỗn hợp giới tính</span>
+              </button>
+            )}
+
+            {metrics.noRoom > 0 && (
+              <Link
+                href={`/worker-management?filter=no_room${selectedKtx !== 'all' ? `&ktx=${encodeURIComponent(selectedKtx)}` : ''}`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-act border border-bdr2 text-lnk text-xs font-bold hover:bg-bdg transition-colors"
+              >
+                <AlertTriangle size={13} />
+                <span>{metrics.noRoom.toLocaleString('vi-VN')} chưa phân phòng</span>
+              </Link>
+            )}
+
+            {(metrics.missingCCCD > 0 || metrics.missingEntry > 0 || metrics.pendingCode > 0) && (
+              <Link
+                href={`/worker-management?filter=missing_cccd_sdt${selectedKtx !== 'all' ? `&ktx=${encodeURIComponent(selectedKtx)}` : ''}`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-act border border-bdr text-mu hover:text-tx text-xs font-semibold transition-colors"
+              >
+                <span>
+                  Thiếu hồ sơ: {metrics.missingCCCD} CCCD · {metrics.missingEntry} ngày vào · {metrics.pendingCode} chờ mã NV
+                </span>
+              </Link>
+            )}
+          </div>
+        </div>
       </div>
-      <a href="/worker-management" className="text-xs font-semibold text-wn hover:text-wn underline flex-shrink-0">
-        Xem danh sách
-      </a>
-    </div>
+
+      {/* Gender Conflict Modal */}
+      {showConflictModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setShowConflictModal(false)}
+        >
+          <div
+            className="bg-surf border border-bdr rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="p-4 sm:p-5 border-b border-bdr flex items-center justify-between bg-act/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl tint-dgr border border-dgr flex items-center justify-center text-dgr">
+                  <Users size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-tx">Phòng lệch hoặc hỗn hợp giới tính</h3>
+                  <p className="text-xs text-mu mt-0.5">
+                    {metrics.genderConflicts.length} phòng cần kiểm tra lại phân bổ Nam / Nữ hoặc nhãn công năng
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowConflictModal(false)}
+                className="p-2 rounded-xl text-mu hover:text-tx hover:bg-act transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-4 sm:p-5 overflow-y-auto space-y-2.5 flex-1 scrollbar-thin">
+              {metrics.genderConflicts.length === 0 ? (
+                <div className="py-10 text-center space-y-2">
+                  <CheckCircle2 size={28} className="mx-auto text-ok" />
+                  <p className="text-sm font-semibold text-tx">Không có phòng lệch giới tính</p>
+                </div>
+              ) : (
+                metrics.genderConflicts.map((item, idx) => (
+                  <div
+                    key={`${item.ktx}-${item.day}-${item.room}-${idx}`}
+                    className="rounded-xl border border-dgr/50 bg-act/60 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
+                  >
+                    <div>
+                      <p className="text-sm font-bold text-tx">
+                        {item.ktx} · {item.day} · {formatRoomDisplay(item.room)}
+                      </p>
+                      <p className="text-xs text-dgr mt-0.5">{item.reason}</p>
+                    </div>
+                    {onSelectRoom ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowConflictModal(false);
+                          onSelectRoom(item.ktx, item.day, item.room);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-pri hover:opacity-90 text-white text-xs font-semibold shrink-0"
+                      >
+                        <span>Kiểm tra phòng</span>
+                        <ArrowRight size={12} />
+                      </button>
+                    ) : (
+                      <Link
+                        href="/worker-management"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-pri hover:opacity-90 text-white text-xs font-semibold shrink-0"
+                      >
+                        <span>Xem công nhân</span>
+                        <ArrowRight size={12} />
+                      </Link>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="p-3.5 border-t border-bdr bg-act/50 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowConflictModal(false)}
+                className="px-4 py-2 rounded-xl bg-act border border-bdr text-xs font-bold text-tx hover:bg-surf"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

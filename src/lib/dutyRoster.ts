@@ -117,14 +117,14 @@ export async function fetchDutyAssignmentsFromSupabase(
     }
 
     if (data && Array.isArray(data)) {
-      const merged: Record<string, string> = { ...localMap };
+      const dbMap: Record<string, string> = {};
       data.forEach((row: { profile_id: string; duty_ktx: string }) => {
         if (row.profile_id) {
-          merged[row.profile_id] = row.duty_ktx || 'Nghỉ';
+          dbMap[row.profile_id] = row.duty_ktx || 'Nghỉ';
         }
       });
-      saveLocalDutyAssignments(dateStr, merged);
-      return { data: merged, isTableMissing: false, error: null };
+      saveLocalDutyAssignments(dateStr, dbMap);
+      return { data: dbMap, isTableMissing: false, error: null };
     }
 
     return { data: localMap, isTableMissing: false, error: null };

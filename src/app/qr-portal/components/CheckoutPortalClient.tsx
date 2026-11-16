@@ -16,12 +16,14 @@ import {
   FileCheck2,
   ClipboardList,
 } from 'lucide-react';
+import { toast } from 'sonner';
+import { QrCodeImage, downloadQrPng, generateQrDataUrl } from '@/components/QrCodeImage';
+import { printHtmlViaIframe, escapeHtml } from '@/lib/printHtml';
 
 export default function CheckoutPortalClient() {
   const [isMounted, setIsMounted] = useState(false);
   const [checkoutUrl, setCheckoutUrl] = useState('/checkout');
   const [copied, setCopied] = useState(false);
-  const [showPrintView, setShowPrintView] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
@@ -45,36 +47,34 @@ export default function CheckoutPortalClient() {
     );
   }
 
-  const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(
-    checkoutUrl
-  )}&margin=10&color=1b2430&bgcolor=ffffff`;
-  const qrLargeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=${encodeURIComponent(
-    checkoutUrl
-  )}&margin=20&color=1b2430&bgcolor=ffffff`;
-
   const handleDownload = async () => {
-    try {
-      const response = await fetch(qrLargeUrl);
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = 'qr-check-out-ktx.png';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      window.open(qrLargeUrl, '_blank');
-    }
+    const ok = await downloadQrPng(checkoutUrl, 'qr-check-out-ktx.png', 640);
+    if (!ok) toast.error('Không thể tạo file ảnh QR.');
   };
 
-  const handlePrint = () => {
-    setShowPrintView(true);
-    setTimeout(() => {
-      window.print();
-      setShowPrintView(false);
-    }, 300);
+  const handlePrint = async () => {
+    const qrDataUrl = await generateQrDataUrl(checkoutUrl, { width: 520, margin: 3 });
+    if (!qrDataUrl) return;
+    printHtmlViaIframe(`<!doctype html>
+<html><head><meta charset="utf-8"><title>In QR Check-out KTX</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 95vh; margin: 0; color: #111; }
+  .card { text-align: center; max-width: 420px; padding: 28px; border: 2px solid #1b2430; border-radius: 14px; }
+  h2 { margin: 0 0 8px; font-size: 18px; text-transform: uppercase; letter-spacing: 0.5px; }
+  p { margin: 6px 0; font-size: 13px; color: #444; }
+  img { width: 250px; height: 250px; margin: 14px auto; display: block; border: 2px solid #111; padding: 8px; }
+  .url { font-family: monospace; font-size: 11px; word-break: break-all; color: #333; margin-top: 8px; }
+  .foot { font-size: 11px; color: #555; border-top: 1px solid #ddd; padding-top: 10px; margin-top: 12px; }
+</style></head>
+<body>
+  <div class="card">
+    <h2>Thủ Tục Trả Phòng KTX Phước Vĩnh Tây</h2>
+    <p>Quét mã QR bằng Camera điện thoại hoặc Zalo để khai báo dọn ra và bàn giao phòng</p>
+    <img src="${qrDataUrl}" alt="QR Code Check-out KTX" />
+    <div class="url">${escapeHtml(checkoutUrl)}</div>
+    <div class="foot">Ban Quản Lý KTX • Vui lòng bàn giao chìa khóa cho ban quản lý / bảo vệ</div>
+  </div>
+</body></html>`);
   };
 
   const handleCopyLink = () => {
@@ -87,35 +87,6 @@ export default function CheckoutPortalClient() {
 
   return (
     <div className="p-4 md:p-6 space-y-4 max-w-7xl mx-auto font-sans">
-      {/* Print Overlay */}
-      {showPrintView && (
-        <div
-          className="fixed inset-0 z-[9999] bg-surf flex flex-col items-center justify-center p-8 print:block text-black"
-          id="print-area"
-        >
-          <div className="text-center space-y-4 max-w-sm mx-auto">
-            <h2 className="text-xl font-bold uppercase tracking-wider">
-              THỦ TỤC TRẢ PHÒNG KTX PHƯỚC VĨNH TÂY
-            </h2>
-            <p className="text-xs text-mu">
-              Quét mã QR bằng Camera điện thoại hoặc Zalo để khai báo dọn ra và bàn giao phòng
-            </p>
-            <div className="p-2 border-2 border-black inline-block">
-              <img
-                src={qrLargeUrl}
-                alt="QR Code Check-out KTX"
-                className="w-60 h-60 mx-auto"
-              />
-            </div>
-            <p className="text-xs font-mono break-all">
-              {checkoutUrl}
-            </p>
-            <div className="text-[11px] text-ic border-t pt-2">
-              Ban Quản Lý KTX • Vui lòng bàn giao chìa khóa cho ban quản lý/bảo vệ
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Header bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-bdr">
@@ -133,12 +104,11 @@ export default function CheckoutPortalClient() {
       <div className="bg-surf border border-bdr rounded-md p-5">
         <div className="flex flex-col sm:flex-row items-center gap-6">
           <div className="shrink-0 flex flex-col items-center gap-2.5">
-            <div className="p-2 border border-bdr bg-surf rounded">
-              <img
-                src={qrApiUrl}
+            <div className="p-2 border border-bdr bg-white rounded">
+              <QrCodeImage
+                value={checkoutUrl}
+                size={160}
                 alt="Mã QR Check-out KTX"
-                width={170}
-                height={170}
                 className="w-40 h-40 object-contain"
               />
             </div>

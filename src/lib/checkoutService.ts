@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/client';
+import { releaseBedsForWorkers } from '@/lib/bedSync';
 import { CheckoutRequest } from '@/types/checkout';
 
 const CHECKOUT_TAG_PREFIX = '[CHECKOUT_PENDING]';
@@ -348,6 +349,8 @@ export async function approveCheckoutRequest(
 
       if (updateErr) {
         console.error('[checkoutService] Failed to clear worker room in database:', updateErr);
+      } else {
+        await releaseBedsForWorkers(supabase, [workerRow.id]);
       }
     }
   } catch (err) {

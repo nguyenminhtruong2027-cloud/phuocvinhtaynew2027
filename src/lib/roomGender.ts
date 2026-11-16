@@ -200,9 +200,13 @@ export async function syncRoomGenderToSupabase(
 }
 
 /**
- * Loads all room_label values from Supabase `room_units`
+ * Loads all room_label values from Supabase `room_units` along with fetch success flag
+ * so callers can treat Supabase as the Single Source of Truth when online.
  */
-export async function fetchRoomLabelsFromSupabase(): Promise<Record<string, 'male' | 'female' | 'auto'>> {
+export async function fetchRoomLabelsAuthoritative(): Promise<{
+  data: Record<string, 'male' | 'female' | 'auto'>;
+  ok: boolean;
+}> {
   try {
     const supabase = createClient();
     const { data, error } = await supabase
@@ -210,7 +214,7 @@ export async function fetchRoomLabelsFromSupabase(): Promise<Record<string, 'mal
       .select('ktx, day_nha, phong_so, room_label')
       .not('room_label', 'is', null);
 
-    if (error || !data) return {};
+    if (error || !data) return { data: {}, ok: false };
 
     const map: Record<string, 'male' | 'female' | 'auto'> = {};
     data.forEach((row: any) => {
@@ -224,9 +228,17 @@ export async function fetchRoomLabelsFromSupabase(): Promise<Record<string, 'mal
       }
     });
 
-    return map;
+    return { data: map, ok: true };
   } catch (err) {
     console.warn('fetchRoomLabelsFromSupabase notice:', err);
-    return {};
+    return { data: {}, ok: false };
   }
+}
+
+/**
+ * Loads all room_label values from Supabase `room_units`
+ */
+export async function fetchRoomLabelsFromSupabase(): Promise<Record<string, 'male' | 'female' | 'auto'>> {
+  const res = await fetchRoomLabelsAuthoritative();
+  return res.data;
 }

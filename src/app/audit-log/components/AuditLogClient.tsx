@@ -3,7 +3,10 @@ import React, { useState, useMemo } from 'react';
 import { useAudit, AuditAction } from '@/context/AuditContext';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
-import { Filter, Clock, User, Activity, Calendar, X } from 'lucide-react';
+import { Filter, Clock, User, Activity, Calendar, X, Download } from 'lucide-react';
+import { exportToExcel } from '@/lib/exportExcel';
+import { getVNDateString } from '@/lib/vnDate';
+import { toast } from 'sonner';
 
 const ACTION_COLORS: Record<AuditAction, string> = {
   'Thêm': 'bg-okbg text-ok border-bdr2',
@@ -16,9 +19,45 @@ const ACTION_COLORS: Record<AuditAction, string> = {
   UPDATE: 'bg-bdg text-lnk border-bdr2',
   DELETE: 'bg-dgrbg text-dgr border-dgr',
   IMPORT: 'bg-bdg text-ok2 border-bdr2',
+  CHECKOUT_REQUEST: 'tint-wn text-wn border-wn',
+  CHECKOUT_APPROVED: 'bg-dgrbg text-dgr border-dgr',
+  BED_REASSIGN: 'tint-wn text-wn border-wn',
+  APPROVE_REGISTRATION: 'bg-okbg text-ok border-bdr2',
 };
 
-const ALL_ACTIONS: AuditAction[] = ['Thêm', 'Sửa', 'Xóa', 'Chuyển phòng', 'Đổi trạng thái tạm trú', 'Import'];
+const ACTION_LABELS: Record<AuditAction, string> = {
+  'Thêm': 'Thêm (cũ)',
+  'Sửa': 'Sửa (cũ)',
+  'Xóa': 'Xóa (cũ)',
+  'Chuyển phòng': 'Chuyển phòng',
+  'Đổi trạng thái tạm trú': 'Đổi trạng thái tạm trú',
+  'Import': 'Import (cũ)',
+  CREATE: 'CREATE — Thêm mới',
+  UPDATE: 'UPDATE — Cập nhật',
+  DELETE: 'DELETE — Xóa',
+  IMPORT: 'IMPORT — Nhập Excel',
+  CHECKOUT_REQUEST: 'CHECKOUT_REQUEST — Yêu cầu trả phòng',
+  CHECKOUT_APPROVED: 'CHECKOUT_APPROVED — Duyệt trả phòng',
+  BED_REASSIGN: 'BED_REASSIGN — Đổi / Gán giường',
+  APPROVE_REGISTRATION: 'APPROVE_REGISTRATION — Duyệt QR đăng ký',
+};
+
+const ALL_ACTIONS: AuditAction[] = [
+  'CREATE',
+  'UPDATE',
+  'DELETE',
+  'IMPORT',
+  'BED_REASSIGN',
+  'CHECKOUT_REQUEST',
+  'CHECKOUT_APPROVED',
+  'APPROVE_REGISTRATION',
+  'Đổi trạng thái tạm trú',
+  'Chuyển phòng',
+  'Thêm',
+  'Sửa',
+  'Xóa',
+  'Import',
+];
 
 /**
  * JsonDetail — component trình bày thuần: hiển thị detail dạng code block mono thu gọn,
@@ -157,6 +196,22 @@ export default function AuditLogClient() {
     );
   }
 
+  const handleExportLogs = () => {
+    if (filtered.length === 0) {
+      toast.warning('Không có bản ghi nào để xuất Excel.');
+      return;
+    }
+    const rows = filtered.map((l, idx) => ({
+      'STT': idx + 1,
+      'Thời gian (UTC+7)': formatTimestamp(l.timestamp),
+      'Tài khoản thực hiện': l.account,
+      'Hành động': l.action,
+      'Chi tiết': l.detail,
+    }));
+    exportToExcel(rows, `NhatKyHeThong_${getVNDateString()}.xlsx`, 'Nhật ký');
+    toast.success(`Đã xuất ${rows.length} bản ghi nhật ký hệ thống.`);
+  };
+
   return (
     <div className="px-3 sm:px-6 lg:px-8 xl:px-10 py-4 sm:py-6 max-w-screen-2xl mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 sm:mb-6">
@@ -164,9 +219,20 @@ export default function AuditLogClient() {
           <h1 className="text-xl sm:text-2xl font-bold text-foreground">Nhật Ký Hệ Thống</h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">{filtered.length} bản ghi · Tất cả tài khoản Admin</p>
         </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-dgrbg border border-dgr w-fit">
-          <span className="w-2 h-2 rounded-full bg-dgr" />
-          <span className="text-xs font-semibold text-dgr">Admin Only</span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={handleExportLogs}
+            disabled={filtered.length === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-bdr3 bg-transparent text-tx text-xs font-semibold hover:bg-act transition-colors disabled:opacity-50"
+          >
+            <Download size={14} />
+            <span>Xuất Excel</span>
+          </button>
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-dgrbg border border-dgr w-fit">
+            <span className="w-2 h-2 rounded-full bg-dgr" />
+            <span className="text-xs font-semibold text-dgr">Admin Only</span>
+          </div>
         </div>
       </div>
 
@@ -195,7 +261,7 @@ export default function AuditLogClient() {
               className="input-field pl-8 py-2 text-sm w-full"
             >
               <option value="">Tất cả hành động</option>
-              {ALL_ACTIONS.map(a => <option key={a} value={a}>{a}</option>)}
+              {ALL_ACTIONS.map(a => <option key={a} value={a}>{ACTION_LABELS[a] || a}</option>)}
             </select>
           </div>
 

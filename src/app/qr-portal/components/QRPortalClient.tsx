@@ -26,6 +26,11 @@ import {
   Inbox,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { useAudit } from '@/context/AuditContext';
+import { toast } from 'sonner';
+import { syncBedForWorkerSave } from '@/lib/bedSync';
+import { QrCodeImage, downloadQrPng, generateQrDataUrl } from '@/components/QrCodeImage';
+import { printHtmlViaIframe, escapeHtml } from '@/lib/printHtml';
 import {
   fetchWorkerHierarchy,
   WorkerHierarchyData,
@@ -94,7 +99,7 @@ function DetailModal({
 }: {
   reg: WorkerRegistration;
   onClose: () => void;
-  onApprove: (updatedReg: WorkerRegistration) => void;
+  onApprove: (updatedReg: WorkerRegistration, tamTruStatus: 'registered' | 'unregistered') => void;
   onReject: (id: string) => void;
   processing: string | null;
   hierarchy: WorkerHierarchyData;
@@ -102,6 +107,7 @@ function DetailModal({
   const isProcessing = processing === reg.id;
   const cfg = STATUS_CONFIG[reg.status];
   const isPending = reg.status === 'pending';
+  const [markTamTruRegistered, setMarkTamTruRegistered] = useState(false);
 
   const [editForm, setEditForm] = useState({
     ho_va_ten: reg.ho_va_ten || '',
@@ -200,12 +206,15 @@ function DetailModal({
 
   const handleApproveSubmit = () => {
     const finalUnit = isCustomUnit ? customUnit.trim() : editForm.don_vi.trim();
-    onApprove({
-      ...reg,
-      ...editForm,
-      don_vi: finalUnit,
-      que_quan: editForm.ho_khau_tinh,
-    });
+    onApprove(
+      {
+        ...reg,
+        ...editForm,
+        don_vi: finalUnit,
+        que_quan: editForm.ho_khau_tinh,
+      },
+      markTamTruRegistered ? 'registered' : 'unregistered'
+    );
   };
 
   return (
@@ -526,25 +535,38 @@ function DetailModal({
           )}
 
           {isPending && (
-            <div className="flex gap-2.5 pt-3 border-t border-bdr">
-              <button
-                type="button"
-                onClick={() => onReject(reg.id)}
-                disabled={isProcessing}
-                className="flex-1 py-2 px-3 border border-dgr text-dgr hover:bg-dgrbg rounded text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer text-center"
-              >
-                {isProcessing ? <Loader2 size={13} className="animate-spin inline mr-1" /> : <XCircle size={13} className="inline mr-1" />}
-                Từ chối hồ sơ
-              </button>
-              <button
-                type="button"
-                onClick={handleApproveSubmit}
-                disabled={isProcessing}
-                className="flex-1 py-2 px-3 bg-ok2 hover:opacity-90 text-tx rounded text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer text-center"
-              >
-                {isProcessing ? <Loader2 size={13} className="animate-spin inline mr-1" /> : <CheckCircle2 size={13} className="inline mr-1" />}
-                Duyệt hồ sơ (Lưu bản chỉnh sửa)
-              </button>
+            <div className="space-y-3 pt-3 border-t border-bdr">
+              <label className="flex items-center gap-2 text-xs text-tx cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={markTamTruRegistered}
+                  onChange={e => setMarkTamTruRegistered(e.target.checked)}
+                  className="w-4 h-4 rounded accent-emerald-600 cursor-pointer"
+                />
+                <span>
+                  Đánh dấu <strong className="text-ok">Đã đăng ký tạm trú</strong> ngay khi duyệt (mặc định: <em>Chưa đăng ký</em>)
+                </span>
+              </label>
+              <div className="flex gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => onReject(reg.id)}
+                  disabled={isProcessing}
+                  className="flex-1 py-2 px-3 border border-dgr text-dgr hover:bg-dgrbg rounded text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer text-center"
+                >
+                  {isProcessing ? <Loader2 size={13} className="animate-spin inline mr-1" /> : <XCircle size={13} className="inline mr-1" />}
+                  Từ chối hồ sơ
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApproveSubmit}
+                  disabled={isProcessing}
+                  className="flex-1 py-2 px-3 bg-ok2 hover:opacity-90 text-tx rounded text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer text-center"
+                >
+                  {isProcessing ? <Loader2 size={13} className="animate-spin inline mr-1" /> : <CheckCircle2 size={13} className="inline mr-1" />}
+                  Duyệt hồ sơ (Lưu bản chỉnh sửa)
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -601,95 +623,82 @@ function DeleteConfirmModal({
 }
 
 function QRCodeDisplay({ url }: { url: string }) {
-  const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(url)}&margin=10&color=1b2430&bgcolor=ffffff`;
-  const qrLargeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=${encodeURIComponent(url)}&margin=20&color=1b2430&bgcolor=ffffff`;
-  const [showPrintView, setShowPrintView] = useState(false);
-
   const handleDownload = async () => {
-    try {
-      const response = await fetch(qrLargeUrl);
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = 'qr-dang-ky-cu-tru.png';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      window.open(qrLargeUrl, '_blank');
-    }
+    const ok = await downloadQrPng(url, 'qr-dang-ky-cu-tru.png', 640);
+    if (!ok) toast.error('Không thể tạo file ảnh QR.');
   };
 
-  const handlePrint = () => {
-    setShowPrintView(true);
-    setTimeout(() => {
-      window.print();
-      setShowPrintView(false);
-    }, 300);
+  const handlePrint = async () => {
+    const qrDataUrl = await generateQrDataUrl(url, { width: 520, margin: 3 });
+    if (!qrDataUrl) return;
+    printHtmlViaIframe(`<!doctype html>
+<html><head><meta charset="utf-8"><title>In QR Đăng Ký Cư Trú</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 95vh; margin: 0; color: #111; }
+  .card { text-align: center; max-width: 420px; padding: 28px; border: 2px solid #1b2430; border-radius: 14px; }
+  h2 { margin: 0 0 8px; font-size: 18px; text-transform: uppercase; letter-spacing: 0.5px; }
+  p { margin: 6px 0; font-size: 13px; color: #444; }
+  img { width: 260px; height: 260px; margin: 16px auto; display: block; border: 1px solid #ddd; padding: 8px; }
+  .url { font-family: monospace; font-size: 11px; word-break: break-all; color: #333; margin-top: 10px; }
+</style></head>
+<body>
+  <div class="card">
+    <h2>Đăng Ký Cư Trú KTX Phước Vĩnh Tây</h2>
+    <p>Quét mã QR bằng Camera hoặc Zalo để khai báo thông tin</p>
+    <img src="${qrDataUrl}" alt="QR Code" />
+    <div class="url">${escapeHtml(url)}</div>
+  </div>
+</body></html>`);
   };
 
   return (
-    <>
-      {showPrintView && (
-        <div className="fixed inset-0 z-[9999] bg-surf flex flex-col items-center justify-center p-8 print:block text-black" id="print-area">
-          <div className="text-center space-y-4 max-w-sm mx-auto">
-            <h2 className="text-xl font-bold uppercase tracking-wider">Đăng Ký Cư Trú KTX Phước Vĩnh Tây</h2>
-            <p className="text-xs text-mu">Quét mã QR dưới đây để điền thông tin</p>
-            <img src={qrLargeUrl} alt="QR Code" className="w-56 h-56 mx-auto border-2 border-black p-2" />
-            <p className="text-xs font-mono break-all">{url}</p>
+    <div className="bg-surf border border-bdr rounded-md p-4">
+      <div className="flex flex-col sm:flex-row items-center gap-5">
+        <div className="shrink-0 flex flex-col items-center gap-2.5">
+          <div className="p-2 border border-bdr bg-white rounded">
+            <QrCodeImage value={url} size={144} alt="QR Code đăng ký" className="w-36 h-36 object-contain" />
+          </div>
+          <div className="flex gap-1.5 w-full">
+            <button
+              onClick={handleDownload}
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 bg-side hover:bg-act text-tx rounded text-[11px] font-semibold cursor-pointer"
+            >
+              <Download size={12} /> Tải mã
+            </button>
+            <button
+              onClick={handlePrint}
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 border border-bdr hover:bg-act text-tx rounded text-[11px] font-semibold cursor-pointer"
+            >
+              <Printer size={12} /> In ấn
+            </button>
           </div>
         </div>
-      )}
-      <div className="bg-surf border border-bdr rounded-md p-4">
-        <div className="flex flex-col sm:flex-row items-center gap-5">
-          <div className="shrink-0 flex flex-col items-center gap-2.5">
-            <div className="p-2 border border-bdr bg-surf rounded">
-              <img src={qrApiUrl} alt="QR Code đăng ký" width={160} height={160} className="w-36 h-36" />
-            </div>
-            <div className="flex gap-1.5 w-full">
-              <button
-                onClick={handleDownload}
-                className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 bg-side hover:bg-act text-tx rounded text-[11px] font-semibold cursor-pointer"
-              >
-                <Download size={12} /> Tải mã
-              </button>
-              <button
-                onClick={handlePrint}
-                className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 border border-bdr hover:bg-act text-tx rounded text-[11px] font-semibold cursor-pointer"
-              >
-                <Printer size={12} /> In ấn
-              </button>
-            </div>
+
+        <div className="flex-1 space-y-2 text-center sm:text-left">
+          <div>
+            <span className="text-[11px] font-bold uppercase text-wn tracking-wider">Mã Tiếp Nhận Công Nhân Mới</span>
+            <h3 className="font-bold text-sm text-tx mt-0.5">Mã QR Đăng Ký Cư Trú Trực Tuyến</h3>
+            <p className="text-xs text-mu mt-1 leading-relaxed">
+              Niêm yết tại cổng bảo vệ hoặc văn phòng KTX. Công nhân sử dụng Zalo hoặc camera điện thoại quét mã để khai báo họ tên, CCCD, phòng ở và đơn vị công tác.
+            </p>
           </div>
 
-          <div className="flex-1 space-y-2 text-center sm:text-left">
-            <div>
-              <span className="text-[11px] font-bold uppercase text-wn tracking-wider">Mã Tiếp Nhận Công Nhân Mới</span>
-              <h3 className="font-bold text-sm text-tx mt-0.5">Mã QR Đăng Ký Cư Trú Trực Tuyến</h3>
-              <p className="text-xs text-mu mt-1 leading-relaxed">
-                Niêm yết tại cổng bảo vệ hoặc văn phòng KTX. Công nhân sử dụng Zalo hoặc camera điện thoại quét mã để khai báo họ tên, CCCD, phòng ở và đơn vị công tác.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2 pt-1 flex-wrap">
-              <span className="text-xs text-ic font-mono bg-page px-2 py-1 rounded border border-bdr break-all">
-                {url}
-              </span>
-              <a
-                href="/register"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs text-wn hover:underline font-semibold"
-              >
-                <ExternalLink size={12} /> Mở trang đăng ký
-              </a>
-            </div>
+          <div className="flex items-center gap-2 pt-1 flex-wrap">
+            <span className="text-xs text-ic font-mono bg-page px-2 py-1 rounded border border-bdr break-all">
+              {url}
+            </span>
+            <a
+              href="/register"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-wn hover:underline font-semibold"
+            >
+              <ExternalLink size={12} /> Mở trang đăng ký
+            </a>
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -720,6 +729,7 @@ export default function QRPortalClient() {
   });
 
   const { currentUser, isAdmin, canWriteBlock } = useAuth();
+  const { addLog } = useAudit();
   const supabase = createClient();
 
   useEffect(() => {
@@ -767,8 +777,11 @@ export default function QRPortalClient() {
     return registrations.filter(r => isAdmin || canWriteBlock(r.day, r.ktx));
   }, [registrations, isAdmin, canWriteBlock]);
 
-  // Phê duyệt hồ sơ — Lưu bản chỉnh sửa (Requirement 2)
-  const handleApprove = async (regToApprove: WorkerRegistration) => {
+  // Phê duyệt hồ sơ — Lưu bản chỉnh sửa + đồng bộ giường + audit log
+  const handleApprove = async (
+    regToApprove: WorkerRegistration,
+    tamTruStatus: 'registered' | 'unregistered' = 'unregistered'
+  ) => {
     setProcessing(regToApprove.id);
     try {
       const nowStr = new Date().toISOString();
@@ -802,21 +815,40 @@ export default function QRPortalClient() {
 
       if (updateErr) throw new Error(updateErr.message);
 
+      // Compute next STT cleanly
+      let nextStt = 1;
+      try {
+        const { data: maxRow } = await supabase
+          .from('workers')
+          .select('stt')
+          .order('stt', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (maxRow && typeof maxRow.stt === 'number') {
+          nextStt = maxRow.stt + 1;
+        }
+      } catch {}
+
       const workerId = `reg-${regToApprove.id}`;
+      const ktxVal = (regToApprove.ktx || '').trim();
+      const dayVal = (regToApprove.day || '').trim();
+      const roomVal = (regToApprove.phong_so || '').trim();
+      const bedVal = (regToApprove.giuong || '').trim();
+
       const { error: insertErr } = await supabase.from('workers').upsert({
         id: workerId,
-        stt: 0,
+        stt: nextStt,
         ho_va_ten: regToApprove.ho_va_ten || '',
         ma_nv: regToApprove.ma_nv || '',
         tieu_doan: regToApprove.tieu_doan || '',
-        ktx: regToApprove.ktx || '',
+        ktx: ktxVal,
         don_vi: regToApprove.don_vi || '',
         gioi_tinh: regToApprove.gioi_tinh || '',
         ngay_sinh: regToApprove.ngay_sinh || '',
         so_dien_thoai: regToApprove.so_dien_thoai || '',
-        day: regToApprove.day || '',
-        phong_so: regToApprove.phong_so || '',
-        giuong: regToApprove.giuong || '',
+        day: dayVal,
+        phong_so: roomVal,
+        giuong: bedVal,
         cccd: regToApprove.so_cccd || '',
         ho_khau_tinh: regToApprove.ho_khau_tinh || regToApprove.que_quan || '',
         to_truong: regToApprove.to_truong || '',
@@ -824,13 +856,50 @@ export default function QRPortalClient() {
         ngay_vao_ktx: regToApprove.ngay_vao_ktx || '',
         ngay_ra_ktx: '',
         ghi_chu: regToApprove.ghi_chu || '',
-        khoa_tra_cuu: `${regToApprove.day || ''}|${regToApprove.phong_so || ''}|${regToApprove.giuong || ''}`,
+        khoa_tra_cuu: `${ktxVal}|${dayVal}|${roomVal}`,
         avatar: regToApprove.cccd_image_url || '',
-        tam_tru_status: 'registered',
+        tam_tru_status: tamTruStatus,
       }, { onConflict: 'id' });
 
       if (insertErr) {
-        console.warn('Insert to workers warning:', insertErr.message);
+        throw new Error(`Không thể thêm vào danh sách công nhân: ${insertErr.message}`);
+      }
+
+      // Sync bed assignment into `beds` table so Bed Management updates immediately
+      await syncBedForWorkerSave(supabase, undefined, {
+        id: workerId,
+        stt: nextStt,
+        hoVaTen: regToApprove.ho_va_ten || '',
+        maNV: regToApprove.ma_nv || '',
+        tieuDoan: regToApprove.tieu_doan || '',
+        ktx: ktxVal,
+        donVi: regToApprove.don_vi || '',
+        gioiTinh: regToApprove.gioi_tinh || '',
+        ngaySinh: regToApprove.ngay_sinh || '',
+        soDienThoai: regToApprove.so_dien_thoai || '',
+        day: dayVal,
+        phongSo: roomVal,
+        giuong: bedVal,
+        cccd: regToApprove.so_cccd || '',
+        hoKhauTinh: regToApprove.ho_khau_tinh || regToApprove.que_quan || '',
+        toTruong: regToApprove.to_truong || '',
+        sdtToTruong: regToApprove.sdt_to_truong || '',
+        ngayVaoKTX: regToApprove.ngay_vao_ktx || '',
+        ghiChu: regToApprove.ghi_chu || '',
+        khoaTraCuu: `${ktxVal}|${dayVal}|${roomVal}`,
+        tamTruStatus,
+      });
+
+      try {
+        addLog(
+          currentUser?.email || 'unknown',
+          'APPROVE_REGISTRATION',
+          `Duyệt hồ sơ QR: ${regToApprove.ho_va_ten} (${regToApprove.ma_nv || regToApprove.so_cccd || 'N/A'}) → ${[ktxVal, dayVal, roomVal ? `P.${roomVal}` : '', bedVal ? `G.${bedVal}` : ''].filter(Boolean).join(' - ')}`
+        );
+      } catch {}
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('ktx_workers_updated'));
       }
 
       setRegistrations(prev =>
@@ -839,9 +908,10 @@ export default function QRPortalClient() {
       if (detailReg?.id === regToApprove.id) {
         setDetailReg({ ...regToApprove, status: 'approved', reviewed_at: nowStr });
       }
+      toast.success(`Đã duyệt và xếp chỗ cho ${regToApprove.ho_va_ten}`);
     } catch (e: any) {
       console.error('Approve error:', e.message);
-      alert(`Lỗi khi phê duyệt: ${e?.message || 'Không thể cập nhật'}`);
+      toast.error(`Lỗi khi phê duyệt: ${e?.message || 'Không thể cập nhật'}`);
     } finally {
       setProcessing(null);
     }

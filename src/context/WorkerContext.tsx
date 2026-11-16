@@ -1,8 +1,18 @@
 'use client';
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { usePathname } from 'next/navigation';
 import { Worker } from '@/data/workers';
 import { createClient } from '@/lib/supabase/client';
 import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
+import {
+  reconcileBedsWithWorkers,
+  releaseAllOccupiedBeds,
+  releaseBedsForWorkers,
+  syncBedForWorkerSave,
+} from '@/lib/bedSync';
+import { useAuth } from '@/context/AuthContext';
+
+const PUBLIC_PATHS = ['/sign-up-login', '/login', '/register', '/checkout', '/attendance'];
 
 // ─── DB row ↔ Worker mapping ───────────────────────────────────────────────
 
@@ -92,6 +102,17 @@ interface WorkerContextValue {
   importWorkers: (rows: Worker[]) => Promise<void>;
   updateTamTruStatus: (id: string, status: 'registered' | 'unregistered') => Promise<void>;
   bulkUpdateKtx: (ids: string[], ktxValue: string) => Promise<void>;
+  bulkUpdateWorkers: (
+    ids: string[],
+    patch: {
+      tamTruStatus?: 'registered' | 'unregistered';
+      ktx?: string;
+      day?: string;
+      phongSo?: string;
+      tieuDoan?: string;
+      clearBedOnMove?: boolean;
+    }
+  ) => Promise<void>;
   refreshWorkers: () => Promise<void>;
   setWorkers: React.Dispatch<React.SetStateAction<Worker[]>>;
 }
@@ -101,6 +122,11 @@ const WorkerContext = createContext<WorkerContextValue | null>(null);
 const FETCH_PAGE_SIZE = 1000;
 
 export function WorkerProvider({ children }: { children: React.ReactNode }) {
+  const { currentUser, loading: authLoading } = useAuth();
+  const pathname = usePathname();
+  const isPublicPath = PUBLIC_PATHS.some(p => pathname?.startsWith(p));
+  const shouldLoadWorkers = !authLoading && Boolean(currentUser) && !isPublicPath;
+
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [totalWorkerCount, setTotalWorkerCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -170,10 +196,21 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
   }, [supabase]);
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!shouldLoadWorkers) {
+      workerMetaByIdRef.current.clear();
+      setWorkers([]);
+      setTotalWorkerCount(0);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     fetchWorkers(false);
-  }, [fetchWorkers]);
+  }, [authLoading, shouldLoadWorkers, fetchWorkers]);
 
   useEffect(() => {
+    if (!shouldLoadWorkers) return;
+
     const workersChannel = supabase
       .channel('workers_realtime_v2')
       .on(
@@ -227,7 +264,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       supabase.removeChannel(workersChannel);
       supabase.removeChannel(profilesChannel);
     };
-  }, [fetchWorkers, supabase]);
+  }, [shouldLoadWorkers, fetchWorkers, supabase]);
 
   const refreshWorkers = useCallback(async () => {
     await fetchWorkers(true);
@@ -241,18 +278,21 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       .from('workers')
       .insert(dbRow);
     if (error) throw new Error(error.message);
+    await syncBedForWorkerSave(supabase, undefined, { ...worker, id: String(dbRow.id) });
     await fetchWorkers(true);
   }, [fetchWorkers, supabase]);
 
   const updateWorker = useCallback(async (worker: Worker) => {
+    const prevWorker = workerMetaByIdRef.current.get(worker.id) || workers.find(w => w.id === worker.id);
     const dbRow = workerToDbRow(worker);
     const { error } = await supabase
       .from('workers')
       .update(dbRow)
       .eq('id', worker.id);
     if (error) throw new Error(error.message);
+    await syncBedForWorkerSave(supabase, prevWorker, worker);
     await fetchWorkers(true);
-  }, [fetchWorkers, supabase]);
+  }, [workers, fetchWorkers, supabase]);
 
   const deleteWorker = useCallback(async (id: string) => {
     const workerToDelete = workers.find(w => w.id === id);
@@ -274,6 +314,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       .delete()
       .eq('id', id);
     if (error) throw new Error(error.message);
+    await releaseBedsForWorkers(supabase, [id]);
     await fetchWorkers(true);
   }, [workers, fetchWorkers, supabase]);
 
@@ -305,6 +346,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       .delete()
       .in('id', ids);
     if (error) throw new Error(error.message);
+    await releaseBedsForWorkers(supabase, ids);
     await fetchWorkers(true);
   }, [workers, fetchWorkers, supabase]);
 
@@ -315,6 +357,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
     }
     const ids = (workers || []).map(w => w?.id).filter(Boolean) as string[];
     if (ids.length === 0) {
+      await releaseAllOccupiedBeds(supabase);
       setWorkers([]);
       setTotalWorkerCount(0);
       return;
@@ -353,15 +396,20 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       if (error) throw new Error(error.message);
     }
 
+    await releaseAllOccupiedBeds(supabase);
     setWorkers([]);
     setTotalWorkerCount(0);
   }, [workers, supabase]);
 
   const importWorkers = useCallback(async (rows: Worker[]) => {
     if (rows.length === 0) return;
-    const maxStt = workers.length > 0 ? Math.max(...workers.map(w => w.stt)) : 0;
-    const rowsWithStt = rows.map((r, i) => ({ ...r, stt: maxStt + i + 1 }));
-    
+    let nextStt = workers.length > 0 ? Math.max(...workers.map(w => w.stt || 0)) : 0;
+    const rowsWithStt = rows.map(r => {
+      if (r.stt && r.stt > 0) return r;
+      nextStt += 1;
+      return { ...r, stt: nextStt };
+    });
+
     // Ensure each row has a valid primary key so upsert can dedupe by id
     const dbRows = rowsWithStt.map(w => {
       const row = workerToDbRow(w);
@@ -377,6 +425,14 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
         .from('workers')
         .upsert(batch, { onConflict: 'id' });
       if (error) throw new Error(error.message);
+    }
+
+    if (rows.some(r => (r.giuong || '').trim() !== '' || workers.some(existing => existing.id === r.id))) {
+      try {
+        await reconcileBedsWithWorkers(supabase);
+      } catch (syncErr) {
+        console.warn('[WorkerContext] Post-import bed reconcile warning:', syncErr);
+      }
     }
     await fetchWorkers(true);
   }, [workers, fetchWorkers, supabase]);
@@ -401,7 +457,69 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
         .in('id', batchIds);
       if (error) throw new Error(error.message);
     }
+    await releaseBedsForWorkers(supabase, ids);
     setWorkers(prev => prev.map(w => ids.includes(w.id) ? { ...w, ktx: ktxValue } : w));
+  }, [supabase]);
+
+  const bulkUpdateWorkers = useCallback(async (
+    ids: string[],
+    patch: {
+      tamTruStatus?: 'registered' | 'unregistered';
+      ktx?: string;
+      day?: string;
+      phongSo?: string;
+      tieuDoan?: string;
+      clearBedOnMove?: boolean;
+    }
+  ) => {
+    if (ids.length === 0) return;
+    const dbPatch: Record<string, unknown> = {};
+    if (patch.tamTruStatus !== undefined) dbPatch.tam_tru_status = patch.tamTruStatus;
+    if (patch.ktx !== undefined) dbPatch.ktx = patch.ktx;
+    if (patch.day !== undefined) dbPatch.day = patch.day;
+    if (patch.phongSo !== undefined) dbPatch.phong_so = patch.phongSo;
+    if (patch.tieuDoan !== undefined) dbPatch.tieu_doan = patch.tieuDoan;
+
+    const isMovingRoom = patch.ktx !== undefined || patch.day !== undefined || patch.phongSo !== undefined;
+    if (isMovingRoom && patch.clearBedOnMove !== false) {
+      dbPatch.giuong = '';
+    }
+
+    if (Object.keys(dbPatch).length === 0) return;
+
+    const BATCH = 200;
+    for (let i = 0; i < ids.length; i += BATCH) {
+      const batchIds = ids.slice(i, i + BATCH);
+      const { error } = await supabase
+        .from('workers')
+        .update(dbPatch)
+        .in('id', batchIds);
+      if (error) throw new Error(error.message);
+    }
+
+    if (isMovingRoom) {
+      await releaseBedsForWorkers(supabase, ids);
+    }
+
+    const idSet = new Set(ids);
+    setWorkers(prev =>
+      prev.map(w => {
+        if (!idSet.has(w.id)) return w;
+        const nextKtx = patch.ktx !== undefined ? patch.ktx : w.ktx;
+        const nextDay = patch.day !== undefined ? patch.day : w.day;
+        const nextRoom = patch.phongSo !== undefined ? patch.phongSo : w.phongSo;
+        return {
+          ...w,
+          ...(patch.tamTruStatus !== undefined ? { tamTruStatus: patch.tamTruStatus } : {}),
+          ...(patch.ktx !== undefined ? { ktx: patch.ktx } : {}),
+          ...(patch.day !== undefined ? { day: patch.day } : {}),
+          ...(patch.phongSo !== undefined ? { phongSo: patch.phongSo } : {}),
+          ...(patch.tieuDoan !== undefined ? { tieuDoan: patch.tieuDoan } : {}),
+          ...(isMovingRoom && patch.clearBedOnMove !== false ? { giuong: '' } : {}),
+          khoaTraCuu: `${nextKtx}|${nextDay}|${nextRoom}`,
+        };
+      })
+    );
   }, [supabase]);
 
   return (
@@ -419,6 +537,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       importWorkers,
       updateTamTruStatus,
       bulkUpdateKtx,
+      bulkUpdateWorkers,
       refreshWorkers,
       setWorkers,
     }}>

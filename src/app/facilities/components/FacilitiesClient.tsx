@@ -1,15 +1,19 @@
 'use client';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/context/AuthContext';
+import { toast } from 'sonner';
 import {
   Search, Edit2, Check, X, Plus, Loader2, BedDouble, Wind, Package, Fan,
   Zap, Tv, Lightbulb, UtensilsCrossed, ChevronDown, ChevronUp, Upload,
-  AlertCircle, CheckCircle2, Download, Trash2, Filter, Snowflake, AlertTriangle, CheckSquare, Square
+  AlertCircle, CheckCircle2, Download, Trash2, Filter, Snowflake, AlertTriangle, CheckSquare, Square, Lock,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { exportToExcel } from '@/lib/exportExcel';
 import { useKtxStructure } from '@/lib/ktxStructure';
 import { compareKtxNames, naturalSortCompare } from '@/data/workers';
+import { getVNDateString } from '@/lib/vnDate';
+import { syncBedsForFacilityRoom } from '@/lib/bedSync';
 
 interface FacilityRow {
   id: string;
@@ -73,6 +77,12 @@ const METRIC_CARDS: MetricCard[] = [
 ];
 
 const NUMERIC_FIELDS: (keyof EditingRow)[] = ['giuong', 'dieu_hoa', 'tu', 'quat', 'o_cam_dien', 'remote', 'bong_tuyp', 'ban_an', 'ghe_an'];
+
+const ISSUE_NOTE_REGEX = /hỏng|hư|sửa|bảo trì|lỗi|thay|kém|yếu|chập/i;
+
+function hasFacilityIssue(note?: string | null): boolean {
+  return Boolean(note && ISSUE_NOTE_REGEX.test(note));
+}
 
 // ─── Excel column header → DB field mapping ───────────────────────────────────
 function normalizeHeader(h: string): string {
@@ -662,6 +672,7 @@ function AddRoomModal({ activeKtx, ktxOptions, onSave, onClose, saving }: {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function FacilitiesClient() {
+  const { isAdmin, canWriteBlock, currentUser } = useAuth();
   const [rows, setRows] = useState<FacilityRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeKtx, setActiveKtx] = useState<string>('');
@@ -669,6 +680,7 @@ export default function FacilitiesClient() {
   // Filters
   const [filterDay, setFilterDay] = useState<string>('');
   const [searchPhong, setSearchPhong] = useState('');
+  const [onlyIssues, setOnlyIssues] = useState(false);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingRow, setEditingRow] = useState<EditingRow | null>(null);
@@ -707,27 +719,43 @@ export default function FacilitiesClient() {
 
   const supabase = createClient();
 
+  const canWriteFacility = useCallback(
+    (ktx?: string, day?: string) => isAdmin || canWriteBlock(day || '', ktx || ''),
+    [isAdmin, canWriteBlock]
+  );
+
   const fetchFacilities = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('facilities')
-        .select('*')
-        .order('day', { ascending: true })
-        .order('phong_khu_vuc', { ascending: true });
-      if (error) console.error('Fetch facilities error:', error.message);
-      else {
-        const fetched: FacilityRow[] = (data || []).map((r: any) => ({
-          ...r,
-          room_type: (r.room_type || 'accommodation') as 'accommodation' | 'functional',
-          is_visible: r.is_visible !== false,
-        }));
-        setRows(fetched);
-        // Auto-set activeKtx to first available KTX from DB
-        if (fetched.length > 0 && !activeKtx) {
-          const firstKtx = Array.from(new Set(fetched.map((r: FacilityRow) => r.ktx).filter(Boolean))).sort(compareKtxNames)[0];
-          if (firstKtx) setActiveKtx(firstKtx as string);
+      const PAGE_SIZE = 1000;
+      const allData: any[] = [];
+      let from = 0;
+      for (let page = 0; page < 30; page++) {
+        const { data, error } = await supabase
+          .from('facilities')
+          .select('*')
+          .order('day', { ascending: true })
+          .order('phong_khu_vuc', { ascending: true })
+          .range(from, from + PAGE_SIZE - 1);
+        if (error) {
+          console.error('Fetch facilities error:', error.message);
+          break;
         }
+        const chunk = data || [];
+        allData.push(...chunk);
+        if (chunk.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
+      }
+
+      const fetched: FacilityRow[] = allData.map((r: any) => ({
+        ...r,
+        room_type: (r.room_type || 'accommodation') as 'accommodation' | 'functional',
+        is_visible: r.is_visible !== false,
+      }));
+      setRows(fetched);
+      if (fetched.length > 0 && !activeKtx) {
+        const firstKtx = Array.from(new Set(fetched.map((r: FacilityRow) => r.ktx).filter(Boolean))).sort(compareKtxNames)[0];
+        if (firstKtx) setActiveKtx(firstKtx as string);
       }
     } catch (e: any) {
       console.error('Fetch error:', e.message);
@@ -774,13 +802,22 @@ export default function FacilitiesClient() {
     rows.filter(r => r.ktx === activeKtx).map(r => r.day).filter(Boolean)
   )).sort(naturalSortCompare);
 
+  const issueCountInKtx = rows.filter(r => r.ktx === activeKtx && hasFacilityIssue(r.ghi_chu)).length;
+
   // ─── Filtered rows — always scoped to activeKtx tab ──────────────────────
   const filteredRows = rows.filter(r => {
     if (r.ktx !== activeKtx) return false;
     if (filterDay && r.day !== filterDay) return false;
+    if (onlyIssues && !hasFacilityIssue(r.ghi_chu)) return false;
     if (searchPhong.trim()) {
       const q = searchPhong.toLowerCase();
-      if (!r.phong_khu_vuc?.toLowerCase().includes(q) && !r.day?.toLowerCase().includes(q)) return false;
+      if (
+        !r.phong_khu_vuc?.toLowerCase().includes(q) &&
+        !r.day?.toLowerCase().includes(q) &&
+        !r.ghi_chu?.toLowerCase().includes(q)
+      ) {
+        return false;
+      }
     }
     return true;
   });
@@ -806,6 +843,10 @@ export default function FacilitiesClient() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (!isAdmin) {
+      toast.error('Chỉ Quản trị viên (Admin) mới có quyền Import Excel hàng loạt.');
+      return;
+    }
     setImporting(true);
     setImportResult(null);
     try {
@@ -829,10 +870,24 @@ export default function FacilitiesClient() {
         .delete()
         .in('phong_khu_vuc', ['Phòng ở', 'Phòng chức năng']);
 
-      const { data: existingData, error: fetchErr } = await supabase.from('facilities').select('id, ktx, day, phong_khu_vuc');
-      if (fetchErr) throw new Error(fetchErr.message);
+      // Paginated read of existing facilities to support >1,000 rows safely
+      const existingData: any[] = [];
+      let exFrom = 0;
+      const EX_PAGE = 1000;
+      for (let p = 0; p < 30; p++) {
+        const { data: exChunk, error: fetchErr } = await supabase
+          .from('facilities')
+          .select('id, ktx, day, phong_khu_vuc')
+          .range(exFrom, exFrom + EX_PAGE - 1);
+        if (fetchErr) throw new Error(fetchErr.message);
+        const list = exChunk || [];
+        existingData.push(...list);
+        if (list.length < EX_PAGE) break;
+        exFrom += EX_PAGE;
+      }
+
       const existingMap = new Map<string, string>();
-      (existingData || []).forEach((r: any) => existingMap.set(`${r.ktx}||${r.day}||${r.phong_khu_vuc}`, r.id));
+      existingData.forEach((r: any) => existingMap.set(`${r.ktx}||${r.day}||${r.phong_khu_vuc}`, r.id));
       const toInsert: Omit<FacilityRow, 'id'>[] = [];
       const toUpdate: (Omit<FacilityRow, 'id'> & { id: string })[] = [];
       allParsedRows.forEach(row => {
@@ -852,13 +907,29 @@ export default function FacilitiesClient() {
         }
       }
       if (toUpdate.length > 0) {
-        for (const row of toUpdate) {
-          const { id, ...updateData } = row;
-          const { error: updateErr } = await supabase.from('facilities').update(updateData).eq('id', id);
-          if (updateErr) errors.push(`Update error (${row.day} - ${row.phong_khu_vuc}): ${updateErr.message}`);
-          else updatedCount++;
+        const UPDATE_CHUNK = 10;
+        for (let i = 0; i < toUpdate.length; i += UPDATE_CHUNK) {
+          const chunk = toUpdate.slice(i, i + UPDATE_CHUNK);
+          const results = await Promise.all(
+            chunk.map(async row => {
+              const { id, ...updateData } = row;
+              const { error: updateErr } = await supabase.from('facilities').update(updateData).eq('id', id);
+              return { row, updateErr };
+            })
+          );
+          for (const { row, updateErr } of results) {
+            if (updateErr) errors.push(`Update error (${row.day} - ${row.phong_khu_vuc}): ${updateErr.message}`);
+            else updatedCount++;
+          }
         }
       }
+
+      // Synchronize beds for imported accommodation rooms in parallel chunks
+      const syncTargets = [...toInsert, ...toUpdate];
+      for (let i = 0; i < syncTargets.length; i += 10) {
+        await Promise.all(syncTargets.slice(i, i + 10).map(r => syncBedsForFacilityRoom(supabase, r)));
+      }
+
       if (errors.length > 0) {
         setImportResult({ success: false, message: `Có lỗi xảy ra: ${errors.slice(0, 2).join('; ')}`, inserted: insertedCount, updated: updatedCount });
       } else {
@@ -912,29 +983,35 @@ export default function FacilitiesClient() {
       'Ghi chú': '',
     });
     const filterLabel = activeKtx ? `_${activeKtx.replace(' ', '')}` : '';
-    const fileName = `CSVC_KTX_PhuocVinhTay${filterLabel}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const fileName = `CSVC_KTX_PhuocVinhTay${filterLabel}_${getVNDateString()}.xlsx`;
     exportToExcel(exportData, fileName, 'Cơ sở vật chất');
   };
 
   // ─── Add row ──────────────────────────────────────────────────────────────
   const handleAddRow = async (newRow: Omit<FacilityRow, 'id'>) => {
+    if (!canWriteFacility(newRow.ktx, newRow.day)) {
+      toast.error(`Bạn không có quyền thêm phòng tại ${newRow.ktx} - ${newRow.day}.`);
+      return;
+    }
     setAddingRow(true);
     try {
       const { data, error } = await supabase.from('facilities').insert(newRow).select().single();
-      if (error) console.error('Add row error:', error.message);
-      else if (data) {
+      if (error) {
+        toast.error(`Lỗi thêm phòng: ${error.message}`);
+      } else if (data) {
+        await syncBedsForFacilityRoom(supabase, data as FacilityRow);
         setRows(prev => [...prev, data]);
-        // Switch to the KTX tab of the newly added room
         setActiveKtx(newRow.ktx);
         setFilterDay('');
         setSearchPhong('');
         setShowAddModal(false);
+        toast.success(`Đã thêm ${newRow.phong_khu_vuc} (${newRow.ktx} - ${newRow.day})`);
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('ktx_facilities_updated'));
         }
       }
     } catch (e: any) {
-      console.error('Add error:', e.message);
+      toast.error(`Lỗi thêm phòng: ${e.message}`);
     } finally {
       setAddingRow(false);
     }
@@ -942,6 +1019,10 @@ export default function FacilitiesClient() {
 
   // ─── Edit row ─────────────────────────────────────────────────────────────
   const startEdit = (row: FacilityRow) => {
+    if (!canWriteFacility(row.ktx, row.day)) {
+      toast.error(`Bạn không có quyền chỉnh sửa phòng tại ${row.ktx} - ${row.day}.`);
+      return;
+    }
     setEditingId(row.id);
     setEditingRow({
       id: row.id,
@@ -965,6 +1046,11 @@ export default function FacilitiesClient() {
 
   const saveEdit = async () => {
     if (!editingRow) return;
+    const targetRow = rows.find(r => r.id === editingRow.id);
+    if (targetRow && !canWriteFacility(targetRow.ktx, targetRow.day)) {
+      toast.error(`Bạn không có quyền chỉnh sửa phòng tại ${targetRow.ktx} - ${targetRow.day}.`);
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     try {
@@ -977,9 +1063,14 @@ export default function FacilitiesClient() {
       const { error } = await supabase.from('facilities').update(updatePayload).eq('id', editingRow.id);
       if (error) setSaveError(error.message);
       else {
+        const updatedRow = targetRow ? ({ ...targetRow, ...updatePayload } as FacilityRow) : null;
+        if (updatedRow) {
+          await syncBedsForFacilityRoom(supabase, updatedRow);
+        }
         setRows(prev => prev.map(r => r.id === editingRow.id ? { ...r, ...updatePayload } as FacilityRow : r));
         setEditingId(null);
         setEditingRow(null);
+        toast.success('Đã cập nhật trang thiết bị và đồng bộ giường');
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('ktx_facilities_updated'));
         }
@@ -993,6 +1084,10 @@ export default function FacilitiesClient() {
 
   // ─── Toggle is_visible directly ───────────────────────────────────────────
   const toggleVisibility = async (row: FacilityRow) => {
+    if (!canWriteFacility(row.ktx, row.day)) {
+      toast.error(`Bạn không có quyền thay đổi hiển thị phòng tại ${row.ktx} - ${row.day}.`);
+      return;
+    }
     const nextVisible = row.is_visible === false ? true : false;
     setRows(prev => prev.map(r => r.id === row.id ? { ...r, is_visible: nextVisible } : r));
     try {
@@ -1004,6 +1099,7 @@ export default function FacilitiesClient() {
         console.warn('Update is_visible error:', error.message);
         setRows(prev => prev.map(r => r.id === row.id ? { ...r, is_visible: !nextVisible } : r));
       } else {
+        await syncBedsForFacilityRoom(supabase, { ...row, is_visible: nextVisible });
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('ktx_facilities_updated'));
         }
@@ -1015,6 +1111,10 @@ export default function FacilitiesClient() {
 
   // ─── Delete guard & check ─────────────────────────────────────────────────
   const handleRequestDelete = async (row: FacilityRow) => {
+    if (!canWriteFacility(row.ktx, row.day)) {
+      toast.error(`Bạn không có quyền xóa phòng tại ${row.ktx} - ${row.day}.`);
+      return;
+    }
     setCheckingDeleteId(row.id);
     try {
       const { count, error } = await supabase
@@ -1024,24 +1124,7 @@ export default function FacilitiesClient() {
         .eq('day', row.day)
         .eq('phong_so', row.phong_khu_vuc);
 
-      let occupantCount = (!error && typeof count === 'number') ? count : 0;
-
-      // Fallback check in mock storage if count is 0
-      if (occupantCount === 0 && typeof window !== 'undefined') {
-        try {
-          const stored = localStorage.getItem('ktx_mock_db_workers');
-          if (stored) {
-            const list = JSON.parse(stored);
-            if (Array.isArray(list)) {
-              occupantCount = list.filter((w: any) =>
-                (w.ktx ?? '').trim() === (row.ktx ?? '').trim() &&
-                (w.day ?? '').trim() === (row.day ?? '').trim() &&
-                (w.phong_so ?? '').trim() === (row.phong_khu_vuc ?? '').trim()
-              ).length;
-            }
-          }
-        } catch {}
-      }
+      const occupantCount = (!error && typeof count === 'number') ? count : 0;
 
       if (occupantCount > 0) {
         setBlockedTarget({ row, count: occupantCount });
@@ -1084,18 +1167,19 @@ export default function FacilitiesClient() {
   // ─── Check Occupancy across multiple rooms ────────────────────────────────
   const checkRoomsOccupancy = useCallback(async (roomTargets: FacilityRow[]) => {
     try {
-      const { data: workerRows, error } = await supabase
-        .from('workers')
-        .select('ktx, day, phong_so');
-
-      let workersList: any[] = [];
-      if (!error && workerRows) {
-        workersList = workerRows;
-      } else if (typeof window !== 'undefined') {
-        try {
-          const stored = localStorage.getItem('ktx_mock_db_workers');
-          if (stored) workersList = JSON.parse(stored) || [];
-        } catch {}
+      const workersList: any[] = [];
+      let from = 0;
+      const PAGE_SIZE = 1000;
+      while (true) {
+        const { data: workerRows, error } = await supabase
+          .from('workers')
+          .select('ktx, day, phong_so')
+          .order('id', { ascending: true })
+          .range(from, from + PAGE_SIZE - 1);
+        if (error || !workerRows || workerRows.length === 0) break;
+        workersList.push(...workerRows);
+        if (workerRows.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
       }
 
       const occMap = new Map<string, number>();
@@ -1145,8 +1229,11 @@ export default function FacilitiesClient() {
 
   // Request batch deletion of selected rooms
   const handleRequestBulkDelete = useCallback(async () => {
-    const targets = sortedRows.filter(r => selectedIds.has(r.id));
-    if (targets.length === 0) return;
+    const targets = sortedRows.filter(r => selectedIds.has(r.id) && canWriteFacility(r.ktx, r.day));
+    if (targets.length === 0) {
+      toast.error('Bạn không có quyền xóa các phòng đã chọn.');
+      return;
+    }
     setDeleting(true);
     const result = await checkRoomsOccupancy(targets);
     setDeleting(false);
@@ -1157,10 +1244,14 @@ export default function FacilitiesClient() {
       totalWorkers: result.totalWorkers,
       safeToDelete: result.safeToDelete,
     });
-  }, [sortedRows, selectedIds, checkRoomsOccupancy]);
+  }, [sortedRows, selectedIds, canWriteFacility, checkRoomsOccupancy]);
 
   // Request deletion of all rooms in active view/tab
   const handleRequestDeleteAll = useCallback(async () => {
+    if (!isAdmin) {
+      toast.error('Chỉ Quản trị viên (Admin) mới có quyền xóa toàn bộ danh mục.');
+      return;
+    }
     if (sortedRows.length === 0) return;
     setDeleting(true);
     const result = await checkRoomsOccupancy(sortedRows);
@@ -1172,7 +1263,7 @@ export default function FacilitiesClient() {
       totalWorkers: result.totalWorkers,
       safeToDelete: result.safeToDelete,
     });
-  }, [sortedRows, checkRoomsOccupancy]);
+  }, [isAdmin, sortedRows, checkRoomsOccupancy]);
 
   // Confirm and execute bulk deletion
   const handleConfirmBulkDelete = useCallback(async () => {
@@ -1203,7 +1294,7 @@ export default function FacilitiesClient() {
       setBulkActionSuccess(`✓ Đã xóa thành công ${idsToDelete.length} phòng/khu vực khỏi cơ sở vật chất.`);
       setTimeout(() => setBulkActionSuccess(null), 6000);
     } catch (err: any) {
-      alert(`Lỗi khi xóa: ${err?.message || 'Không thể xóa dữ liệu'}`);
+      toast.error(`Lỗi khi xóa: ${err?.message || 'Không thể xóa dữ liệu'}`);
     } finally {
       setBulkDeleting(false);
     }
@@ -1246,7 +1337,7 @@ export default function FacilitiesClient() {
   const tdClass = "px-3 py-2 text-sm text-foreground whitespace-nowrap";
   const inputClass = "w-16 px-1.5 py-0.5 text-sm border border-border rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary text-center";
 
-  const hasActiveFilters = filterDay || searchPhong.trim();
+  const hasActiveFilters = Boolean(filterDay || searchPhong.trim() || onlyIssues);
 
   return (
     <div className="p-4 md:p-6 space-y-5">
@@ -1295,14 +1386,16 @@ export default function FacilitiesClient() {
         </div>
         <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
           <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImportExcel} />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={importing}
-            className="flex items-center justify-center gap-2 px-3 py-2 border border-bdr3 bg-transparent text-tx rounded-lg text-xs sm:text-sm font-medium hover:bg-act disabled:opacity-60 transition-colors flex-1 sm:flex-initial"
-          >
-            {importing ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
-            {importing ? 'Đang import...' : 'Import Excel'}
-          </button>
+          {isAdmin && (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importing}
+              className="flex items-center justify-center gap-2 px-3 py-2 border border-bdr3 bg-transparent text-tx rounded-lg text-xs sm:text-sm font-medium hover:bg-act disabled:opacity-60 transition-colors flex-1 sm:flex-initial"
+            >
+              {importing ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
+              {importing ? 'Đang import...' : 'Import Excel'}
+            </button>
+          )}
           <button
             onClick={handleExportExcel}
             disabled={loading || sortedRows.length === 0}
@@ -1311,24 +1404,38 @@ export default function FacilitiesClient() {
             <Download size={15} />
             Xuất Excel
           </button>
-          <button
-            onClick={handleRequestDeleteAll}
-            disabled={loading || sortedRows.length === 0 || deleting}
-            title={hasActiveFilters ? "Xóa tất cả các phòng đang hiển thị theo bộ lọc" : `Xóa tất cả ${sortedRows.length} phòng trong danh mục`}
-            className="flex items-center justify-center gap-1.5 px-3 py-2 border border-rose-500/40 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 rounded-lg text-xs sm:text-sm font-semibold transition-colors disabled:opacity-50 flex-1 sm:flex-initial"
-          >
-            <Trash2 size={15} />
-            <span>Xóa tất cả</span>
-          </button>
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center justify-center gap-2 px-3 py-2 bg-primary text-primary-foreground rounded-lg text-xs sm:text-sm font-medium hover:opacity-90 transition-opacity flex-1 sm:flex-initial"
-          >
-            <Plus size={15} />
-            Thêm phòng mới
-          </button>
+          {isAdmin && (
+            <button
+              onClick={handleRequestDeleteAll}
+              disabled={loading || sortedRows.length === 0 || deleting}
+              title={hasActiveFilters ? "Xóa tất cả các phòng đang hiển thị theo bộ lọc" : `Xóa tất cả ${sortedRows.length} phòng trong danh mục`}
+              className="flex items-center justify-center gap-1.5 px-3 py-2 border border-rose-500/40 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 rounded-lg text-xs sm:text-sm font-semibold transition-colors disabled:opacity-50 flex-1 sm:flex-initial"
+            >
+              <Trash2 size={15} />
+              <span>Xóa tất cả</span>
+            </button>
+          )}
+          {(isAdmin || (currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && (
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="flex items-center justify-center gap-2 px-3 py-2 bg-primary text-primary-foreground rounded-lg text-xs sm:text-sm font-medium hover:opacity-90 transition-opacity flex-1 sm:flex-initial"
+            >
+              <Plus size={15} />
+              Thêm phòng mới
+            </button>
+          )}
         </div>
       </div>
+
+      {!isAdmin && (
+        <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-bdg border border-bdr2 text-xs text-lnk">
+          <Lock size={14} className="shrink-0" />
+          <span>
+            Chế độ phân quyền: bạn chỉ có thể thêm, sửa hoặc xóa phòng thuộc phạm vi phụ trách (
+            <strong>{currentUser?.assignedBlocks?.length ? currentUser.assignedBlocks.join(', ') : 'Chỉ xem'}</strong>).
+          </span>
+        </div>
+      )}
 
       {/* Import Result Banner */}
       {importResult && (
@@ -1379,15 +1486,33 @@ export default function FacilitiesClient() {
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Tìm phòng..."
+            placeholder="Tìm phòng / ghi chú..."
             value={searchPhong}
             onChange={e => setSearchPhong(e.target.value)}
-            className="pl-8 pr-3 py-1.5 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 w-40"
+            className="pl-8 pr-3 py-1.5 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 w-44"
           />
         </div>
+        <button
+          type="button"
+          onClick={() => setOnlyIssues(v => !v)}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+            onlyIssues
+              ? 'tint-wn text-wn border-wn'
+              : 'bg-background text-muted-foreground border-border hover:text-foreground'
+          }`}
+          title="Lọc nhanh các phòng có ghi chú hỏng hóc / sửa chữa / bảo trì"
+        >
+          <AlertTriangle size={13} />
+          <span>Chỉ hiện phòng có sự cố</span>
+          {issueCountInKtx > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500/20 text-wn font-tabular">
+              {issueCountInKtx}
+            </span>
+          )}
+        </button>
         {hasActiveFilters && (
           <button
-            onClick={() => { setFilterDay(''); setSearchPhong(''); }}
+            onClick={() => { setFilterDay(''); setSearchPhong(''); setOnlyIssues(false); }}
             className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg hover:bg-muted transition-colors"
           >
             <X size={12} /> Xóa lọc
@@ -1497,9 +1622,9 @@ export default function FacilitiesClient() {
                 <button
                   type="button"
                   onClick={handleRequestDeleteAll}
-                  disabled={sortedRows.length === 0}
-                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs border border-rose-500/30 text-rose-400 hover:bg-rose-500/10 rounded-md transition-colors disabled:opacity-50"
-                  title="Xóa toàn bộ danh mục phòng hiển thị"
+                  disabled={!isAdmin || sortedRows.length === 0}
+                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs border border-rose-500/30 text-rose-400 hover:bg-rose-500/10 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  title={isAdmin ? 'Xóa toàn bộ danh mục phòng hiển thị' : 'Chỉ Admin mới có quyền xóa toàn bộ'}
                 >
                   <Trash2 size={13} />
                   <span>Xóa hết ({sortedRows.length})</span>
@@ -1658,22 +1783,37 @@ export default function FacilitiesClient() {
                           <td className={`${tdClass} text-center font-tabular`}>{row.bong_tuyp}</td>
                           <td className={`${tdClass} text-center font-tabular`}>{row.ban_an}</td>
                           <td className={`${tdClass} text-center font-tabular`}>{row.ghe_an}</td>
-                          <td className={`${tdClass} text-muted-foreground max-w-[120px] truncate`}>{row.ghi_chu || '—'}</td>
+                          <td className={`${tdClass} max-w-[160px]`} title={row.ghi_chu || ''}>
+                            {hasFacilityIssue(row.ghi_chu) ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold tint-wn text-wn border border-wn max-w-full truncate">
+                                <AlertTriangle size={11} className="shrink-0" />
+                                <span className="truncate">{row.ghi_chu}</span>
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground truncate block">{row.ghi_chu || '—'}</span>
+                            )}
+                          </td>
                           <td className="px-3 py-2 text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              <button onClick={() => startEdit(row)}
-                                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" title="Sửa">
-                                <Edit2 size={14} />
-                              </button>
-                              <button
-                                onClick={() => handleRequestDelete(row)}
-                                disabled={checkingDeleteId === row.id}
-                                className="p-1.5 rounded-lg text-mu hover:bg-dgrbg hover:text-dgr transition-colors disabled:opacity-50"
-                                title="Xóa phòng (Chỉ cho phép khi 0 công nhân)"
-                              >
-                                {checkingDeleteId === row.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                              </button>
-                            </div>
+                            {canWriteFacility(row.ktx, row.day) ? (
+                              <div className="flex items-center justify-end gap-1">
+                                <button onClick={() => startEdit(row)}
+                                  className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" title="Sửa">
+                                  <Edit2 size={14} />
+                                </button>
+                                <button
+                                  onClick={() => handleRequestDelete(row)}
+                                  disabled={checkingDeleteId === row.id}
+                                  className="p-1.5 rounded-lg text-mu hover:bg-dgrbg hover:text-dgr transition-colors disabled:opacity-50"
+                                  title="Xóa phòng (Chỉ cho phép khi 0 công nhân)"
+                                >
+                                  {checkingDeleteId === row.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/60" title="Chỉ xem">
+                                <Lock size={12} />
+                              </span>
+                            )}
                           </td>
                         </>
                       )}

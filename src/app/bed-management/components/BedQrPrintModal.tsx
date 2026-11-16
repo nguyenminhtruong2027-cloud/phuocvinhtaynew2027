@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { X, Printer, Loader2, QrCode, AlertCircle } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { compareKtxNames } from '@/data/workers';
+import { QrCodeImage, generateQrDataUrl } from '@/components/QrCodeImage';
+import { printHtmlViaIframe, escapeHtml } from '@/lib/printHtml';
 
 interface PrintBedRow {
   id: string;
@@ -17,7 +19,6 @@ interface PrintBedRow {
 }
 
 const QR_BASE = 'https://phuocvinhtaynew2027.vercel.app/qr-portal?tab=bed_inspect&bed_qr=';
-const QR_IMG = 'https://api.qrserver.com/v1/create-qr-code/';
 
 function bedQrUrl(bed: PrintBedRow): string {
   const data = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bed?.id || '')
@@ -25,32 +26,6 @@ function bedQrUrl(bed: PrintBedRow): string {
     : encodeURIComponent([bed?.ktx, bed?.day, bed?.phong_so, bed?.giuong].filter(Boolean).join('|'));
   return `${QR_BASE}${data}`;
 }
-
-function qrImageSrc(bed: PrintBedRow): string {
-  return `${QR_IMG}?size=240x240&data=${encodeURIComponent(bedQrUrl(bed))}&margin=6&color=0B0F17&bgcolor=FFFFFF`;
-}
-
-/** Print-only CSS: chỉ hiển thị khu vực tem, khổ tem nhãn 5×8cm. */
-const PRINT_CSS = `
-@media print {
-  @page { size: A4; margin: 8mm; }
-  body * { visibility: hidden !important; }
-  .qr-print-area, .qr-print-area * { visibility: visible !important; }
-  .qr-print-area {
-    position: absolute !important;
-    top: 0; left: 0; width: 100%;
-    display: grid !important;
-    grid-template-columns: repeat(2, 5cm);
-    gap: 4mm;
-  }
-  .qr-label {
-    width: 5cm !important; height: 8cm !important;
-    break-inside: avoid; page-break-inside: avoid;
-    box-shadow: none !important;
-  }
-  .no-print { display: none !important; }
-}
-`;
 
 interface Props {
   open: boolean;
@@ -164,11 +139,62 @@ export default function BedQrPrintModal({ open, onClose, lockedBed = null }: Pro
     });
   }, [beds, scopeKtx, scopeDay, scopeRoom, lockedBed]);
 
+  const [printing, setPrinting] = useState(false);
+
+  const handlePrintLabels = useCallback(async () => {
+    if (labelBeds.length === 0) return;
+    setPrinting(true);
+    try {
+      const items = await Promise.all(
+        labelBeds.map(async bed => {
+          const qrSrc = await generateQrDataUrl(bedQrUrl(bed), {
+            width: 260,
+            margin: 2,
+            darkColor: '#0B0F17',
+          });
+          const occupant =
+            bed?.status === 'occupied'
+              ? bed?.ho_va_ten || bed?.ma_nv || ''
+              : bed?.status === 'maintenance'
+              ? 'Đang bảo trì'
+              : '(Giường trống)';
+          return `
+            <div class="label">
+              <div class="hd">KTX Phước Vĩnh Tây</div>
+              <div class="qr"><img src="${qrSrc}" alt="QR" /></div>
+              <div class="meta">
+                <div class="loc">${escapeHtml([bed?.ktx, bed?.day].filter(Boolean).join(' · '))}</div>
+                <div class="room">Phòng ${escapeHtml(bed?.phong_so || '—')} · Giường ${escapeHtml(bed?.giuong || '—')}</div>
+                <div class="occ">${escapeHtml(occupant)}</div>
+              </div>
+            </div>`;
+        })
+      );
+      printHtmlViaIframe(`<!doctype html>
+<html><head><meta charset="utf-8"><title>In Tem Mã QR Giường</title>
+<style>
+  @page { size: A4; margin: 8mm; }
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 0; color: #0B0F17; }
+  .grid { display: grid; grid-template-columns: repeat(3, 5cm); gap: 4mm; }
+  .label { width: 5cm; height: 8cm; border: 1px solid #cbd5e1; border-radius: 6px; padding: 3mm; box-sizing: border-box; display: flex; flex-direction: column; break-inside: avoid; page-break-inside: avoid; }
+  .hd { text-align: center; font-size: 9pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: #475569; }
+  .qr { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
+  .qr img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  .meta { text-align: center; line-height: 1.25; }
+  .loc { font-size: 9pt; font-weight: 800; }
+  .room { font-size: 9.5pt; font-weight: 800; color: #1d4ed8; }
+  .occ { font-size: 10pt; font-weight: 700; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style></head>
+<body><div class="grid">${items.join('')}</div></body></html>`);
+    } finally {
+      setPrinting(false);
+    }
+  }, [labelBeds]);
+
   if (!open) return null;
 
   return (
     <>
-      <style dangerouslySetInnerHTML={{ __html: PRINT_CSS }} />
       <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4" onClick={onClose}>
         <div
           className="bg-surf border border-bdr rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-4xl flex flex-col max-h-[92vh]"
@@ -226,11 +252,13 @@ export default function BedQrPrintModal({ open, onClose, lockedBed = null }: Pro
                 </select>
               </div>
               <button
-                onClick={() => window.print()}
-                className="ml-auto flex items-center gap-2 px-4 py-2.5 rounded-xl bg-pri2 hover:bg-pri2 text-[#0B0F17] text-sm font-extrabold transition-colors"
-                title="In ngay (Ctrl+P)"
+                onClick={handlePrintLabels}
+                disabled={printing || labelBeds.length === 0}
+                className="ml-auto flex items-center gap-2 px-4 py-2.5 rounded-xl bg-pri2 hover:bg-pri2 text-[#0B0F17] text-sm font-extrabold transition-colors disabled:opacity-50"
+                title="In tem QR 5×8 cm"
               >
-                <Printer size={15} /> In ngay (Ctrl+P)
+                {printing ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />}
+                {printing ? 'Đang tạo tem...' : 'In ngay (5×8 cm)'}
               </button>
             </div>
           )}
@@ -239,10 +267,12 @@ export default function BedQrPrintModal({ open, onClose, lockedBed = null }: Pro
           {lockedBed && (
             <div className="px-5 pt-4 flex justify-end no-print">
               <button
-                onClick={() => window.print()}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-pri2 hover:bg-pri2 text-[#0B0F17] text-sm font-extrabold transition-colors"
+                onClick={handlePrintLabels}
+                disabled={printing}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-pri2 hover:bg-pri2 text-[#0B0F17] text-sm font-extrabold transition-colors disabled:opacity-50"
               >
-                <Printer size={15} /> In ngay (Ctrl+P)
+                {printing ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />}
+                {printing ? 'Đang tạo tem...' : 'In ngay (5×8 cm)'}
               </button>
             </div>
           )}
@@ -265,7 +295,14 @@ export default function BedQrPrintModal({ open, onClose, lockedBed = null }: Pro
                     <label key={bed?.id} className="qr-label block rounded-xl border border-bdr bg-white p-2.5 text-[#0B0F17] shadow-lg aspect-[5/8] flex flex-col overflow-hidden">
                       <p className="text-[9px] font-bold text-center text-mu uppercase tracking-wider">KTX Phước Vĩnh Tây</p>
                       <div className="flex-1 min-h-0 flex items-center justify-center">
-                        <img src={qrImageSrc(bed)} alt={`QR giường ${bed?.ktx} ${bed?.day} P${bed?.phong_so} G${bed?.giuong}`} className="w-full h-full object-contain" />
+                        <QrCodeImage
+                          value={bedQrUrl(bed)}
+                          size={180}
+                          margin={2}
+                          darkColor="#0B0F17"
+                          alt={`QR giường ${bed?.ktx} ${bed?.day} P${bed?.phong_so} G${bed?.giuong}`}
+                          className="w-full h-full object-contain"
+                        />
                       </div>
                       <div className="space-y-0.5 text-center">
                         <p className="text-[10px] font-extrabold truncate">{[bed?.ktx, bed?.day].filter(Boolean).join(' · ')}</p>
@@ -281,29 +318,8 @@ export default function BedQrPrintModal({ open, onClose, lockedBed = null }: Pro
                   ))}
                 </div>
                 <p className="mt-3 text-[11px] text-mu text-center no-print">
-                  💡 Mẹo: tem đã căn khổ 5×8 cm. Bấm <b>In ngay</b> hoặc <b>Ctrl+P</b> — chọn khổ giấy A4, tắt Header/Footer khi in.
+                  💡 Mẹo: tem đã căn khổ 5×8 cm. Bấm <b>In ngay</b> — chọn khổ giấy A4, tắt Header/Footer khi in.
                 </p>
-              </div>
-
-              {/* Print area: chỉ tem được in với khổ thật 5×8 cm */}
-              <div className="qr-print-area hidden">
-                {labelBeds.map(bed => (
-                  <div key={`print-${bed?.id}`} className="qr-label bg-white text-[#0B0F17] p-3 flex flex-col">
-                    <p className="text-center text-xs font-extrabold uppercase tracking-wider">KTX Phước Vĩnh Tây</p>
-                    <div className="flex-1 min-h-0 flex items-center justify-center py-1">
-                      <img src={qrImageSrc(bed)} alt="QR" className="w-full h-full object-contain" />
-                    </div>
-                    <div className="space-y-0.5 text-center">
-                      <p className="text-sm font-extrabold">{[bed?.ktx, bed?.day].filter(Boolean).join(' · ')}</p>
-                      <p className="text-sm font-extrabold text-pri">Phòng {bed?.phong_so || '—'} · Giường {bed?.giuong || '—'}</p>
-                      <p className="text-base font-extrabold">
-                        {bed?.status === 'occupied'
-                          ? (bed?.ho_va_ten || bed?.ma_nv || '')
-                          : (bed?.status === 'maintenance' ? 'Đang bảo trì' : '(Giường trống)')}
-                      </p>
-                    </div>
-                  </div>
-                ))}
               </div>
             </>
           )}

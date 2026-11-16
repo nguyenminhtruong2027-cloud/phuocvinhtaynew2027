@@ -1,8 +1,26 @@
 'use client';
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/context/AuthContext';
 
-export type AuditAction = 'Thêm' | 'Sửa' | 'Xóa' | 'Chuyển phòng' | 'Đổi trạng thái tạm trú' | 'Import' | 'CREATE' | 'UPDATE' | 'DELETE' | 'IMPORT';
+const PUBLIC_PATHS = ['/sign-up-login', '/login', '/register', '/checkout', '/attendance'];
+
+export type AuditAction =
+  | 'Thêm'
+  | 'Sửa'
+  | 'Xóa'
+  | 'Chuyển phòng'
+  | 'Đổi trạng thái tạm trú'
+  | 'Import'
+  | 'CREATE'
+  | 'UPDATE'
+  | 'DELETE'
+  | 'IMPORT'
+  | 'CHECKOUT_REQUEST'
+  | 'CHECKOUT_APPROVED'
+  | 'BED_REASSIGN'
+  | 'APPROVE_REGISTRATION';
 
 export interface AuditEntry {
   id: string;
@@ -22,6 +40,11 @@ interface AuditContextValue {
 const AuditContext = createContext<AuditContextValue | null>(null);
 
 export function AuditProvider({ children }: { children: React.ReactNode }) {
+  const { currentUser, loading: authLoading } = useAuth();
+  const pathname = usePathname();
+  const isPublicPath = PUBLIC_PATHS.some(p => pathname?.startsWith(p));
+  const shouldLoadAudit = !authLoading && Boolean(currentUser) && !isPublicPath;
+
   const [logs, setLogs] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const supabase = createClient();
@@ -47,26 +70,15 @@ export function AuditProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
   }, [supabase]);
 
-  // Initial fetch on mount
   useEffect(() => {
+    if (authLoading) return;
+    if (!shouldLoadAudit) {
+      setLogs([]);
+      setLoading(false);
+      return;
+    }
     fetchLogs();
-  }, [fetchLogs]);
-
-  // Re-fetch whenever the auth session is established or refreshed so every
-  // admin account always sees the full shared log (not the empty snapshot
-  // captured before the session token was ready).
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        fetchLogs();
-      }
-      if (event === 'SIGNED_OUT') {
-        setLogs([]);
-        setLoading(false);
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, [supabase, fetchLogs]);
+  }, [authLoading, shouldLoadAudit, fetchLogs]);
 
   const addLog = useCallback(async (account: string, action: AuditAction, detail: string) => {
     const entry: AuditEntry = {

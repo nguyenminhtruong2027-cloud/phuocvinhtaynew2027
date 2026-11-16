@@ -5,11 +5,21 @@ import {
   Users, LayoutGrid, Percent, AlertCircle, VenusAndMars, HardHat,
   Building2, TrendingUp, TrendingDown, UserPlus, UserMinus, ArrowRightLeft,
   Calendar, Clock, RefreshCw, Filter, X, Building, BarChart2, CheckCircle2,
-  ChevronDown, ChevronRight
+  ChevronDown, ChevronRight, Download
 } from 'lucide-react';
+import { toast } from 'sonner';
+import { exportMultiSheetExcel } from '@/lib/exportExcel';
 import { useWorkers } from '@/context/WorkerContext';
 import { Worker, DEFAULT_ROOM_CAPACITY, getUniqueBuildings, getUniqueRooms, countUniqueBuildings } from '@/data/workers';
-import { getActiveKtxList } from '@/lib/systemMetrics';
+import { computeSystemMetrics, getActiveKtxList } from '@/lib/systemMetrics';
+import {
+  fetchFacilitiesList,
+  fetchRoomCapacities,
+  getRoomCapacity,
+  normalizeRoomLabel,
+  FacilityItem,
+  RoomCapacityMap,
+} from '@/lib/facilityCapacity';
 import { createClient } from '@/lib/supabase/client';
 import {
   DailyFluctuation,
@@ -143,9 +153,61 @@ export default function ReportDashboard() {
   const [lastFetched, setLastFetched] = useState<string>('');
   const realtimeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Unique buildings from workers for filter ──
-  const activeKtxList = useMemo(() => getActiveKtxList(workers), [workers]);
-  const allBuildings = useMemo(() => getUniqueBuildings(workers), [workers]);
+  // ── Physical facilities & capacities (Single Source of Truth) ──
+  const [facilitiesList, setFacilitiesList] = useState<FacilityItem[]>([]);
+  const [capacities, setCapacities] = useState<RoomCapacityMap>({});
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const tabParam = new URLSearchParams(window.location.search).get('tab');
+      if (tabParam === 'bien-dong' || tabParam === 'tong-quan') {
+        setActiveTab(tabParam);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const loadFacilities = async () => {
+      try {
+        const [facs, capMap] = await Promise.all([
+          fetchFacilitiesList(),
+          fetchRoomCapacities(),
+        ]);
+        if (active) {
+          setFacilitiesList(facs);
+          setCapacities(capMap);
+        }
+      } catch (err) {
+        console.warn('[ReportDashboard] load facilities error:', err);
+      }
+    };
+    loadFacilities();
+    const supabase = createClient();
+    const channel = supabase
+      .channel('report_facilities_realtime_v1')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, loadFacilities)
+      .subscribe();
+    return () => {
+      active = false;
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // ── Unique buildings from workers & facilities for filter ──
+  const activeKtxList = useMemo(
+    () => getActiveKtxList(workers, [], facilitiesList),
+    [workers, facilitiesList]
+  );
+  const allBuildings = useMemo(() => {
+    const set = new Set<string>(getUniqueBuildings(workers));
+    facilitiesList.forEach(f => {
+      if ((f.room_type || 'accommodation') === 'accommodation' && f.is_visible !== false && f.day?.trim()) {
+        set.add(f.day.trim());
+      }
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true, sensitivity: 'base' }));
+  }, [workers, facilitiesList]);
   const flKtxOptions = useMemo(() => {
     const merged = new Set([...activeKtxList, ...flAvailableKtx]);
     return Array.from(merged).filter(Boolean);
@@ -258,17 +320,113 @@ export default function ReportDashboard() {
     return [...filteredDailyAsc].sort((a, b) => b.ngay.localeCompare(a.ngay));
   }, [filteredDailyAsc]);
 
-  // ── Tổng quan computed ──
+  const handleExportFluctuation = useCallback(() => {
+    if (filteredDailyData.length === 0) {
+      toast.warning('Không có dữ liệu biến động trong khoảng lọc để xuất Excel.');
+      return;
+    }
+
+    const totalTang = filteredDailyData.reduce((sum, r) => sum + r.so_tang, 0);
+    const totalGiam = filteredDailyData.reduce((sum, r) => sum + r.so_giam, 0);
+    const totalRong = totalTang - totalGiam;
+
+    const summaryRows: Record<string, any>[] = filteredDailyData.map((row, idx) => ({
+      'STT': idx + 1,
+      'Ngày': formatDateVN(row.ngay),
+      'Vào ở (+)': row.so_tang,
+      'Rời khỏi (-)': row.so_giam,
+      'Biến động ròng': row.bien_dong_rong,
+      'Khu vực lọc': flFilter.ktx || 'Tất cả KTX',
+      'Dãy lọc': flFilter.day || 'Tất cả dãy',
+      'Chế độ chốt': flFilter.cutoffMode === '14h' ? 'Chốt 14:00' : 'Thời gian thực',
+    }));
+
+    summaryRows.push({
+      'STT': '',
+      'Ngày': 'TỔNG CỘNG KỲ',
+      'Vào ở (+)': totalTang,
+      'Rời khỏi (-)': totalGiam,
+      'Biến động ròng': totalRong,
+      'Khu vực lọc': flFilter.ktx || 'Tất cả KTX',
+      'Dãy lọc': flFilter.day || 'Tất cả dãy',
+      'Chế độ chốt': flFilter.cutoffMode === '14h' ? 'Chốt 14:00' : 'Thời gian thực',
+    });
+
+    const detailRows: Record<string, any>[] = [];
+    let detailIdx = 1;
+    filteredDailyData.forEach(row => {
+      const dateVN = formatDateVN(row.ngay);
+      row.entries.forEach(p => {
+        detailRows.push({
+          'STT': detailIdx++,
+          'Ngày': dateVN,
+          'Giờ (VN)': p.time_vn || '',
+          'Loại biến động': 'Vào ở (+)',
+          'Họ và tên': p.ho_va_ten || '—',
+          'Mã NV': p.ma_nv || '—',
+          'KTX': p.ktx || '—',
+          'Dãy': p.day || '—',
+        });
+      });
+      row.exits.forEach(p => {
+        detailRows.push({
+          'STT': detailIdx++,
+          'Ngày': dateVN,
+          'Giờ (VN)': p.time_vn || '',
+          'Loại biến động': 'Rời khỏi (-)',
+          'Họ và tên': p.ho_va_ten || '—',
+          'Mã NV': p.ma_nv || '—',
+          'KTX': p.ktx || '—',
+          'Dãy': p.day || '—',
+        });
+      });
+    });
+
+    const fileName = `BienDong_KTX_${flFilter.dateFrom}_den_${flFilter.dateTo}.xlsx`;
+    const ok = exportMultiSheetExcel(
+      [
+        { name: 'Tổng hợp theo ngày', data: summaryRows },
+        {
+          name: 'Chi tiết vào - ra',
+          data: detailRows,
+          emptyHeaders: ['STT', 'Ngày', 'Giờ (VN)', 'Loại biến động', 'Họ và tên', 'Mã NV', 'KTX', 'Dãy'],
+        },
+      ],
+      fileName
+    );
+    if (ok) {
+      toast.success(`Đã xuất báo cáo biến động (${filteredDailyData.length} ngày, ${detailRows.length} lượt vào/ra).`);
+    } else {
+      toast.error('Không thể xuất file Excel. Vui lòng thử lại.');
+    }
+  }, [filteredDailyData, flFilter]);
+
+  // ── Tổng quan computed (synced with facilities capacity & computeSystemMetrics) ──
+  const activeFacilities = useMemo(() => {
+    return (facilitiesList || []).filter(f => {
+      if ((f.room_type || 'accommodation') !== 'accommodation' || f.is_visible === false) return false;
+      const k = (f.ktx || '').toLowerCase();
+      const d = (f.day || '').toLowerCase();
+      const r = (f.phong_khu_vuc || '').toLowerCase();
+      return !k.includes('tổng') && !k.includes('tong') && !d.includes('tổng') && !r.includes('tổng') && !/^\d+\s*phòng$/i.test(r.trim());
+    });
+  }, [facilitiesList]);
+
   const filtered = useMemo(() => {
     return workers.filter(w => {
       if (!matchesGender(w, filters.gender)) return false;
       if (!matchesUnit(w, filters.unit)) return false;
       if (!matchesKtx(w, filters.ktx)) return false;
-      if (filters.building && w.day !== filters.building) return false;
-      if (filters.room && w.phongSo !== filters.room) return false;
+      if (filters.building && (w.day ?? '').trim() !== filters.building.trim()) return false;
+      if (filters.room && normalizeRoomLabel(w.phongSo) !== normalizeRoomLabel(filters.room)) return false;
       return true;
     });
   }, [workers, filters]);
+
+  const getRoomCap = useCallback(
+    (k: string, b: string, r: string) => getRoomCapacity(capacities, k, b, r) || DEFAULT_ROOM_CAPACITY,
+    [capacities]
+  );
 
   const stats = useMemo(() => {
     const total = filtered.length;
@@ -282,63 +440,111 @@ export default function ReportDashboard() {
     const vinalpha = filtered.filter(w => { const dv = (w.donVi || '').toLowerCase(); return dv.includes('vinalpha') || dv.includes('alpha'); }).length;
     const otherUnit = Math.max(0, total - xd - me - vinalpha);
 
-    const buildingCount = countUniqueBuildings(filtered);
-    const roomSet = new Set(filtered.map(w => `${w.ktx}||${w.day}||${w.phongSo}`).filter(k => !k.startsWith('||')));
-    const roomCount = roomSet.size;
-    const capacity = roomCount * DEFAULT_ROOM_CAPACITY;
     const workersWithRoom = filtered.filter(w => w.day && w.phongSo).length;
-    const fillRate = capacity > 0 ? Math.round((workersWithRoom / capacity) * 100) : 0;
     const missingData = filtered.filter(w => !w.day || !w.phongSo).length;
+
+    let buildingCount = 0;
+    let roomCount = 0;
+    let capacity = 0;
+
+    if (activeFacilities.length > 0) {
+      const scopedFacilities = activeFacilities.filter(f => {
+        const fk = (f.ktx ?? '').trim();
+        const fb = (f.day ?? '').trim();
+        const fr = (f.phong_khu_vuc ?? '').trim();
+        if (!fk || !fb || !fr) return false;
+        if (filters.ktx !== 'all' && fk !== filters.ktx.trim()) return false;
+        if (filters.building && fb !== filters.building.trim()) return false;
+        if (filters.room && normalizeRoomLabel(fr) !== normalizeRoomLabel(filters.room)) return false;
+        return true;
+      });
+      const bPairSet = new Set<string>();
+      const rKeySet = new Set<string>();
+      scopedFacilities.forEach(f => {
+        const fk = (f.ktx ?? '').trim();
+        const fb = (f.day ?? '').trim();
+        const fr = (f.phong_khu_vuc ?? '').trim();
+        bPairSet.add(`${fk}||${fb}`);
+        const rKey = `${fk}||${fb}||${normalizeRoomLabel(fr)}`;
+        if (!rKeySet.has(rKey)) {
+          rKeySet.add(rKey);
+          capacity += getRoomCap(fk, fb, fr);
+        }
+      });
+      buildingCount = bPairSet.size;
+      roomCount = rKeySet.size;
+    } else {
+      buildingCount = countUniqueBuildings(filtered);
+      const roomSet = new Set(
+        filtered
+          .filter(w => w.ktx && w.day && w.phongSo)
+          .map(w => `${w.ktx.trim()}||${w.day.trim()}||${normalizeRoomLabel(w.phongSo)}`)
+      );
+      roomCount = roomSet.size;
+      roomSet.forEach(rk => {
+        const [k, b, r] = rk.split('||');
+        capacity += getRoomCap(k, b, r);
+      });
+    }
+
+    const fillRate = capacity > 0 ? Math.round((workersWithRoom / capacity) * 100) : 0;
 
     return {
       total, male, female, xd, me, vinalpha, otherUnit,
       buildingCount, roomCount, capacity, fillRate, workersWithRoom, missingData
     };
-  }, [filtered]);
+  }, [filtered, activeFacilities, filters.ktx, filters.building, filters.room, getRoomCap]);
 
   const ktxBreakdownCounts = useMemo(() => {
+    const metrics = computeSystemMetrics(filtered, {}, 'all', [], getRoomCap, facilitiesList);
     const map: Record<string, { total: number; male: number; female: number; rooms: number; capacity: number; fillRate: number }> = {};
-    const roomsMap: Record<string, Set<string>> = {};
 
-    activeKtxList.forEach(k => {
-      map[k] = { total: 0, male: 0, female: 0, rooms: 0, capacity: 0, fillRate: 0 };
-      roomsMap[k] = new Set();
-    });
-
-    filtered.forEach(w => {
-      const k = (w.ktx ?? '').trim();
-      if (k && map[k]) {
-        map[k].total++;
-        const g = (w.gioiTinh || '').toLowerCase();
-        if (g.includes('nam')) map[k].male++;
-        else if (g.includes('nữ') || g.includes('nu')) map[k].female++;
-
-        if (w.day && w.phongSo) {
-          roomsMap[k]?.add(`${w.day}||${w.phongSo}`);
-        }
-      }
-    });
-
-    activeKtxList.forEach(k => {
-      const rooms = roomsMap[k]?.size || 0;
-      const capacity = rooms * DEFAULT_ROOM_CAPACITY;
-      map[k].rooms = rooms;
-      map[k].capacity = capacity;
-      map[k].fillRate = capacity > 0 ? Math.round((map[k].total / capacity) * 100) : 0;
+    metrics.ktxBreakdown.forEach(item => {
+      map[item.ktx] = {
+        total: item.totalWorkers,
+        male: item.male,
+        female: item.female,
+        rooms: item.totalRooms,
+        capacity: item.capacity,
+        fillRate: item.fillRate,
+      };
     });
 
     return map;
-  }, [filtered, activeKtxList]);
+  }, [filtered, getRoomCap, facilitiesList]);
 
   const buildingList = useMemo(() => {
+    const set = new Set<string>();
     const list = filters.ktx === 'all' ? workers : workers.filter(w => (w.ktx ?? '').trim() === filters.ktx.trim());
-    return getUniqueBuildings(list);
-  }, [workers, filters.ktx]);
+    getUniqueBuildings(list).forEach(b => set.add(b));
+    activeFacilities.forEach(f => {
+      const fk = (f.ktx ?? '').trim();
+      const fb = (f.day ?? '').trim();
+      if (fb && (filters.ktx === 'all' || fk === filters.ktx.trim())) {
+        set.add(fb);
+      }
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true, sensitivity: 'base' }));
+  }, [workers, filters.ktx, activeFacilities]);
 
   const roomList = useMemo(() => {
+    const set = new Set<string>();
     const list = filters.ktx === 'all' ? workers : workers.filter(w => (w.ktx ?? '').trim() === filters.ktx.trim());
-    return getUniqueRooms(list, filters.building || undefined);
-  }, [workers, filters.ktx, filters.building]);
+    getUniqueRooms(list, filters.building || undefined).forEach(r => set.add(normalizeRoomLabel(r) || r));
+    activeFacilities.forEach(f => {
+      const fk = (f.ktx ?? '').trim();
+      const fb = (f.day ?? '').trim();
+      const fr = normalizeRoomLabel(f.phong_khu_vuc ?? '');
+      if (
+        fr &&
+        (filters.ktx === 'all' || fk === filters.ktx.trim()) &&
+        (!filters.building || fb === filters.building.trim())
+      ) {
+        set.add(fr);
+      }
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true, sensitivity: 'base' }));
+  }, [workers, filters.ktx, filters.building, activeFacilities]);
 
   const hasActiveFilter =
     filters.gender !== 'all' || filters.unit !== 'all' || filters.ktx !== 'all' ||
@@ -383,8 +589,19 @@ export default function ReportDashboard() {
             </div>
           </div>
 
-          {/* Quick Refresh Status */}
-          <div className="flex items-center gap-2">
+          {/* Quick Refresh & Export Status */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {activeTab === 'bien-dong' && (
+              <button
+                onClick={handleExportFluctuation}
+                disabled={flLoading || filteredDailyData.length === 0}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-ok2 hover:opacity-90 text-xs font-bold text-white transition-all shadow-md disabled:opacity-50"
+                title="Xuất Excel gồm 2 sheet: Tổng hợp theo ngày và Chi tiết từng công nhân vào/ra"
+              >
+                <Download size={13} />
+                <span>Xuất Excel Biến Động</span>
+              </button>
+            )}
             <button
               onClick={() => {
                 if (activeTab === 'bien-dong') fetchFluctuation();
@@ -1018,12 +1235,21 @@ export default function ReportDashboard() {
             {/* ── Daily Detail Table (Dark Theme with Row Highlight) ── */}
             {!flLoading && filteredDailyData.length > 0 && (
               <div className="bg-surf rounded-2xl border border-bdr/60 shadow-xl overflow-hidden">
-                <div className="px-5 py-4 border-b border-bdr/60 flex items-center justify-between bg-act/60">
+                <div className="px-5 py-4 border-b border-bdr/60 flex items-center justify-between gap-3 flex-wrap bg-act/60">
                   <h4 className="font-bold text-tx flex items-center gap-2 text-sm">
                     <Calendar size={15} className="text-ok" />
                     Chi tiết biến động theo từng ngày
                   </h4>
-                  <span className="text-xs text-mu font-medium font-tabular">{filteredDailyData.length} ngày có dữ liệu</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-mu font-medium font-tabular">{filteredDailyData.length} ngày có dữ liệu</span>
+                    <button
+                      onClick={handleExportFluctuation}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-act border border-bdr2 text-ok hover:bg-okbg text-xs font-bold transition-colors"
+                    >
+                      <Download size={12} />
+                      <span>Xuất Excel</span>
+                    </button>
+                  </div>
                 </div>
                 <div className="overflow-x-auto scrollbar-thin">
                   <table className="w-full text-sm min-w-[550px]">

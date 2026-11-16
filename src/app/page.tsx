@@ -16,12 +16,13 @@ import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabase/client';
 import WorkerFormModal from '@/app/worker-management/components/WorkerFormModal';
 import ExecutiveSpecialistsCard from './components/ExecutiveSpecialistsCard';
+import DataQualityAlert from './components/DataQualityAlert';
 import { SpecialistWithDuty } from '@/lib/dutyRoster';
 import {
   getRoomGenderInfo,
   loadSavedRoomGenderMap,
   saveRoomGenderMap,
-  fetchRoomLabelsFromSupabase,
+  fetchRoomLabelsAuthoritative,
   syncRoomGenderToSupabase,
   RoomGenderInfo,
   normalizeGender,
@@ -29,6 +30,7 @@ import {
 import { computeSystemMetrics, getActiveKtxList } from '@/lib/systemMetrics';
 import { useKtxStructure } from '@/lib/ktxStructure';
 import { exportToExcel } from '@/lib/exportExcel';
+import { fetchWorkerFluctuationReport, getVNDateString } from '@/lib/workerFluctuation';
 
 const RoomDrawer = dynamic(() => import('./components/RoomDrawer'), { ssr: false });
 const DashboardCharts = dynamic(() => import('./components/DashboardCharts'), { ssr: false });
@@ -607,20 +609,32 @@ export default function OccupancyDashboardPage() {
   const [roomFilterMode, setRoomFilterMode] = useState<'all' | 'overloaded' | 'empty'>('all');
   const [showOverloadedModal, setShowOverloadedModal] = useState(false);
 
-  // Load and sync room gender designations
+  // Load and sync room gender designations (Supabase room_units is authoritative)
   useEffect(() => {
+    let active = true;
     const saved = loadSavedRoomGenderMap();
     setRoomGenderMap(saved);
 
-    fetchRoomLabelsFromSupabase().then(dbLabels => {
-      if (Object.keys(dbLabels).length > 0) {
-        setRoomGenderMap(prev => {
-          const merged = { ...dbLabels, ...prev };
-          saveRoomGenderMap(merged);
-          return merged;
-        });
-      }
-    });
+    const syncLabels = () => {
+      fetchRoomLabelsAuthoritative().then(({ data: dbLabels, ok }) => {
+        if (!active || !ok) return;
+        setRoomGenderMap(dbLabels);
+        saveRoomGenderMap(dbLabels);
+      });
+    };
+
+    syncLabels();
+
+    const supabase = createClient();
+    const channel = supabase
+      .channel('dashboard_room_units_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_units' }, syncLabels)
+      .subscribe();
+
+    return () => {
+      active = false;
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Load room capacities and physical facilities catalog + realtime
@@ -745,10 +759,10 @@ export default function OccupancyDashboardPage() {
           .select('id, full_name, email, role, assigned_blocks');
 
         if (!error && data && data.length > 0) {
-          const map = new Map<string, any>();
-          rawProfiles.forEach(p => { if (p.email) map.set(p.email.toLowerCase(), p); });
-          data.forEach(p => { if (p.email) map.set(p.email.toLowerCase(), p); });
-          rawProfiles = Array.from(map.values());
+          rawProfiles = data;
+          try {
+            localStorage.setItem('ktx_local_profiles', JSON.stringify(data));
+          } catch {}
         }
       } catch {}
 
@@ -887,28 +901,52 @@ export default function OccupancyDashboardPage() {
   }, [roomWorkerMap, capacities]);
 
   useEffect(() => {
-    const today = new Date();
-    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    let entered = 0;
-    let left = 0;
-    (workers || []).forEach(w => {
-      if (w?.ngayVaoKTX) {
-        const d = new Date(w.ngayVaoKTX);
-        if (!isNaN(d.getTime())) {
-          const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          if (ds === todayStr) entered++;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const loadTodayStats = async () => {
+      try {
+        const todayVN = getVNDateString();
+        const report = await fetchWorkerFluctuationReport({
+          dateFrom: todayVN,
+          dateTo: todayVN,
+          ktx: selectedKTX === 'all' ? '' : selectedKTX,
+          day: selectedBuilding || '',
+          cutoffMode: 'realtime',
+        });
+        if (active) {
+          setTodayStats({
+            entered: report.today.so_tang,
+            left: report.today.so_giam,
+          });
         }
+      } catch (err) {
+        console.warn('[Dashboard] load todayStats warning:', err);
       }
-      if (w.ngayRaKTX) {
-        const d = new Date(w.ngayRaKTX);
-        if (!isNaN(d.getTime())) {
-          const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          if (ds === todayStr) left++;
-        }
-      }
-    });
-    setTodayStats({ entered, left });
-  }, [workers]);
+    };
+
+    loadTodayStats();
+
+    const supabase = createClient();
+    const scheduleReload = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (active) loadTodayStats();
+      }, 250);
+    };
+
+    const channel = supabase
+      .channel('dashboard_today_fluctuation_v1')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'workers' }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_deletion_log' }, scheduleReload)
+      .subscribe();
+
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
+  }, [workers.length, selectedKTX, selectedBuilding]);
 
   const ktxListForGrid = useMemo(() => {
     const facKtxs = Array.from(new Set(accommodationFacilities.map(f => f.ktx).filter(Boolean))).sort(compareKtxNames);
@@ -1156,6 +1194,15 @@ export default function OccupancyDashboardPage() {
             />
           </div>
 
+          {/* ── 3b. Smart Operational Alerts (Tạm trú, Lệch giới tính, Thiếu hồ sơ) ── */}
+          {!isEmpty && (
+            <DataQualityAlert
+              selectedKtx={selectedKTX}
+              roomGenderMap={roomGenderMap}
+              onSelectRoom={handleRoomClick}
+            />
+          )}
+
           {/* ── 4. Specialists Duty Card & Operational Alerts (Balanced 2-Column Row) ── */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 w-full">
             {/* Left: Specialists Card */}
@@ -1197,6 +1244,7 @@ export default function OccupancyDashboardPage() {
                   colorBg="bg-okbg"
                   colorText="text-ok"
                   colorBorder="border-bdr2"
+                  onClick={() => router.push('/report-dashboard?tab=bien-dong')}
                 />
                 <ExecutiveAlertCard
                   icon={TrendingDown}
@@ -1205,6 +1253,7 @@ export default function OccupancyDashboardPage() {
                   colorBg="tint-wn"
                   colorText="text-wn"
                   colorBorder="border-wn"
+                  onClick={() => router.push('/report-dashboard?tab=bien-dong')}
                 />
               </div>
 

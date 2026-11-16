@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { getVNDateString } from '@/lib/vnDate';
 import { CheckCircle2, AlertCircle, Loader2, QrCode, User, Hash, MapPin } from 'lucide-react';
 
 interface SessionInfo {
@@ -42,7 +43,7 @@ export default function AttendancePage() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      const dateParam = params.get('date') || new Date().toISOString().slice(0, 10);
+      const dateParam = params.get('date') || getVNDateString();
       setSessionDate(dateParam);
       setZoneKtx(params.get('ktx') || '');
       setZoneDay(params.get('day') || '');
@@ -81,19 +82,34 @@ export default function AttendancePage() {
     setPageState('submitting');
     try {
       let wInfo: WorkerInfo = { ho_va_ten: hoVaTen.trim(), ktx: '', day: '', phong_so: '' };
-      const { data: worker } = await supabase
-        .from('workers')
-        .select('ho_va_ten, ktx, day, phong_so')
-        .eq('ma_nv', maNv.trim())
-        .maybeSingle();
-      if (worker) {
-        wInfo = {
-          ho_va_ten: worker.ho_va_ten || hoVaTen.trim(),
-          ktx: worker.ktx || '',
-          day: worker.day || '',
-          phong_so: worker.phong_so || '',
-        };
-      }
+      try {
+        const { data: rpcRows, error: rpcErr } = await supabase.rpc('lookup_worker_qr', {
+          p_code: maNv.trim(),
+        });
+        if (!rpcErr && Array.isArray(rpcRows) && rpcRows.length > 0) {
+          const match = rpcRows[0];
+          wInfo = {
+            ho_va_ten: match.ho_va_ten || hoVaTen.trim(),
+            ktx: match.ktx || '',
+            day: match.day || '',
+            phong_so: match.phong_so || '',
+          };
+        } else {
+          const { data: worker } = await supabase
+            .from('workers')
+            .select('ho_va_ten, ktx, day, phong_so')
+            .eq('ma_nv', maNv.trim())
+            .maybeSingle();
+          if (worker) {
+            wInfo = {
+              ho_va_ten: worker.ho_va_ten || hoVaTen.trim(),
+              ktx: worker.ktx || '',
+              day: worker.day || '',
+              phong_so: worker.phong_so || '',
+            };
+          }
+        }
+      } catch {}
 
       // Feature 5: Check for duplicate check-in
       const { data: existingRecord } = await supabase

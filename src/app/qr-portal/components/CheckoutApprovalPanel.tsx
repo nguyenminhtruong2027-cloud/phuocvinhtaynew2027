@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
 import { fetchWorkerHierarchy, WorkerHierarchyData, invalidateWorkerHierarchyCache } from '@/lib/workerHierarchy';
 import { invalidateKtxStructureCache } from '@/lib/ktxStructure';
+import { toast } from 'sonner';
 import {
   CheckCircle2,
   Clock,
@@ -452,7 +453,7 @@ export default function CheckoutApprovalPanel({
       if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
       successTimeoutRef.current = setTimeout(() => setActionSuccessMsg(null), 8000);
     } catch (err: any) {
-      alert(`Lỗi khi phê duyệt: ${err?.message || 'Không thể cập nhật'}`);
+      toast.error(`Lỗi khi phê duyệt: ${err?.message || 'Không thể cập nhật'}`);
     } finally {
       setProcessingId(null);
     }
@@ -483,7 +484,7 @@ export default function CheckoutApprovalPanel({
         setDetailReq(prev => (prev ? { ...prev, status: 'rejected', reviewed_at: nowStr } : null));
       }
     } catch (err: any) {
-      alert(`Lỗi khi từ chối: ${err?.message || 'Không thể cập nhật'}`);
+      toast.error(`Lỗi khi từ chối: ${err?.message || 'Không thể cập nhật'}`);
     } finally {
       setProcessingId(null);
     }
@@ -518,7 +519,7 @@ export default function CheckoutApprovalPanel({
         window.dispatchEvent(new CustomEvent('ktx_workers_updated'));
       }
     } catch (err: any) {
-      alert(`Lỗi khi xóa: ${err?.message || 'Không thể xóa'}`);
+      toast.error(`Lỗi khi xóa: ${err?.message || 'Không thể xóa'}`);
     }
   };
 

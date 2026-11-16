@@ -52,6 +52,72 @@ export function exportToExcel<T extends Record<string, any>>(
   }
 }
 
+export interface ExcelSheetInput<T extends Record<string, any> = Record<string, any>> {
+  name: string;
+  data: T[];
+  emptyHeaders?: string[];
+}
+
+/**
+ * Xuất nhiều sheet vào cùng 1 file Excel (.xlsx) với độ rộng cột tự động chuẩn Tiếng Việt.
+ */
+export function exportMultiSheetExcel(
+  sheets: ExcelSheetInput[],
+  fileName: string
+): boolean {
+  try {
+    const wb = XLSX.utils.book_new();
+    const usedNames = new Set<string>();
+
+    sheets.forEach((sheet, idx) => {
+      const rows = sheet.data && sheet.data.length > 0
+        ? sheet.data
+        : sheet.emptyHeaders && sheet.emptyHeaders.length > 0
+        ? [Object.fromEntries(sheet.emptyHeaders.map(h => [h, '']))]
+        : [{}];
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const keys = Object.keys(rows[0] || {});
+      if (keys.length > 0) {
+        ws['!cols'] = keys.map((key) => {
+          let maxLen = key.length;
+          for (let i = 0; i < Math.min(rows.length, 1000); i++) {
+            const val = rows[i]?.[key];
+            if (val !== undefined && val !== null) {
+              const str = String(val);
+              if (str.length > maxLen) {
+                maxLen = Math.min(str.length, 60);
+              }
+            }
+          }
+          return { wch: Math.max(maxLen + 4, 12) };
+        });
+      }
+
+      const base = (sheet.name || `Sheet${idx + 1}`)
+        .replace(/[:\\/?*[\]]/g, '')
+        .trim()
+        .slice(0, 31) || `Sheet${idx + 1}`;
+      let safeName = base;
+      let suffix = 1;
+      while (usedNames.has(safeName)) {
+        const tag = `_${suffix++}`;
+        safeName = `${base.slice(0, Math.max(1, 31 - tag.length))}${tag}`;
+      }
+      usedNames.add(safeName);
+      XLSX.utils.book_append_sheet(wb, ws, safeName);
+    });
+
+    return saveWorkbook(wb, fileName);
+  } catch (err) {
+    console.error('Lỗi khi xuất file Excel nhiều sheet:', err);
+    if (sheets[0]?.data) {
+      return exportToCsv(sheets[0].data, fileName);
+    }
+    return false;
+  }
+}
+
 /**
  * Lưu Workbook SheetJS thành file binary .xlsx thực thụ bằng Blob ArrayBuffer
  * Tránh hoàn toàn lỗi UTF-8 byte expansion khi truyền type: 'binary' vào new Blob()

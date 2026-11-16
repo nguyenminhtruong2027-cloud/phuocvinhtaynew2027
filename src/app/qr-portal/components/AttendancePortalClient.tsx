@@ -3,7 +3,10 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { QrCode, Calendar, Play, Square, Users, UserCheck, UserX, Download, RefreshCw, Loader2, CheckCircle2, Clock, Edit3, Save, X, AlertCircle, Search, Trash2, Filter, MapPin, Bell, BellRing, UserPlus } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
+import { getVNDateString } from '@/lib/vnDate';
+import { QrCodeImage, downloadQrPng } from '@/components/QrCodeImage';
 
 interface AttendanceSession {
   id: string;
@@ -71,32 +74,17 @@ function getZoneLabel(s: AttendanceSession): string {
 }
 
 function QRCodeDisplay({ url, sessionDate, zoneLabel }: { url: string; sessionDate: string; zoneLabel: string }) {
-  const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(url)}&margin=10&color=1b2430&bgcolor=ffffff`;
-  const qrLargeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=${encodeURIComponent(url)}&margin=20&color=1b2430&bgcolor=ffffff`;
-
   const handleDownload = async () => {
-    try {
-      const response = await fetch(qrLargeUrl);
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = `qr-diemdanh-${sessionDate}-${zoneLabel.replace(/\s/g, '_')}.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      window.open(qrLargeUrl, '_blank');
-    }
+    const ok = await downloadQrPng(url, `qr-diemdanh-${sessionDate}-${zoneLabel.replace(/\s+/g, '_')}.png`, 640);
+    if (!ok) toast.error('Không thể tạo file ảnh QR.');
   };
 
   return (
     <div className="bg-act border border-bdr rounded-md p-4">
       <div className="flex flex-col sm:flex-row items-center gap-5">
         <div className="shrink-0 flex flex-col items-center gap-2.5">
-          <div className="p-2 border border-bdr bg-surf rounded">
-            <img src={qrApiUrl} alt={`QR điểm danh ngày ${sessionDate} - ${zoneLabel}`} width={160} height={160} className="w-36 h-36" />
+          <div className="p-2 border border-bdr bg-white rounded">
+            <QrCodeImage value={url} size={144} alt={`QR điểm danh ngày ${sessionDate} - ${zoneLabel}`} className="w-36 h-36 object-contain" />
           </div>
           <button onClick={handleDownload}
             className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-side text-tx rounded text-xs font-semibold hover:bg-act transition-colors cursor-pointer">
@@ -151,7 +139,7 @@ export default function AttendancePortalClient() {
   const [sessions, setSessions] = useState<AttendanceSession[]>([]);
   const [activeSession, setActiveSession] = useState<AttendanceSession | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [selectedDate, setSelectedDate] = useState(() => getVNDateString());
   const [openingSession, setOpeningSession] = useState(false);
   const [closingSession, setClosingSession] = useState(false);
   const [deletingSession, setDeletingSession] = useState(false);
@@ -379,7 +367,7 @@ export default function AttendancePortalClient() {
       for (let i = 0; i < 14; i++) {
         const d = new Date(today);
         d.setDate(d.getDate() - i);
-        dates.push(d.toISOString().slice(0, 10));
+        dates.push(getVNDateString(d));
       }
       const { data: sessionsData } = await supabase
         .from('attendance_sessions')
@@ -594,7 +582,7 @@ export default function AttendancePortalClient() {
     // Feature 5: block duplicate check-in
     const alreadyCheckedIn = records.some(r => r.ma_nv === w.ma_nv && (r.status === 'present' || r.status === 'excused'));
     if (alreadyCheckedIn) {
-      alert(`${w.ho_va_ten} đã được điểm danh trong phiên này rồi.`);
+      toast.warning(`${w.ho_va_ten} đã được điểm danh trong phiên này rồi.`);
       return;
     }
     setProxyCheckingIn(w.id);
@@ -740,7 +728,7 @@ export default function AttendancePortalClient() {
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Cảnh báo vắng');
-    XLSX.writeFile(wb, `CanhBaoVang_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(wb, `CanhBaoVang_${getVNDateString()}.xlsx`);
   };
 
   // Scope summary stats to the active KTX filter (Records tab) when set

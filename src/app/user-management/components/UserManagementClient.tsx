@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth, UserRole } from '@/context/AuthContext';
 import { createClient, normalizeSupabaseUrl } from '@/lib/supabase/client';
-import { UserPlus, Pencil, Trash2, Shield, ShieldCheck, RefreshCw, AlertCircle, CheckCircle, Building2, Search, KeyRound } from 'lucide-react';
+import { UserPlus, Pencil, Trash2, Shield, ShieldCheck, RefreshCw, AlertCircle, CheckCircle, Building2, Search, KeyRound, Database, Check, Copy } from 'lucide-react';
 import { useKtxStructure, KtxBlockGroup } from '@/lib/ktxStructure';
 
 interface ProfileRecord {
@@ -86,6 +86,50 @@ export default function UserManagementClient() {
   const [activeTab, setActiveTab] = useState<'all' | 'admin' | 'staff'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [checkingMigrations, setCheckingMigrations] = useState(false);
+  const [migrationStatus, setMigrationStatus] = useState<{
+    entryLog: 'unknown' | 'applied' | 'missing';
+    rlsLookup: 'unknown' | 'applied' | 'missing';
+    checkedAt?: string;
+  }>({ entryLog: 'unknown', rlsLookup: 'unknown' });
+  const [copiedMigrationPath, setCopiedMigrationPath] = useState<string | null>(null);
+
+  const checkDatabaseMigrations = useCallback(async () => {
+    setCheckingMigrations(true);
+    let entryLog: 'applied' | 'missing' = 'missing';
+    let rlsLookup: 'applied' | 'missing' = 'missing';
+
+    try {
+      const { error: entryErr } = await supabase.from('worker_entry_log').select('id').limit(1);
+      if (!entryErr) {
+        entryLog = 'applied';
+      } else {
+        const msg = entryErr.message.toLowerCase();
+        entryLog = msg.includes('does not exist') || msg.includes('schema cache') || msg.includes('not find') ? 'missing' : 'applied';
+      }
+    } catch {
+      entryLog = 'missing';
+    }
+
+    try {
+      const { error: rpcErr } = await supabase.rpc('lookup_worker_qr', { p_code: '__ping__' });
+      if (!rpcErr) {
+        rlsLookup = 'applied';
+      } else {
+        const msg = rpcErr.message.toLowerCase();
+        rlsLookup = msg.includes('could not find the function') || msg.includes('does not exist') ? 'missing' : 'applied';
+      }
+    } catch {
+      rlsLookup = 'missing';
+    }
+
+    setMigrationStatus({
+      entryLog,
+      rlsLookup,
+      checkedAt: new Date().toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
+    });
+    setCheckingMigrations(false);
+  }, [supabase]);
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
@@ -108,12 +152,8 @@ export default function UserManagementClient() {
           ...p,
           assigned_blocks: p.assigned_blocks ?? [],
         }));
-        const mergedMap = new Map<string, ProfileRecord>();
-        localList.forEach(p => mergedMap.set(p.email.toLowerCase(), p));
-        dbList.forEach(p => mergedMap.set(p.email.toLowerCase(), p));
-        const merged = Array.from(mergedMap.values());
-        setProfiles(merged);
-        saveLocalProfiles(merged);
+        setProfiles(dbList);
+        saveLocalProfiles(dbList);
       } else {
         const { data, error } = await supabase
           .from('profiles')
@@ -122,12 +162,8 @@ export default function UserManagementClient() {
 
         if (!error && data && Array.isArray(data) && data.length > 0) {
           const dbList = data.map(p => ({ ...p, assigned_blocks: p.assigned_blocks ?? [] }));
-          const mergedMap = new Map<string, ProfileRecord>();
-          localList.forEach(p => mergedMap.set(p.email.toLowerCase(), p));
-          dbList.forEach(p => mergedMap.set(p.email.toLowerCase(), p));
-          const merged = Array.from(mergedMap.values());
-          setProfiles(merged);
-          saveLocalProfiles(merged);
+          setProfiles(dbList);
+          saveLocalProfiles(dbList);
         } else {
           setProfiles(localList);
         }
@@ -669,6 +705,90 @@ export default function UserManagementClient() {
               </tbody>
             </table>
           </div>
+        )}
+      </div>
+
+      {/* Database Migration Readiness Panel */}
+      <div className="bg-card border border-border rounded-2xl shadow-sm p-5 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-bdg border border-bdr2 flex items-center justify-center text-lnk shrink-0">
+              <Database size={17} />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-foreground">Trạng thái nâng cấp Database (SQL Migrations)</h2>
+              <p className="text-xs text-muted-foreground">
+                Kiểm tra 2 bản vá SQL trong thư mục <code className="px-1 py-0.5 rounded bg-muted">supabase/migrations/</code> đã được chạy trên Supabase hay chưa
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={checkDatabaseMigrations}
+            disabled={checkingMigrations}
+            className="btn-secondary text-xs flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+          >
+            <RefreshCw size={13} className={checkingMigrations ? 'animate-spin' : ''} />
+            <span>{checkingMigrations ? 'Đang kiểm tra...' : 'Kiểm tra kết nối Migration'}</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {[
+            {
+              file: 'supabase/migrations/20261116000000_create_worker_entry_log.sql',
+              title: 'Sổ nhật ký biến động vào/ra (worker_entry_log)',
+              status: migrationStatus.entryLog,
+            },
+            {
+              file: 'supabase/migrations/20261116010000_harden_rls_policies.sql',
+              title: 'Siết RLS & hàm tra cứu QR (lookup_worker_qr)',
+              status: migrationStatus.rlsLookup,
+            },
+          ].map(item => (
+            <div key={item.file} className="p-3.5 rounded-xl border border-border bg-muted/20 flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-foreground">{item.title}</span>
+                {item.status === 'applied' ? (
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-okbg text-ok border border-bdr2 shrink-0">
+                    Đã áp dụng
+                  </span>
+                ) : item.status === 'missing' ? (
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-bold tint-wn text-wn border border-wn shrink-0">
+                    Chưa chạy SQL
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-muted text-muted-foreground shrink-0">
+                    Chưa kiểm tra
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                <code className="truncate font-mono">{item.file}</code>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(item.file);
+                    setCopiedMigrationPath(item.file);
+                    setTimeout(() => setCopiedMigrationPath(null), 2000);
+                  }}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-border hover:bg-muted text-foreground shrink-0"
+                  title="Sao chép đường dẫn file SQL"
+                >
+                  {copiedMigrationPath === item.file ? <Check size={11} className="text-ok" /> : <Copy size={11} />}
+                  <span>{copiedMigrationPath === item.file ? 'Đã chép' : 'Chép path'}</span>
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {migrationStatus.checkedAt && (
+          <p className="text-[11px] text-muted-foreground">
+            Lần kiểm tra gần nhất: <span className="font-tabular">{migrationStatus.checkedAt}</span>
+            {(migrationStatus.entryLog === 'missing' || migrationStatus.rlsLookup === 'missing') &&
+              ' — Mở Supabase Dashboard → SQL Editor và chạy các file được đánh dấu "Chưa chạy SQL" để bật đầy đủ tính năng.'}
+          </p>
         )}
       </div>
 

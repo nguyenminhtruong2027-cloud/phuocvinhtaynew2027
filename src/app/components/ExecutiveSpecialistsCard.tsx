@@ -212,20 +212,17 @@ export default function ExecutiveSpecialistsCard({
       const { data, error } = await Promise.race([fetchPromise, timeoutPromise]);
 
       if (!error && data && Array.isArray(data) && data.length > 0) {
-        const map = new Map<string, SpecialistItem>();
-        localFormatted.forEach(s => { if (s.email) map.set(s.email.toLowerCase(), s); });
-        data.forEach((p, idx) => {
-          const blocks: string[] = Array.isArray(p.assigned_blocks) ? p.assigned_blocks : [];
-          const item: SpecialistItem = {
-            id: p.id,
-            name: p.full_name || p.email?.split('@')[0] || `Chuyên viên ${idx + 1}`,
-            email: p.email || undefined,
-            role: (p.role === 'admin' ? 'admin' : 'staff') as 'admin' | 'staff',
-            assignedBlocks: blocks,
-          };
-          if (p.email) map.set(p.email.toLowerCase(), item);
-        });
-        setInternalProfiles(Array.from(map.values()));
+        const dbList: SpecialistItem[] = data.map((p, idx) => ({
+          id: p.id,
+          name: p.full_name || p.email?.split('@')[0] || `Chuyên viên ${idx + 1}`,
+          email: p.email || undefined,
+          role: (p.role === 'admin' ? 'admin' : 'staff') as 'admin' | 'staff',
+          assignedBlocks: Array.isArray(p.assigned_blocks) ? p.assigned_blocks : [],
+        }));
+        setInternalProfiles(dbList);
+        try {
+          localStorage.setItem('ktx_local_profiles', JSON.stringify(data));
+        } catch {}
       } else {
         setInternalProfiles(localFormatted);
       }
@@ -241,7 +238,7 @@ export default function ExecutiveSpecialistsCard({
       const { data, isTableMissing: missing } = await fetchDutyAssignmentsFromSupabase(todayDate);
       setIsTableMissing(missing);
       if (data) {
-        setDutyMap(prev => ({ ...prev, ...data }));
+        setDutyMap(missing ? prev => ({ ...prev, ...data }) : data);
       }
     } finally {
       if (showSyncIndicator) {
@@ -295,14 +292,16 @@ export default function ExecutiveSpecialistsCard({
       loadProfiles();
     };
 
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener('ktx_duty_updated', handleDutyEvent);
-    window.addEventListener('ktx_profiles_updated', handleProfilesEvent);
-    document.addEventListener('visibilitychange', () => {
+    const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         handleFocus();
       }
-    });
+    };
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('ktx_duty_updated', handleDutyEvent);
+    window.addEventListener('ktx_profiles_updated', handleProfilesEvent);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       if (channel) {
@@ -311,6 +310,7 @@ export default function ExecutiveSpecialistsCard({
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('ktx_duty_updated', handleDutyEvent);
       window.removeEventListener('ktx_profiles_updated', handleProfilesEvent);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [loadDutyAssignments, loadProfiles]);
 

@@ -1,9 +1,11 @@
 'use client';
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { Worker, calcSoNgay, getProfileStatus } from '@/data/workers';
-import { X, Users, Phone, CreditCard, MapPin, Calendar, FileText, VenusAndMars, CheckCircle2 } from 'lucide-react';
+import { X, Users, Phone, CreditCard, MapPin, Calendar, FileText, VenusAndMars, CheckCircle2, Printer } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
+import { printHtmlViaIframe, escapeHtml } from '@/lib/printHtml';
+import { getVNDateTimeDisplay } from '@/lib/vnDate';
 import {
   getRoomGenderInfo,
   syncRoomGenderToSupabase,
@@ -221,6 +223,83 @@ export default function RoomDrawer({
     }
   }, [ktx, room, noteInput, adminAssignedUnit, resolveEffectiveDayNha, onRoomNoteUpdated]);
 
+  const handlePrintRoster = useCallback(() => {
+    const roomTitle = room?.trim().startsWith('Phòng') || room?.trim().startsWith('P.') ? room.trim() : `Phòng ${room}`;
+    const dayLabel = resolveEffectiveDayNha() || building;
+    const rowsHtml = workers
+      .map((w, idx) => {
+        const gender = (w.gioiTinh || '').toLowerCase().includes('nữ') || (w.gioiTinh || '').toLowerCase() === 'nu' ? 'Nữ' : 'Nam';
+        return `<tr>
+          <td style="text-align:center">${idx + 1}</td>
+          <td style="font-weight:600">${escapeHtml(w.hoVaTen || '')}</td>
+          <td style="font-family:monospace">${escapeHtml(w.maNV || '—')}</td>
+          <td style="text-align:center">${escapeHtml(gender)}</td>
+          <td style="font-family:monospace">${escapeHtml(w.soDienThoai || '—')}</td>
+          <td>${escapeHtml(w.donVi || '—')}</td>
+          <td style="text-align:center">${escapeHtml(w.tieuDoan || '—')}</td>
+          <td style="text-align:center">${escapeHtml(w.giuong || '—')}</td>
+          <td style="font-family:monospace">${escapeHtml(w.ngayVaoKTX || '—')}</td>
+          <td></td>
+        </tr>`;
+      })
+      .join('');
+
+    const bodyHtml = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #1e293b;padding-bottom:10px;margin-bottom:14px">
+        <div>
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#475569">Ký túc xá Phước Vĩnh Tây</div>
+          <h1 style="font-size:18px;font-weight:800;margin:4px 0 0;color:#0f172a">DANH SÁCH NHÂN KHẨU PHÒNG — ${escapeHtml(roomTitle)}</h1>
+          <div style="font-size:12px;color:#334155;margin-top:4px">
+            <strong>Khu vực:</strong> ${escapeHtml(ktx)} · ${escapeHtml(dayLabel)} · <strong>Phân loại:</strong> ${escapeHtml(genderInfo.label)}
+          </div>
+        </div>
+        <div style="text-align:right;font-size:11px;color:#475569">
+          <div>Tổng quân số: <strong style="color:#0f172a">${workers.length} người</strong> (${genderInfo.maleCount} Nam · ${genderInfo.femaleCount} Nữ)</div>
+          <div>Ngày in: ${escapeHtml(getVNDateTimeDisplay())}</div>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:32px;text-align:center">STT</th>
+            <th>Họ và tên</th>
+            <th>Mã NV</th>
+            <th style="width:45px;text-align:center">Giới</th>
+            <th>Số điện thoại</th>
+            <th>Đơn vị</th>
+            <th style="width:45px;text-align:center">TĐ</th>
+            <th style="width:55px;text-align:center">Giường</th>
+            <th style="width:82px">Ngày vào</th>
+            <th style="width:85px">Ký nhận / Ghi chú</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      <div style="display:flex;justify-content:space-between;margin-top:24px;font-size:11px;color:#334155;padding:0 16px">
+        <div style="text-align:center"><strong>Trưởng phòng / Tổ trưởng</strong><br/><span style="color:#64748b">(Ký và ghi rõ họ tên)</span></div>
+        <div style="text-align:center"><strong>Cán bộ quản lý KTX</strong><br/><span style="color:#64748b">(Ký và ghi rõ họ tên)</span></div>
+      </div>
+    `;
+
+    const htmlDoc = `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <title>Danh sách ${escapeHtml(roomTitle)} - ${escapeHtml(ktx)}</title>
+  <style>
+    @page { size: A4 landscape; margin: 12mm; }
+    body { font-family: Arial, sans-serif; color: #0f172a; margin: 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; }
+    th { background: #f1f5f9; font-weight: 700; color: #1e293b; }
+  </style>
+</head>
+<body>${bodyHtml}</body>
+</html>`;
+
+    printHtmlViaIframe(htmlDoc);
+  }, [room, resolveEffectiveDayNha, building, workers, ktx, genderInfo]);
+
   return (
     <>
       {/* Toast */}
@@ -262,9 +341,22 @@ export default function RoomDrawer({
               {workers.length} công nhân đang lưu trú ({genderInfo.maleCount} Nam · {genderInfo.femaleCount} Nữ)
             </p>
           </div>
-          <button onClick={onClose} className="p-2 rounded-xl text-mu hover:text-tx hover:bg-act transition-colors">
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            {workers.length > 0 && (
+              <button
+                type="button"
+                onClick={handlePrintRoster}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-act hover:bg-act/80 border border-bdr text-xs font-semibold text-tx transition-colors"
+                title="In danh sách nhân khẩu phòng (A4)"
+              >
+                <Printer size={14} className="text-lnk" />
+                <span className="hidden sm:inline">In danh sách</span>
+              </button>
+            )}
+            <button onClick={onClose} className="p-2 rounded-xl text-mu hover:text-tx hover:bg-act transition-colors">
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* ── Room Gender Classification Admin Control ── */}
