@@ -33,9 +33,30 @@ import { QrCodeImage, downloadQrPng, generateQrDataUrl } from '@/components/QrCo
 import { printHtmlViaIframe, escapeHtml } from '@/lib/printHtml';
 import {
   fetchWorkerHierarchy,
+  invalidateWorkerHierarchyCache,
   WorkerHierarchyData,
   checkDuplicateWorker,
 } from '@/lib/workerHierarchy';
+import {
+  useKtxStructure,
+  invalidateKtxStructureCache,
+  normalizeKtxLabel,
+  normalizeDayLabel,
+} from '@/lib/ktxStructure';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function toValidWorkerUuid(candidate?: string | null): string {
+  const cleaned = (candidate || '').trim();
+  if (UUID_REGEX.test(cleaned)) return cleaned;
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, ch => {
+    const r = (Math.random() * 16) | 0;
+    const v = ch === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
 
 interface WorkerRegistration {
   id: string;
@@ -136,31 +157,38 @@ function DetailModal({
     reg.don_vi && !hierarchy.units.includes(reg.don_vi) ? reg.don_vi : ''
   );
 
-  const availableKtx = hierarchy.ktxList;
+  const { ktxGroups } = useKtxStructure();
+
+  const availableKtx = useMemo(() => {
+    const set = new Set<string>(hierarchy.ktxList);
+    ktxGroups.forEach(g => { if (g.ktx) set.add(g.ktx); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true, sensitivity: 'base' }));
+  }, [hierarchy.ktxList, ktxGroups]);
 
   const availableDays = useMemo(() => {
     if (!editForm.ktx) return [];
-    return hierarchy.daysByKtx[editForm.ktx] || [];
-  }, [hierarchy, editForm.ktx]);
+    const set = new Set<string>(hierarchy.daysByKtx[editForm.ktx] || []);
+    const group = ktxGroups.find(g => g.ktx === editForm.ktx);
+    group?.days.forEach(d => set.add(d));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true, sensitivity: 'base' }));
+  }, [hierarchy.daysByKtx, ktxGroups, editForm.ktx]);
 
   const availableRooms = useMemo(() => {
     if (!editForm.ktx || !editForm.day) return [];
     return hierarchy.roomsByKtxDay[`${editForm.ktx}__${editForm.day}`] || [];
-  }, [hierarchy, editForm.ktx, editForm.day]);
+  }, [hierarchy.roomsByKtxDay, editForm.ktx, editForm.day]);
 
   useEffect(() => {
-    if (isPending) {
-      if (availableDays.length > 0 && !availableDays.includes(editForm.day)) {
-        const nextDay = availableDays[0];
-        const nextRooms = hierarchy.roomsByKtxDay[`${editForm.ktx}__${nextDay}`] || [];
-        setEditForm(prev => ({
-          ...prev,
-          day: nextDay,
-          phong_so: nextRooms.includes(prev.phong_so) ? prev.phong_so : (nextRooms[0] || ''),
-        }));
-      }
+    if (isPending && !editForm.day && availableDays.length > 0) {
+      const nextDay = availableDays[0];
+      const nextRooms = hierarchy.roomsByKtxDay[`${editForm.ktx}__${nextDay}`] || [];
+      setEditForm(prev => ({
+        ...prev,
+        day: nextDay,
+        phong_so: prev.phong_so || nextRooms[0] || '',
+      }));
     }
-  }, [editForm.ktx, availableDays, hierarchy, isPending]);
+  }, [editForm.ktx, editForm.day, availableDays, hierarchy.roomsByKtxDay, isPending]);
 
   const handleKtxChange = (newKtx: string) => {
     const days = hierarchy.daysByKtx[newKtx] || [];
@@ -750,7 +778,9 @@ export default function QRPortalClient() {
         .select('*')
         .order('created_at', { ascending: false });
       if (!error) {
-        setRegistrations((data || []).filter(r => !r.ghi_chu?.startsWith('[CHECKOUT]')));
+        const filtered = (data || []).filter(r => !r.ghi_chu?.startsWith('[CHECKOUT]'));
+        const deduped = Array.from(new Map(filtered.map(r => [r.id, r])).values());
+        setRegistrations(deduped);
       }
     } catch (e: any) {
       console.error('Fetch registrations error:', e.message);
@@ -777,7 +807,7 @@ export default function QRPortalClient() {
     return registrations.filter(r => isAdmin || canWriteBlock(r.day, r.ktx));
   }, [registrations, isAdmin, canWriteBlock]);
 
-  // Phê duyệt hồ sơ — Lưu bản chỉnh sửa + đồng bộ giường + audit log
+  // Phê duyệt hồ sơ — Tạo/cập nhật công nhân (UUID hợp lệ), đồng bộ giường, đánh dấu duyệt & audit log
   const handleApprove = async (
     regToApprove: WorkerRegistration,
     tamTruStatus: 'registered' | 'unregistered' = 'unregistered'
@@ -785,35 +815,6 @@ export default function QRPortalClient() {
     setProcessing(regToApprove.id);
     try {
       const nowStr = new Date().toISOString();
-
-      const { error: updateErr } = await supabase
-        .from('worker_registrations')
-        .update({
-          ho_va_ten: regToApprove.ho_va_ten || '',
-          ma_nv: regToApprove.ma_nv || '',
-          so_cccd: regToApprove.so_cccd || '',
-          so_dien_thoai: regToApprove.so_dien_thoai || '',
-          ngay_sinh: regToApprove.ngay_sinh || '',
-          que_quan: regToApprove.que_quan || regToApprove.ho_khau_tinh || '',
-          gioi_tinh: regToApprove.gioi_tinh || '',
-          don_vi: regToApprove.don_vi || '',
-          tieu_doan: regToApprove.tieu_doan || '',
-          to_truong: regToApprove.to_truong || '',
-          sdt_to_truong: regToApprove.sdt_to_truong || '',
-          ho_khau_tinh: regToApprove.ho_khau_tinh || '',
-          ktx: regToApprove.ktx || '',
-          day: regToApprove.day || '',
-          phong_so: regToApprove.phong_so || '',
-          giuong: regToApprove.giuong || '',
-          ngay_vao_ktx: regToApprove.ngay_vao_ktx || '',
-          ghi_chu: regToApprove.ghi_chu || '',
-          status: 'approved',
-          reviewed_by: currentUser?.id,
-          reviewed_at: nowStr,
-        })
-        .eq('id', regToApprove.id);
-
-      if (updateErr) throw new Error(updateErr.message);
 
       // Compute next STT cleanly
       let nextStt = 1;
@@ -829,12 +830,13 @@ export default function QRPortalClient() {
         }
       } catch {}
 
-      const workerId = `reg-${regToApprove.id}`;
-      const ktxVal = (regToApprove.ktx || '').trim();
-      const dayVal = (regToApprove.day || '').trim();
+      const workerId = toValidWorkerUuid(regToApprove.id);
+      const ktxVal = normalizeKtxLabel(regToApprove.ktx || '');
+      const dayVal = normalizeDayLabel(regToApprove.day || '');
       const roomVal = (regToApprove.phong_so || '').trim();
       const bedVal = (regToApprove.giuong || '').trim();
 
+      // 1. Insert/upsert into `workers` FIRST using valid UUID so registration is not marked approved if insert fails
       const { error: insertErr } = await supabase.from('workers').upsert({
         id: workerId,
         stt: nextStt,
@@ -865,7 +867,37 @@ export default function QRPortalClient() {
         throw new Error(`Không thể thêm vào danh sách công nhân: ${insertErr.message}`);
       }
 
-      // Sync bed assignment into `beds` table so Bed Management updates immediately
+      // 2. Mark registration as approved
+      const { error: updateErr } = await supabase
+        .from('worker_registrations')
+        .update({
+          ho_va_ten: regToApprove.ho_va_ten || '',
+          ma_nv: regToApprove.ma_nv || '',
+          so_cccd: regToApprove.so_cccd || '',
+          so_dien_thoai: regToApprove.so_dien_thoai || '',
+          ngay_sinh: regToApprove.ngay_sinh || '',
+          que_quan: regToApprove.que_quan || regToApprove.ho_khau_tinh || '',
+          gioi_tinh: regToApprove.gioi_tinh || '',
+          don_vi: regToApprove.don_vi || '',
+          tieu_doan: regToApprove.tieu_doan || '',
+          to_truong: regToApprove.to_truong || '',
+          sdt_to_truong: regToApprove.sdt_to_truong || '',
+          ho_khau_tinh: regToApprove.ho_khau_tinh || '',
+          ktx: ktxVal,
+          day: dayVal,
+          phong_so: roomVal,
+          giuong: bedVal,
+          ngay_vao_ktx: regToApprove.ngay_vao_ktx || '',
+          ghi_chu: regToApprove.ghi_chu || '',
+          status: 'approved',
+          reviewed_by: currentUser?.id,
+          reviewed_at: nowStr,
+        })
+        .eq('id', regToApprove.id);
+
+      if (updateErr) throw new Error(updateErr.message);
+
+      // 3. Sync bed assignment into `beds` table so Bed Management updates immediately
       await syncBedForWorkerSave(supabase, undefined, {
         id: workerId,
         stt: nextStt,
@@ -898,15 +930,28 @@ export default function QRPortalClient() {
         );
       } catch {}
 
+      invalidateKtxStructureCache();
+      invalidateWorkerHierarchyCache();
+      fetchWorkerHierarchy(true).then(setHierarchy).catch(() => {});
+
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('ktx_workers_updated'));
       }
 
+      const updatedReg: WorkerRegistration = {
+        ...regToApprove,
+        ktx: ktxVal,
+        day: dayVal,
+        phong_so: roomVal,
+        giuong: bedVal,
+        status: 'approved',
+        reviewed_at: nowStr,
+      };
       setRegistrations(prev =>
-        prev.map(r => (r.id === regToApprove.id ? { ...regToApprove, status: 'approved', reviewed_at: nowStr } : r))
+        prev.map(r => (r.id === regToApprove.id ? updatedReg : r))
       );
       if (detailReg?.id === regToApprove.id) {
-        setDetailReg({ ...regToApprove, status: 'approved', reviewed_at: nowStr });
+        setDetailReg(updatedReg);
       }
       toast.success(`Đã duyệt và xếp chỗ cho ${regToApprove.ho_va_ten}`);
     } catch (e: any) {

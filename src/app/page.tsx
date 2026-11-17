@@ -662,9 +662,16 @@ export default function OccupancyDashboardPage() {
         load();
       })
       .subscribe();
+    const onFacilitiesUpdated = () => { load(); };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('ktx_facilities_updated', onFacilitiesUpdated);
+    }
     return () => {
       active = false;
       supabase.removeChannel(channel);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('ktx_facilities_updated', onFacilitiesUpdated);
+      }
     };
   }, []);
 
@@ -676,9 +683,7 @@ export default function OccupancyDashboardPage() {
     return computeSystemMetrics(workers, roomGenderMap, selectedKTX, ktxNames, getCap, facilitiesList);
   }, [workers, roomGenderMap, selectedKTX, ktxNames, capacities, facilitiesList]);
 
-  // Dynamically retrieved KTX list that actually exist in the database (Supabase)
-  // Guaranteed NO hardcoded, virtual, or empty KTXs (no KTX 4, KTX 5).
-  // Guaranteed KTX 1, KTX 2, and KTX 3 are fully displayed.
+  // Dynamically retrieved KTX list across facilities + active workers (e.g. KTX 1, KTX 2, KTX 3, KTX 4)
   const allKTX = systemMetrics.activeKtxList;
   const ktxGenderRoomStats = systemMetrics.ktxBreakdown;
   const overallRoomTotals = systemMetrics.overallRoomTotals;
@@ -730,15 +735,31 @@ export default function OccupancyDashboardPage() {
     );
   }, [facilitiesList]);
 
+  const hiddenOrFunctionalKeys = useMemo(() => {
+    const set = new Set<string>();
+    (facilitiesList || []).forEach(f => {
+      if ((f.room_type || 'accommodation') !== 'accommodation' || f.is_visible === false) {
+        const k = (f.ktx ?? '').trim();
+        const b = (f.day ?? '').trim();
+        const r = normalizeRoomLabel(f.phong_khu_vuc ?? '');
+        if (k && b && r) set.add(`${k}||${b}||${r}`);
+      }
+    });
+    return set;
+  }, [facilitiesList]);
+
   const allBuildings = useMemo(() => {
     const set = new Set<string>();
     accommodationFacilities.forEach(f => {
       if (selectedKTX === 'all' || f.ktx === selectedKTX) {
-        if (f.day) set.add(f.day);
+        if (f.day) set.add(f.day.trim());
       }
     });
+    filteredWorkers.forEach(w => {
+      if (w.day?.trim()) set.add(w.day.trim());
+    });
     return Array.from(set).sort(naturalSortCompare);
-  }, [accommodationFacilities, selectedKTX]);
+  }, [accommodationFacilities, filteredWorkers, selectedKTX]);
 
   // ── Load block assignments & specialists from profiles ───────────────────
   useEffect(() => {
@@ -767,24 +788,28 @@ export default function OccupancyDashboardPage() {
       } catch {}
 
       const assignments: BlockAssignment[] = [];
-      const list = rawProfiles.map((profile, idx) => {
-        const blocks: string[] = Array.isArray(profile.assigned_blocks) ? profile.assigned_blocks : [];
-        blocks.forEach(block => {
-          if (block && profile.full_name) {
-            assignments.push({ blockKey: block, staffName: profile.full_name });
-          }
-        });
-        return {
-          id: profile.id || `sp-${idx}`,
-          name: profile.full_name || profile.name || profile.email?.split('@')[0] || `Chuyên viên ${idx + 1}`,
-          email: profile.email,
-          role: (profile.role === 'admin' ? 'admin' : 'staff') as 'admin' | 'staff',
+      const listById = new Map<string, { id: string; name: string; email?: string; role: 'admin' | 'staff'; assignedBlocks?: string[] }>();
+      rawProfiles.forEach((profile, idx) => {
+        const id = String(profile?.id || `sp-${idx}`);
+        const blocks: string[] = Array.isArray(profile?.assigned_blocks) ? profile.assigned_blocks : [];
+        if (!listById.has(id)) {
+          blocks.forEach(block => {
+            if (block && profile?.full_name) {
+              assignments.push({ blockKey: block, staffName: profile.full_name });
+            }
+          });
+        }
+        listById.set(id, {
+          id,
+          name: profile?.full_name || profile?.name || profile?.email?.split('@')[0] || `Chuyên viên ${idx + 1}`,
+          email: profile?.email,
+          role: (profile?.role === 'admin' ? 'admin' : 'staff') as 'admin' | 'staff',
           assignedBlocks: blocks,
-        };
+        });
       });
 
       setBlockAssignments(assignments);
-      setSpecialists(list);
+      setSpecialists(Array.from(listById.values()));
     };
 
     loadStaff();
@@ -809,6 +834,7 @@ export default function OccupancyDashboardPage() {
             .select('ktx, day, phong_so, don_vi')
             .not('phong_so', 'is', null)
             .not('don_vi', 'is', null)
+            .order('id', { ascending: true })
             .range(from, from + SIZE - 1);
           if (batchErr || !batch || batch.length === 0) { hasMore = false; break; }
           allData = allData.concat(batch as { ktx: string; day: string; phong_so: string; don_vi: string }[]);
@@ -949,12 +975,11 @@ export default function OccupancyDashboardPage() {
   }, [workers.length, selectedKTX, selectedBuilding]);
 
   const ktxListForGrid = useMemo(() => {
-    const facKtxs = Array.from(new Set(accommodationFacilities.map(f => f.ktx).filter(Boolean))).sort(compareKtxNames);
     if (selectedKTX !== 'all') {
-      return facKtxs.filter(k => k === selectedKTX);
+      return allKTX.filter(k => k === selectedKTX);
     }
-    return facKtxs;
-  }, [selectedKTX, accommodationFacilities]);
+    return allKTX;
+  }, [selectedKTX, allKTX]);
 
   const drawerWorkers = useMemo(() => {
     if (!drawerRoom) return [];
@@ -1623,14 +1648,14 @@ export default function OccupancyDashboardPage() {
             )}
 
             {/* Heatmap Grid */}
-            {!loading && accommodationFacilities.length === 0 && (
+            {!loading && ktxListForGrid.length === 0 && !isEmpty && (
               <div className="p-8 sm:p-12 rounded-2xl bg-act/40 border border-bdr text-center space-y-3">
                 <div className="w-12 h-12 rounded-2xl bg-bdg text-lnk flex items-center justify-center mx-auto">
                   <Building size={24} />
                 </div>
                 <h3 className="text-base font-bold text-tx">Sơ đồ phòng đang trống (0 phòng)</h3>
                 <p className="text-sm text-mu max-w-md mx-auto">
-                  Hiện tại danh mục cơ sở vật chất chưa có phòng ở nào. Sơ đồ phòng được quét trực tiếp 100% từ bảng cơ sở vật chất, tuyệt đối không tự sinh phòng ảo.
+                  Hiện tại chưa có phòng ở nào trong Cơ sở vật chất hoặc danh sách công nhân.
                 </p>
                 <div className="pt-1">
                   <button
@@ -1644,12 +1669,15 @@ export default function OccupancyDashboardPage() {
               </div>
             )}
 
-            {!isEmpty && !loading && ktxListForGrid.length > 0 && accommodationFacilities.length > 0 && (
+            {!isEmpty && !loading && ktxListForGrid.length > 0 && (
               <div className="space-y-6">
                 {ktxListForGrid.map(ktx => {
-                  const ktxWorkers = workers.filter(w => w.ktx === ktx);
-                  const ktxFacilities = accommodationFacilities.filter(f => f.ktx === ktx);
-                  const ktxBuildings = Array.from(new Set(ktxFacilities.map(f => f.day).filter(Boolean)))
+                  const ktxWorkers = workers.filter(w => (w.ktx ?? '').trim() === ktx);
+                  const ktxFacilities = accommodationFacilities.filter(f => (f.ktx ?? '').trim() === ktx);
+                  const buildingSet = new Set<string>();
+                  ktxFacilities.forEach(f => { if (f.day?.trim()) buildingSet.add(f.day.trim()); });
+                  ktxWorkers.forEach(w => { if (w.day?.trim()) buildingSet.add(w.day.trim()); });
+                  const ktxBuildings = Array.from(buildingSet)
                     .filter(b => !selectedBuilding || b === selectedBuilding)
                     .sort(naturalSortCompare);
 
@@ -1661,10 +1689,10 @@ export default function OccupancyDashboardPage() {
                             <span className="text-xs font-bold px-3 py-1 rounded-lg border bg-bdg text-lnk border-bdr2">
                               {ktx}
                             </span>
-                            <span className="text-xs text-mu font-medium">0 phòng cơ sở vật chất</span>
+                            <span className="text-xs text-mu font-medium">{ktxWorkers.length} công nhân · 0 dãy nhà</span>
                           </div>
                           <p className="text-sm text-mu max-w-md mx-auto">
-                            Khu vực {ktx} chưa được cấu hình phòng trong danh mục cơ sở vật chất. Vui lòng thêm phòng tại trang Quản lý Cơ sở vật chất.
+                            Khu vực {ktx} hiện chưa có dữ liệu dãy/phòng. Vui lòng thêm phòng tại trang Quản lý Cơ sở vật chất.
                           </p>
                         </div>
                       );
@@ -1727,11 +1755,26 @@ export default function OccupancyDashboardPage() {
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6 min-w-0 w-full items-start">
                         {ktxBuildings.map(building => {
-                          const buildingWorkers = ktxWorkers.filter(w => w.day === building);
-                          const facRooms = ktxFacilities
-                            .filter(f => f.day === building && f.phong_khu_vuc)
-                            .map(f => f.phong_khu_vuc);
-                          const allRooms = Array.from(new Set(facRooms)).sort(naturalSortCompare);
+                          const buildingWorkers = ktxWorkers.filter(w => (w.day ?? '').trim() === building);
+                          const roomLabelByNorm = new Map<string, string>();
+                          ktxFacilities
+                            .filter(f => (f.day ?? '').trim() === building && f.phong_khu_vuc?.trim())
+                            .forEach(f => {
+                              const raw = f.phong_khu_vuc.trim();
+                              const norm = normalizeRoomLabel(raw);
+                              if (norm && !roomLabelByNorm.has(norm)) {
+                                roomLabelByNorm.set(norm, raw);
+                              }
+                            });
+                          buildingWorkers.forEach(w => {
+                            const raw = (w.phongSo ?? '').trim();
+                            if (!raw) return;
+                            const norm = normalizeRoomLabel(raw);
+                            if (norm && !roomLabelByNorm.has(norm) && !hiddenOrFunctionalKeys.has(`${ktx}||${building}||${norm}`)) {
+                              roomLabelByNorm.set(norm, raw);
+                            }
+                          });
+                          const allRooms = Array.from(roomLabelByNorm.values()).sort(naturalSortCompare);
 
                           const totalCap = allRooms.reduce(
                             (sum, room) => sum + (getRoomCapacity(capacities, ktx, building, room) || DEFAULT_ROOM_CAPACITY),

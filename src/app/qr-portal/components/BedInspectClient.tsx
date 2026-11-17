@@ -172,15 +172,25 @@ export default function BedInspectClient() {
 
   const loadWorkers = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('workers')
-        .select('id, ho_va_ten, ma_nv, cccd, don_vi, gioi_tinh, so_dien_thoai, ngay_vao_ktx, ktx, day, phong_so, giuong')
-        .limit(5000);
-      if (error) {
-        console.warn('[bed-inspector] load workers failed:', error.message);
-        return;
+      const PAGE = 1000;
+      const byId = new Map<string, WorkerLite>();
+      let from = 0;
+      for (let page = 0; page < 30; page++) {
+        const { data, error } = await supabase
+          .from('workers')
+          .select('id, ho_va_ten, ma_nv, cccd, don_vi, gioi_tinh, so_dien_thoai, ngay_vao_ktx, ktx, day, phong_so, giuong')
+          .order('id', { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (error) {
+          console.warn('[bed-inspector] load workers failed:', error.message);
+          break;
+        }
+        const chunk = (data || []).map(mapWorker).filter((w): w is WorkerLite => Boolean(w && w.id));
+        chunk.forEach(w => byId.set(w.id, w));
+        if ((data || []).length < PAGE) break;
+        from += PAGE;
       }
-      setWorkers((data || []).map(mapWorker).filter((w): w is WorkerLite => Boolean(w)));
+      setWorkers(Array.from(byId.values()));
     } catch (err) {
       console.warn('[bed-inspector] load workers failed:', err);
     }

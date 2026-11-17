@@ -56,6 +56,7 @@ export async function fetchWorkerHierarchy(forceRefresh = false): Promise<Worker
       const { data, error } = await supabase
         .from('workers')
         .select('ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, don_vi')
+        .order('id', { ascending: true })
         .range(from, from + PAGE_SIZE - 1);
 
       if (error || !data || data.length === 0) break;

@@ -47,29 +47,33 @@ export default function BedQrPrintModal({ open, onClose, lockedBed = null }: Pro
   const loadBeds = useCallback(async () => {
     setLoading(true);
     try {
-      const rows: PrintBedRow[] = [];
+      const byId = new Map<string, PrintBedRow>();
       let from = 0;
       for (let page = 0; page < 30; page++) {
         try {
           const { data, error } = await supabase
             .from('beds')
             .select('id, ktx, day, phong_so, giuong, status, ma_nv, ho_va_ten')
+            .order('id', { ascending: true })
             .range(from, from + 999);
           if (error) {
             console.warn('[qr-print] load beds error:', error.message);
             break;
           }
           const list = (data ?? []) as Record<string, unknown>[];
-          rows.push(...list.map((r, i) => ({
-            id: String(r?.id ?? `bed-${i}`),
-            ktx: String(r?.ktx ?? ''),
-            day: String(r?.day ?? ''),
-            phong_so: String(r?.phong_so ?? ''),
-            giuong: String(r?.giuong ?? ''),
-            status: r?.status === 'occupied' ? 'occupied' as const : r?.status === 'maintenance' ? 'maintenance' as const : 'empty' as const,
-            ma_nv: r?.ma_nv ? String(r.ma_nv) : null,
-            ho_va_ten: r?.ho_va_ten ? String(r.ho_va_ten) : null,
-          })));
+          list.forEach((r, i) => {
+            const id = String(r?.id ?? `bed-${from}-${i}`);
+            byId.set(id, {
+              id,
+              ktx: String(r?.ktx ?? ''),
+              day: String(r?.day ?? ''),
+              phong_so: String(r?.phong_so ?? ''),
+              giuong: String(r?.giuong ?? ''),
+              status: r?.status === 'occupied' ? 'occupied' as const : r?.status === 'maintenance' ? 'maintenance' as const : 'empty' as const,
+              ma_nv: r?.ma_nv ? String(r.ma_nv) : null,
+              ho_va_ten: r?.ho_va_ten ? String(r.ho_va_ten) : null,
+            });
+          });
           if (list.length < 1000) break;
           from += 1000;
         } catch (err) {
@@ -78,7 +82,7 @@ export default function BedQrPrintModal({ open, onClose, lockedBed = null }: Pro
         }
       }
       // Only real rows (ktx/day/phong/giuong đầy đủ)
-      setBeds(rows.filter(b =>
+      setBeds(Array.from(byId.values()).filter(b =>
         b.ktx?.trim() && b.day?.trim() && b.phong_so?.trim() && b.giuong?.trim()
       ));
     } finally {

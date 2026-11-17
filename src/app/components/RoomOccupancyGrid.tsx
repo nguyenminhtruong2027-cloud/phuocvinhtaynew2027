@@ -127,30 +127,49 @@ export default function RoomOccupancyGrid() {
     };
   }, [loadFacilities, fetchRoomUnitAssignments, fetchCapacities]);
 
-  // Build unique KTX list strictly from physical facilities
-  const ktxList = useMemo(() => {
-    return Array.from(new Set(facilities.map(f => f.ktx).filter(Boolean))).sort(compareKtxNames);
+  const hiddenOrFunctionalKeys = useMemo(() => {
+    const set = new Set<string>();
+    (facilities || []).forEach(f => {
+      if ((f.room_type || 'accommodation') !== 'accommodation' || f.is_visible === false) {
+        const k = (f.ktx ?? '').trim();
+        const b = (f.day ?? '').trim();
+        const r = normalizeRoomLabel(f.phong_khu_vuc ?? '');
+        if (k && b && r) set.add(`${k}||${b}||${r}`);
+      }
+    });
+    return set;
   }, [facilities]);
 
-  // Build unique [KTX + Building] groups strictly from physical facilities
+  // Build unique KTX list from physical facilities merged with active workers
+  const ktxList = useMemo(() => {
+    const set = new Set<string>();
+    facilities.forEach(f => { if (f.ktx?.trim()) set.add(f.ktx.trim()); });
+    workers.forEach(w => { if (w.ktx?.trim()) set.add(w.ktx.trim()); });
+    return Array.from(set).sort(compareKtxNames);
+  }, [facilities, workers]);
+
+  // Build unique [KTX + Building] groups from facilities merged with active workers
   const buildingGroups = useMemo((): BuildingGroup[] => {
     const seen = new Set<string>();
     const groups: BuildingGroup[] = [];
-    facilities.forEach(f => {
-      if (!f.day) return;
-      const ktx = f.ktx || '';
-      const key = `${ktx}|${f.day}`;
+    const addGroup = (rawKtx: string, rawDay: string) => {
+      const ktx = (rawKtx || '').trim();
+      const building = (rawDay || '').trim();
+      if (!building) return;
+      const key = `${ktx}|${building}`;
       if (!seen.has(key)) {
         seen.add(key);
-        groups.push({ ktx, building: f.day, key });
+        groups.push({ ktx, building, key });
       }
-    });
+    };
+    facilities.forEach(f => addGroup(f.ktx, f.day));
+    workers.forEach(w => addGroup(w.ktx, w.day));
     return groups.sort((a, b) => {
       const ktxCmp = compareKtxNames(a.ktx, b.ktx);
       if (ktxCmp !== 0) return ktxCmp;
       return naturalSortCompare(a.building, b.building);
     });
-  }, [facilities]);
+  }, [facilities, workers]);
 
   // Filter groups by selected KTX and/or building
   const filteredGroups = useMemo(() => {
@@ -161,15 +180,27 @@ export default function RoomOccupancyGrid() {
     });
   }, [buildingGroups, selectedKtx, selectedBuilding]);
 
-  // Get unique rooms for a specific KTX+Building combination strictly from facilities
+  // Get unique rooms for a specific KTX+Building combination (facilities merged with active workers)
   const getRoomsForGroup = useCallback((ktx: string, building: string): string[] => {
-    const rooms = Array.from(new Set(
-      facilities
-        .filter(f => f.ktx === ktx && f.day === building && f.phong_khu_vuc)
-        .map(f => f.phong_khu_vuc)
-    ));
-    return rooms.sort(naturalSortCompare);
-  }, [facilities]);
+    const roomByNorm = new Map<string, string>();
+    facilities
+      .filter(f => (f.ktx || '').trim() === ktx && (f.day || '').trim() === building && f.phong_khu_vuc?.trim())
+      .forEach(f => {
+        const raw = f.phong_khu_vuc.trim();
+        const norm = normalizeRoomLabel(raw);
+        if (norm && !roomByNorm.has(norm)) roomByNorm.set(norm, raw);
+      });
+    workers
+      .filter(w => (w.ktx || '').trim() === ktx && (w.day || '').trim() === building && w.phongSo?.trim())
+      .forEach(w => {
+        const raw = w.phongSo.trim();
+        const norm = normalizeRoomLabel(raw);
+        if (norm && !roomByNorm.has(norm) && !hiddenOrFunctionalKeys.has(`${ktx}||${building}||${norm}`)) {
+          roomByNorm.set(norm, raw);
+        }
+      });
+    return Array.from(roomByNorm.values()).sort(naturalSortCompare);
+  }, [facilities, workers, hiddenOrFunctionalKeys]);
 
   /**
    * Get display unit label for a room:
@@ -270,7 +301,7 @@ export default function RoomOccupancyGrid() {
             <h2 className="text-base font-semibold text-foreground">Sơ Đồ Phòng</h2>
             <p className="text-xs text-muted-foreground mt-0.5">Quét 100% từ danh mục cơ sở vật chất cố định</p>
           </div>
-          {facilities.length > 0 && (
+          {buildingGroups.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap">
               {/* KTX filter */}
               <div className="flex items-center gap-1">
@@ -313,7 +344,7 @@ export default function RoomOccupancyGrid() {
               <p className="text-xs text-muted-foreground">Đang tải danh mục cơ sở vật chất...</p>
             </div>
           </div>
-        ) : facilities.length === 0 ? (
+        ) : buildingGroups.length === 0 ? (
           <div className="py-12 text-center space-y-2">
             <div className="w-12 h-12 rounded-2xl bg-muted text-muted-foreground flex items-center justify-center mx-auto">
               <Building size={24} />

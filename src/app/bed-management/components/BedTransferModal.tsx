@@ -53,13 +53,14 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
     setLoading(true);
     setError('');
     try {
-      const rows: TransferBed[] = [];
+      const byId = new Map<string, TransferBed>();
       let from = 0;
       for (let page = 0; page < 30; page++) {
         try {
           const { data, error } = await supabase
             .from('beds')
             .select('id, ktx, day, phong_so, giuong, status')
+            .order('id', { ascending: true })
             .range(from, from + PAGE - 1);
           if (error) {
             setError(error.message);
@@ -72,8 +73,9 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
             const phong = String(r?.phong_so ?? '').trim();
             const giuong = String(r?.giuong ?? '').trim();
             if (!ktx || !day || !phong || !giuong) return;
-            rows.push({
-              id: String(r?.id ?? `b-${i}`),
+            const id = String(r?.id ?? `b-${from}-${i}`);
+            byId.set(id, {
+              id,
               ktx, day, phong_so: phong, giuong,
               status: r?.status === 'occupied' ? 'occupied' : r?.status === 'maintenance' ? 'maintenance' : 'empty',
             });
@@ -85,7 +87,7 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
           break;
         }
       }
-      setBeds(rows);
+      setBeds(Array.from(byId.values()));
     } finally {
       setLoading(false);
     }

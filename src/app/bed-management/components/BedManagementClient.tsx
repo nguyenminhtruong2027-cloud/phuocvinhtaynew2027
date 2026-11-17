@@ -49,25 +49,31 @@ interface WorkerLite {
 
 const PAGE = 1000;
 
-async function fetchAllRows<T>(
+async function fetchAllRows<T extends { id?: unknown }>(
   supabase: ReturnType<typeof createClient>,
   table: string,
   select: string
 ): Promise<T[]> {
-  const rows: T[] = [];
+  const byId = new Map<string, T>();
+  const noId: T[] = [];
   let from = 0;
   for (let page = 0; page < 30; page++) {
     try {
       const { data, error } = await supabase
         .from(table)
         .select(select)
+        .order('id', { ascending: true })
         .range(from, from + PAGE - 1);
       if (error) {
         console.warn(`[bed-management] fetch ${table} error:`, error.message);
         break;
       }
-      const list = (data ?? []) as T[];
-      rows.push(...list);
+      const list = (data ?? []) as unknown as T[];
+      for (const row of list) {
+        const rid = row?.id ? String(row.id) : '';
+        if (rid) byId.set(rid, row);
+        else noId.push(row);
+      }
       if (list.length < PAGE) break;
       from += PAGE;
     } catch (err) {
@@ -75,7 +81,7 @@ async function fetchAllRows<T>(
       break;
     }
   }
-  return rows;
+  return [...Array.from(byId.values()), ...noId];
 }
 
 function shortName(full?: string | null): string {

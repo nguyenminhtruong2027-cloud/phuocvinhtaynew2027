@@ -328,7 +328,12 @@ export default function ExecutiveSpecialistsCard({
   // Rule: If no row exists in duty_assignments for today, status is 'off_duty' ('Nghỉ')
   const mergedSpecialists = useMemo<SpecialistWithDuty[]>(() => {
     const base = Array.isArray(baseSpecialistsList) ? baseSpecialistsList.filter(Boolean) : [];
-    return base.map(sp => {
+    const byId = new Map<string, SpecialistItem>();
+    base.forEach((sp, idx) => {
+      const id = String(sp?.id || `sp-${idx}`);
+      if (!byId.has(id)) byId.set(id, { ...sp, id });
+    });
+    return Array.from(byId.values()).map(sp => {
       const assignedKtx = dutyMap?.[sp.id];
       const isAssignedOnDuty = Boolean(assignedKtx && assignedKtx !== 'Nghỉ');
       const effectiveDutyKtx = isAssignedOnDuty ? assignedKtx : 'Nghỉ';

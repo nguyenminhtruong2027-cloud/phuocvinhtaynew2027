@@ -266,7 +266,8 @@ export default function CheckoutApprovalPanel({
         const checkoutRows = (data as CheckoutRequest[]).filter(r =>
           r.ghi_chu?.startsWith('[CHECKOUT]')
         );
-        setCheckouts(checkoutRows);
+        const deduped = Array.from(new Map(checkoutRows.map(r => [r.id, r])).values());
+        setCheckouts(deduped);
       }
     } catch (e: any) {
       console.error('Fetch checkouts error:', e.message);

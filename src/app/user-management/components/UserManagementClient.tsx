@@ -148,10 +148,14 @@ export default function UserManagementClient() {
       const { data: rpcData, error: rpcError } = await Promise.race([rpcPromise, timeoutPromise]);
 
       if (!rpcError && rpcData && Array.isArray(rpcData) && rpcData.length > 0) {
-        const dbList = (rpcData as ProfileRecord[]).map(p => ({
-          ...p,
-          assigned_blocks: p.assigned_blocks ?? [],
-        }));
+        const dbList = Array.from(
+          new Map(
+            (rpcData as ProfileRecord[]).map(p => [
+              p.id,
+              { ...p, assigned_blocks: p.assigned_blocks ?? [] },
+            ])
+          ).values()
+        );
         setProfiles(dbList);
         saveLocalProfiles(dbList);
       } else {
@@ -161,11 +165,15 @@ export default function UserManagementClient() {
           .order('created_at', { ascending: false });
 
         if (!error && data && Array.isArray(data) && data.length > 0) {
-          const dbList = data.map(p => ({ ...p, assigned_blocks: p.assigned_blocks ?? [] }));
+          const dbList = Array.from(
+            new Map(
+              data.map(p => [p.id, { ...p, assigned_blocks: p.assigned_blocks ?? [] }])
+            ).values()
+          );
           setProfiles(dbList);
           saveLocalProfiles(dbList);
         } else {
-          setProfiles(localList);
+          setProfiles(Array.from(new Map(localList.map(p => [p.id, p])).values()));
         }
       }
     } catch {

@@ -10,7 +10,7 @@ import {
 import { toast } from 'sonner';
 import { exportMultiSheetExcel } from '@/lib/exportExcel';
 import { useWorkers } from '@/context/WorkerContext';
-import { Worker, DEFAULT_ROOM_CAPACITY, getUniqueBuildings, getUniqueRooms, countUniqueBuildings } from '@/data/workers';
+import { Worker, DEFAULT_ROOM_CAPACITY, getUniqueBuildings, getUniqueRooms } from '@/data/workers';
 import { computeSystemMetrics, getActiveKtxList } from '@/lib/systemMetrics';
 import {
   fetchFacilitiesList,
@@ -443,57 +443,61 @@ export default function ReportDashboard() {
     const workersWithRoom = filtered.filter(w => w.day && w.phongSo).length;
     const missingData = filtered.filter(w => !w.day || !w.phongSo).length;
 
-    let buildingCount = 0;
-    let roomCount = 0;
+    const hiddenOrFunctionalKeys = new Set<string>();
+    (facilitiesList || []).forEach(f => {
+      if ((f.room_type || 'accommodation') !== 'accommodation' || f.is_visible === false) {
+        const fk = (f.ktx ?? '').trim();
+        const fb = (f.day ?? '').trim();
+        const fr = normalizeRoomLabel(f.phong_khu_vuc ?? '');
+        if (fk && fb && fr) hiddenOrFunctionalKeys.add(`${fk}||${fb}||${fr}`);
+      }
+    });
+
+    const bPairSet = new Set<string>();
+    const rKeySet = new Set<string>();
     let capacity = 0;
 
-    if (activeFacilities.length > 0) {
-      const scopedFacilities = activeFacilities.filter(f => {
-        const fk = (f.ktx ?? '').trim();
-        const fb = (f.day ?? '').trim();
-        const fr = (f.phong_khu_vuc ?? '').trim();
-        if (!fk || !fb || !fr) return false;
-        if (filters.ktx !== 'all' && fk !== filters.ktx.trim()) return false;
-        if (filters.building && fb !== filters.building.trim()) return false;
-        if (filters.room && normalizeRoomLabel(fr) !== normalizeRoomLabel(filters.room)) return false;
-        return true;
-      });
-      const bPairSet = new Set<string>();
-      const rKeySet = new Set<string>();
-      scopedFacilities.forEach(f => {
-        const fk = (f.ktx ?? '').trim();
-        const fb = (f.day ?? '').trim();
-        const fr = (f.phong_khu_vuc ?? '').trim();
-        bPairSet.add(`${fk}||${fb}`);
-        const rKey = `${fk}||${fb}||${normalizeRoomLabel(fr)}`;
-        if (!rKeySet.has(rKey)) {
-          rKeySet.add(rKey);
-          capacity += getRoomCap(fk, fb, fr);
-        }
-      });
-      buildingCount = bPairSet.size;
-      roomCount = rKeySet.size;
-    } else {
-      buildingCount = countUniqueBuildings(filtered);
-      const roomSet = new Set(
-        filtered
-          .filter(w => w.ktx && w.day && w.phongSo)
-          .map(w => `${w.ktx.trim()}||${w.day.trim()}||${normalizeRoomLabel(w.phongSo)}`)
-      );
-      roomCount = roomSet.size;
-      roomSet.forEach(rk => {
-        const [k, b, r] = rk.split('||');
-        capacity += getRoomCap(k, b, r);
-      });
-    }
+    activeFacilities.forEach(f => {
+      const fk = (f.ktx ?? '').trim();
+      const fb = (f.day ?? '').trim();
+      const fr = (f.phong_khu_vuc ?? '').trim();
+      if (!fk || !fb || !fr) return;
+      if (filters.ktx !== 'all' && fk !== filters.ktx.trim()) return;
+      if (filters.building && fb !== filters.building.trim()) return;
+      if (filters.room && normalizeRoomLabel(fr) !== normalizeRoomLabel(filters.room)) return;
+      bPairSet.add(`${fk}||${fb}`);
+      const rKey = `${fk}||${fb}||${normalizeRoomLabel(fr)}`;
+      if (!rKeySet.has(rKey)) {
+        rKeySet.add(rKey);
+        capacity += getRoomCap(fk, fb, fr);
+      }
+    });
 
+    filtered.forEach(w => {
+      const wk = (w.ktx ?? '').trim();
+      const wb = (w.day ?? '').trim();
+      const wr = (w.phongSo ?? '').trim();
+      if (wk && wb) {
+        bPairSet.add(`${wk}||${wb}`);
+      }
+      if (wk && wb && wr) {
+        const rKey = `${wk}||${wb}||${normalizeRoomLabel(wr)}`;
+        if (!rKeySet.has(rKey) && !hiddenOrFunctionalKeys.has(rKey)) {
+          rKeySet.add(rKey);
+          capacity += getRoomCap(wk, wb, wr);
+        }
+      }
+    });
+
+    const buildingCount = bPairSet.size;
+    const roomCount = rKeySet.size;
     const fillRate = capacity > 0 ? Math.round((workersWithRoom / capacity) * 100) : 0;
 
     return {
       total, male, female, xd, me, vinalpha, otherUnit,
       buildingCount, roomCount, capacity, fillRate, workersWithRoom, missingData
     };
-  }, [filtered, activeFacilities, filters.ktx, filters.building, filters.room, getRoomCap]);
+  }, [filtered, activeFacilities, facilitiesList, filters.ktx, filters.building, filters.room, getRoomCap]);
 
   const ktxBreakdownCounts = useMemo(() => {
     const metrics = computeSystemMetrics(filtered, {}, 'all', [], getRoomCap, facilitiesList);

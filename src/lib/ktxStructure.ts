@@ -152,6 +152,7 @@ export async function fetchDynamicKtxStructure(forceRefresh = false): Promise<Kt
         const { data: workerRows, error: workerErr } = await supabase
           .from('workers')
           .select('ktx, day')
+          .order('id', { ascending: true })
           .range(from, from + PAGE_SIZE - 1);
 
         if (workerErr) {

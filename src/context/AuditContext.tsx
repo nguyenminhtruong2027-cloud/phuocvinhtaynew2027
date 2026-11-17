@@ -58,13 +58,14 @@ export function AuditProvider({ children }: { children: React.ReactNode }) {
         .order('timestamp', { ascending: false })
         .limit(500);
       if (!error && data) {
-        setLogs(data.map(row => ({
+        const mapped = data.map(row => ({
           id: row.id,
           timestamp: row.timestamp,
           account: row.account,
           action: row.action as AuditAction,
           detail: row.detail,
-        })));
+        }));
+        setLogs(Array.from(new Map(mapped.map(l => [l.id, l])).values()));
       }
     } catch {}
     setLoading(false);

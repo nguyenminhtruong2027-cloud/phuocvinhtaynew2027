@@ -10,10 +10,16 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { exportToExcel } from '@/lib/exportExcel';
-import { useKtxStructure } from '@/lib/ktxStructure';
+import {
+  useKtxStructure,
+  invalidateKtxStructureCache,
+  normalizeKtxLabel,
+  normalizeDayLabel,
+} from '@/lib/ktxStructure';
 import { compareKtxNames, naturalSortCompare } from '@/data/workers';
 import { getVNDateString } from '@/lib/vnDate';
 import { syncBedsForFacilityRoom } from '@/lib/bedSync';
+import { normalizeRoomLabel } from '@/lib/facilityCapacity';
 
 interface FacilityRow {
   id: string;
@@ -546,67 +552,189 @@ function BulkDeleteModal({
 }
 
 
+function normalizeAddKtxName(raw: string): string {
+  const trimmed = (raw || '').trim();
+  if (!trimmed) return '';
+  if (/^\d+$/.test(trimmed)) return `KTX ${trimmed}`;
+  return normalizeKtxLabel(trimmed);
+}
+
 // ─── Add Room Modal ───────────────────────────────────────────────────────────
-function AddRoomModal({ activeKtx, ktxOptions, onSave, onClose, saving }: {
+function AddRoomModal({ activeKtx, ktxOptions, existingRows, onSave, onClose, saving }: {
   activeKtx: string;
   ktxOptions: string[];
-  onSave: (row: Omit<FacilityRow, 'id'>) => void;
+  existingRows: FacilityRow[];
+  onSave: (row: Omit<FacilityRow, 'id'>, keepOpen?: boolean) => Promise<boolean>;
   onClose: () => void;
   saving: boolean;
 }) {
-  const { ktxNames } = useKtxStructure();
+  const { ktxGroups, ktxNames } = useKtxStructure();
+  const allKtxChoices = Array.from(
+    new Set([...ktxOptions, ...ktxNames, activeKtx].map(s => (s || '').trim()).filter(Boolean))
+  ).sort(compareKtxNames);
+
+  const defaultKtx = (activeKtx || allKtxChoices[0] || '').trim();
+  const [isCustomKtx, setIsCustomKtx] = useState(!defaultKtx);
+  const [newKtxInput, setNewKtxInput] = useState('');
+  const [validationError, setValidationError] = useState<string | null>(null);
+
   const [form, setForm] = useState<Omit<FacilityRow, 'id'>>({
-    ktx: activeKtx, day: '', phong_khu_vuc: '', giuong: 20, dieu_hoa: 2, tu: 4,
+    ktx: defaultKtx, day: '', phong_khu_vuc: '', giuong: 20, dieu_hoa: 2, tu: 4,
     quat: 4, o_cam_dien: 8, remote: 2, bong_tuyp: 4, ban_an: 1, ghe_an: 8, ghi_chu: '',
     room_type: 'accommodation', is_visible: true
   });
-  const [newKtxInput, setNewKtxInput] = useState('');
-  const canSave = form.day.trim() && form.phong_khu_vuc.trim() && form.ktx.trim();
 
-  const allKtxChoices = Array.from(new Set([...ktxOptions, ...ktxNames])).sort(compareKtxNames);
+  const customKtxInputRef = useRef<HTMLInputElement>(null);
+  const dayInputRef = useRef<HTMLInputElement>(null);
+  const roomInputRef = useRef<HTMLInputElement>(null);
+
+  const resolvedPreviewKtx = normalizeAddKtxName(isCustomKtx ? newKtxInput : form.ktx);
+  const suggestedDays = ktxGroups.find(g => g.ktx === resolvedPreviewKtx)?.days || [];
+
+  const handleSubmit = async (keepOpen: boolean) => {
+    setValidationError(null);
+    const finalKtx = normalizeAddKtxName(isCustomKtx ? newKtxInput : form.ktx);
+    const finalDay = normalizeDayLabel(form.day.trim());
+    const finalRoom = form.phong_khu_vuc.trim();
+
+    if (!finalKtx) {
+      setValidationError('Vui lòng chọn hoặc nhập tên Khu KTX (VD: KTX 3, KTX 4).');
+      if (isCustomKtx) customKtxInputRef.current?.focus();
+      return;
+    }
+    if (!finalDay) {
+      setValidationError('Vui lòng nhập tên Dãy (VD: Dãy 1).');
+      dayInputRef.current?.focus();
+      return;
+    }
+    if (!finalRoom) {
+      setValidationError('Vui lòng nhập tên Phòng/Khu vực (VD: Phòng 1 hoặc 1).');
+      roomInputRef.current?.focus();
+      return;
+    }
+
+    const normRoom = normalizeRoomLabel(finalRoom);
+    const duplicate = existingRows.find(
+      r =>
+        (r.ktx || '').trim() === finalKtx &&
+        normalizeDayLabel(r.day || '') === finalDay &&
+        normalizeRoomLabel(r.phong_khu_vuc || '') === normRoom
+    );
+    if (duplicate) {
+      setValidationError(`Phòng "${duplicate.phong_khu_vuc}" tại ${finalKtx} - ${finalDay} đã tồn tại trong Cơ sở vật chất.`);
+      roomInputRef.current?.focus();
+      return;
+    }
+
+    const ok = await onSave(
+      {
+        ...form,
+        ktx: finalKtx,
+        day: finalDay,
+        phong_khu_vuc: finalRoom,
+      },
+      keepOpen
+    );
+
+    if (ok && keepOpen) {
+      setIsCustomKtx(false);
+      setNewKtxInput('');
+      setForm(prev => ({
+        ...prev,
+        ktx: finalKtx,
+        day: finalDay,
+        phong_khu_vuc: '',
+        ghi_chu: '',
+      }));
+      setTimeout(() => roomInputRef.current?.focus(), 30);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-foreground">Thêm phòng/khu vực mới</h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground">
+          <button type="button" onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground">
             <X size={18} />
           </button>
         </div>
+
+        {validationError && (
+          <div className="flex items-start gap-2 p-2.5 rounded-lg border border-dgr/40 bg-dgrbg text-xs text-dgr font-medium">
+            <AlertCircle size={15} className="shrink-0 mt-0.5" />
+            <span>{validationError}</span>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {/* KTX selector — required field */}
           <div className="col-span-2 sm:col-span-3">
             <label className="text-xs text-muted-foreground mb-1 block font-medium">Khu KTX *</label>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap sm:flex-nowrap gap-2">
               <select
-                value={form.ktx}
-                onChange={e => setForm(r => ({ ...r, ktx: e.target.value }))}
-                className="flex-1 px-2 py-1.5 text-sm border border-border rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                value={isCustomKtx ? '__new__' : form.ktx}
+                onChange={e => {
+                  const val = e.target.value;
+                  setValidationError(null);
+                  if (val === '__new__') {
+                    setIsCustomKtx(true);
+                    setForm(r => ({ ...r, ktx: newKtxInput }));
+                    setTimeout(() => customKtxInputRef.current?.focus(), 20);
+                  } else {
+                    setIsCustomKtx(false);
+                    setForm(r => ({ ...r, ktx: val }));
+                  }
+                }}
+                className="flex-1 min-w-[180px] px-2.5 py-1.5 text-sm border border-border rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               >
                 {allKtxChoices.map(k => <option key={k} value={k}>{k}</option>)}
                 <option value="__new__">+ Nhập KTX khác...</option>
               </select>
-              {form.ktx === '__new__' && (
+              {isCustomKtx && (
                 <input
+                  ref={customKtxInputRef}
                   type="text"
-                  placeholder="VD: KTX 6"
+                  placeholder="VD: KTX 3"
                   value={newKtxInput}
-                  onChange={e => { setNewKtxInput(e.target.value); setForm(r => ({ ...r, ktx: e.target.value })); }}
-                  className="w-32 px-2 py-1.5 text-sm border border-primary rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  onChange={e => {
+                    const val = e.target.value;
+                    setValidationError(null);
+                    setNewKtxInput(val);
+                    setForm(r => ({ ...r, ktx: val }));
+                  }}
+                  className="w-full sm:w-44 px-2.5 py-1.5 text-sm border border-primary rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               )}
             </div>
           </div>
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Dãy *</label>
-            <input type="text" value={form.day} onChange={e => setForm(r => ({ ...r, day: e.target.value }))}
-              className="w-full px-2 py-1.5 text-sm border border-border rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary" placeholder="Dãy 1" />
+            <input
+              ref={dayInputRef}
+              list="facility_day_suggestions"
+              type="text"
+              value={form.day}
+              onChange={e => { setValidationError(null); setForm(r => ({ ...r, day: e.target.value })); }}
+              className="w-full px-2.5 py-1.5 text-sm border border-border rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              placeholder="VD: Dãy 1"
+            />
+            {suggestedDays.length > 0 && (
+              <datalist id="facility_day_suggestions">
+                {suggestedDays.map(d => <option key={d} value={d} />)}
+              </datalist>
+            )}
           </div>
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Phòng/Khu vực *</label>
-            <input type="text" value={form.phong_khu_vuc} onChange={e => setForm(r => ({ ...r, phong_khu_vuc: e.target.value }))}
-              className="w-full px-2 py-1.5 text-sm border border-border rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary" placeholder="1" />
+            <input
+              ref={roomInputRef}
+              type="text"
+              value={form.phong_khu_vuc}
+              onChange={e => { setValidationError(null); setForm(r => ({ ...r, phong_khu_vuc: e.target.value })); }}
+              className="w-full px-2.5 py-1.5 text-sm border border-border rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              placeholder="VD: Phòng 1 hoặc 1"
+            />
           </div>
 
           {/* Room Type Classification */}
@@ -638,7 +766,7 @@ function AddRoomModal({ activeKtx, ktxOptions, onSave, onClose, saving }: {
           <div className="col-span-2 sm:col-span-3">
             <label className="text-xs text-muted-foreground mb-1 block">Ghi chú</label>
             <input type="text" value={form.ghi_chu} onChange={e => setForm(r => ({ ...r, ghi_chu: e.target.value }))}
-              className="w-full px-2 py-1.5 text-sm border border-border rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary" placeholder="Ghi chú..." />
+              className="w-full px-2.5 py-1.5 text-sm border border-border rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary" placeholder="Ghi chú..." />
           </div>
 
           <div className="col-span-2 sm:col-span-3 flex items-center gap-2 pt-1">
@@ -654,12 +782,17 @@ function AddRoomModal({ activeKtx, ktxOptions, onSave, onClose, saving }: {
             </label>
           </div>
         </div>
-        <div className="flex gap-2 justify-end pt-2">
-          <button onClick={onClose} disabled={saving}
+        <div className="flex flex-wrap gap-2 justify-end pt-2">
+          <button type="button" onClick={onClose} disabled={saving}
             className="px-4 py-2 border border-border rounded-lg text-sm text-muted-foreground hover:bg-muted transition-colors">
             Hủy
           </button>
-          <button onClick={() => onSave(form)} disabled={saving || !canSave}
+          <button type="button" onClick={() => handleSubmit(true)} disabled={saving}
+            className="flex items-center gap-1.5 px-3.5 py-2 border border-primary/50 text-primary bg-primary/10 rounded-lg text-sm font-medium hover:bg-primary/20 disabled:opacity-50 transition-colors">
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+            Lưu &amp; Thêm tiếp
+          </button>
+          <button type="button" onClick={() => handleSubmit(false)} disabled={saving}
             className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity">
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
             Lưu phòng
@@ -689,7 +822,12 @@ export default function FacilitiesClient() {
 
   // Add modal
   const [showAddModal, setShowAddModal] = useState(false);
+  const [addModalInitialKtx, setAddModalInitialKtx] = useState<string | null>(null);
   const [addingRow, setAddingRow] = useState(false);
+
+  const { ktxNames: structureKtxNames, reload: reloadKtxStructure } = useKtxStructure();
+  const activeKtxRef = useRef(activeKtx);
+  activeKtxRef.current = activeKtx;
 
   // Delete modal & guard
   const [deleteTarget, setDeleteTarget] = useState<FacilityRow | null>(null);
@@ -736,6 +874,7 @@ export default function FacilitiesClient() {
           .select('*')
           .order('day', { ascending: true })
           .order('phong_khu_vuc', { ascending: true })
+          .order('id', { ascending: true })
           .range(from, from + PAGE_SIZE - 1);
         if (error) {
           console.error('Fetch facilities error:', error.message);
@@ -747,13 +886,19 @@ export default function FacilitiesClient() {
         from += PAGE_SIZE;
       }
 
-      const fetched: FacilityRow[] = allData.map((r: any) => ({
-        ...r,
-        room_type: (r.room_type || 'accommodation') as 'accommodation' | 'functional',
-        is_visible: r.is_visible !== false,
-      }));
+      const byId = new Map<string, FacilityRow>();
+      allData.forEach((r: any, idx: number) => {
+        const id = String(r?.id ?? `fac-${idx}`);
+        byId.set(id, {
+          ...r,
+          id,
+          room_type: (r.room_type || 'accommodation') as 'accommodation' | 'functional',
+          is_visible: r.is_visible !== false,
+        });
+      });
+      const fetched: FacilityRow[] = Array.from(byId.values());
       setRows(fetched);
-      if (fetched.length > 0 && !activeKtx) {
+      if (fetched.length > 0 && !activeKtxRef.current) {
         const firstKtx = Array.from(new Set(fetched.map((r: FacilityRow) => r.ktx).filter(Boolean))).sort(compareKtxNames)[0];
         if (firstKtx) setActiveKtx(firstKtx as string);
       }
@@ -762,7 +907,7 @@ export default function FacilitiesClient() {
     } finally {
       setLoading(false);
     }
-  }, [activeKtx, supabase]);
+  }, [supabase]);
 
   useEffect(() => { fetchFacilities(); }, [fetchFacilities]);
 
@@ -788,9 +933,11 @@ export default function FacilitiesClient() {
     )
   ).sort(compareKtxNames);
 
-  // If activeKtx not in tabs (e.g. after data load), reset to first
+  const missingFacilityKtxs = structureKtxNames.filter(k => k && !allKtxTabs.includes(k));
+
+  // If activeKtx not in tabs (e.g. after data load or deleting last room of a tab), reset to first
   useEffect(() => {
-    if (allKtxTabs.length > 0 && !allKtxTabs.includes(activeKtx)) {
+    if (allKtxTabs.length > 0 && (!activeKtx || !allKtxTabs.includes(activeKtx))) {
       setActiveKtx(allKtxTabs[0]);
       setFilterDay('');
       setSearchPhong('');
@@ -878,6 +1025,7 @@ export default function FacilitiesClient() {
         const { data: exChunk, error: fetchErr } = await supabase
           .from('facilities')
           .select('id, ktx, day, phong_khu_vuc')
+          .order('id', { ascending: true })
           .range(exFrom, exFrom + EX_PAGE - 1);
         if (fetchErr) throw new Error(fetchErr.message);
         const list = exChunk || [];
@@ -935,6 +1083,8 @@ export default function FacilitiesClient() {
       } else {
         setImportResult({ success: true, message: `Import thành công! Đã thêm ${insertedCount} dòng mới, cập nhật ${updatedCount} dòng.`, inserted: insertedCount, updated: updatedCount });
       }
+      invalidateKtxStructureCache();
+      reloadKtxStructure(true);
       await fetchFacilities();
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('ktx_facilities_updated'));
@@ -988,30 +1138,49 @@ export default function FacilitiesClient() {
   };
 
   // ─── Add row ──────────────────────────────────────────────────────────────
-  const handleAddRow = async (newRow: Omit<FacilityRow, 'id'>) => {
+  const handleAddRow = async (newRow: Omit<FacilityRow, 'id'>, keepOpen = false): Promise<boolean> => {
     if (!canWriteFacility(newRow.ktx, newRow.day)) {
       toast.error(`Bạn không có quyền thêm phòng tại ${newRow.ktx} - ${newRow.day}.`);
-      return;
+      return false;
     }
     setAddingRow(true);
     try {
       const { data, error } = await supabase.from('facilities').insert(newRow).select().single();
       if (error) {
         toast.error(`Lỗi thêm phòng: ${error.message}`);
-      } else if (data) {
+        return false;
+      }
+      if (data) {
         await syncBedsForFacilityRoom(supabase, data as FacilityRow);
-        setRows(prev => [...prev, data]);
-        setActiveKtx(newRow.ktx);
+        const insertedRow: FacilityRow = {
+          ...(data as any),
+          room_type: ((data as any).room_type || 'accommodation') as 'accommodation' | 'functional',
+          is_visible: (data as any).is_visible !== false,
+        };
+        setRows(prev =>
+          prev.some(r => r.id === insertedRow.id)
+            ? prev.map(r => (r.id === insertedRow.id ? insertedRow : r))
+            : [...prev, insertedRow]
+        );
+        setActiveKtx(insertedRow.ktx);
         setFilterDay('');
         setSearchPhong('');
-        setShowAddModal(false);
-        toast.success(`Đã thêm ${newRow.phong_khu_vuc} (${newRow.ktx} - ${newRow.day})`);
+        if (!keepOpen) {
+          setShowAddModal(false);
+          setAddModalInitialKtx(null);
+        }
+        invalidateKtxStructureCache();
+        reloadKtxStructure(true);
+        toast.success(`Đã thêm ${insertedRow.phong_khu_vuc} (${insertedRow.ktx} - ${insertedRow.day})`);
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('ktx_facilities_updated'));
         }
+        return true;
       }
+      return false;
     } catch (e: any) {
       toast.error(`Lỗi thêm phòng: ${e.message}`);
+      return false;
     } finally {
       setAddingRow(false);
     }
@@ -1071,6 +1240,8 @@ export default function FacilitiesClient() {
         setEditingId(null);
         setEditingRow(null);
         toast.success('Đã cập nhật trang thiết bị và đồng bộ giường');
+        invalidateKtxStructureCache();
+        reloadKtxStructure(true);
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('ktx_facilities_updated'));
         }
@@ -1100,6 +1271,8 @@ export default function FacilitiesClient() {
         setRows(prev => prev.map(r => r.id === row.id ? { ...r, is_visible: !nextVisible } : r));
       } else {
         await syncBedsForFacilityRoom(supabase, { ...row, is_visible: nextVisible });
+        invalidateKtxStructureCache();
+        reloadKtxStructure(true);
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('ktx_facilities_updated'));
         }
@@ -1153,6 +1326,8 @@ export default function FacilitiesClient() {
           return next;
         });
         setDeleteTarget(null);
+        invalidateKtxStructureCache();
+        reloadKtxStructure(true);
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('ktx_facilities_updated'));
         }
@@ -1286,7 +1461,9 @@ export default function FacilitiesClient() {
       });
       setBulkDeleteModal(null);
 
-      // Trigger sync event for Dashboard
+      // Trigger sync event for Dashboard & KTX structure cache
+      invalidateKtxStructureCache();
+      reloadKtxStructure(true);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('ktx_facilities_updated'));
       }
@@ -1298,7 +1475,7 @@ export default function FacilitiesClient() {
     } finally {
       setBulkDeleting(false);
     }
-  }, [bulkDeleteModal, supabase]);
+  }, [bulkDeleteModal, supabase, reloadKtxStructure]);
 
   // Checkbox selection helpers
   const isAllSelected = sortedRows.length > 0 && sortedRows.every(r => selectedIds.has(r.id));
@@ -1344,10 +1521,11 @@ export default function FacilitiesClient() {
       {/* Modals */}
       {showAddModal && (
         <AddRoomModal
-          activeKtx={activeKtx}
+          activeKtx={addModalInitialKtx || activeKtx}
           ktxOptions={allKtxTabs}
+          existingRows={rows}
           onSave={handleAddRow}
-          onClose={() => setShowAddModal(false)}
+          onClose={() => { setShowAddModal(false); setAddModalInitialKtx(null); }}
           saving={addingRow}
         />
       )}
@@ -1417,7 +1595,7 @@ export default function FacilitiesClient() {
           )}
           {(isAdmin || (currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && (
             <button
-              onClick={() => setShowAddModal(true)}
+              onClick={() => { setAddModalInitialKtx(null); setShowAddModal(true); }}
               className="flex items-center justify-center gap-2 px-3 py-2 bg-primary text-primary-foreground rounded-lg text-xs sm:text-sm font-medium hover:opacity-90 transition-opacity flex-1 sm:flex-initial"
             >
               <Plus size={15} />
@@ -1434,6 +1612,33 @@ export default function FacilitiesClient() {
             Chế độ phân quyền: bạn chỉ có thể thêm, sửa hoặc xóa phòng thuộc phạm vi phụ trách (
             <strong>{currentUser?.assignedBlocks?.length ? currentUser.assignedBlocks.join(', ') : 'Chỉ xem'}</strong>).
           </span>
+        </div>
+      )}
+
+      {/* Missing facility KTX prompt banner (e.g. KTX 3 / KTX 4 already has workers) */}
+      {!loading && missingFacilityKtxs.length > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-xl border border-wn/35 tint-wn text-xs">
+          <div className="flex items-center gap-2 text-wn font-medium">
+            <AlertTriangle size={15} className="shrink-0" />
+            <span>
+              Phát hiện dữ liệu công nhân tại <strong>{missingFacilityKtxs.join(', ')}</strong> chưa có danh mục phòng cơ sở vật chất:
+            </span>
+          </div>
+          {(isAdmin || (currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {missingFacilityKtxs.map(k => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => { setAddModalInitialKtx(k); setShowAddModal(true); }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary text-primary-foreground font-semibold hover:opacity-90 transition-opacity cursor-pointer"
+                >
+                  <Plus size={12} />
+                  <span>Thêm phòng {k}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

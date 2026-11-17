@@ -202,33 +202,41 @@ export async function reconcileBedsWithWorkers(supabase: SupabaseClient): Promis
   assignedCount: number;
   updatedInfoCount: number;
 }> {
-  const allBeds: BedSyncRow[] = [];
+  const bedsById = new Map<string, BedSyncRow>();
   let from = 0;
   for (let p = 0; p < 30; p++) {
     const { data, error } = await supabase
       .from('beds')
       .select('id, ktx, day, phong_so, giuong, status, worker_id, ma_nv, ho_va_ten')
+      .order('id', { ascending: true })
       .range(from, from + BED_PAGE_SIZE - 1);
     if (error) throw new Error(error.message);
     const list = (data ?? []) as BedSyncRow[];
-    allBeds.push(...list);
+    for (const b of list) {
+      if (b?.id) bedsById.set(b.id, b);
+    }
     if (list.length < BED_PAGE_SIZE) break;
     from += BED_PAGE_SIZE;
   }
+  const allBeds = Array.from(bedsById.values());
 
-  const allWorkers: WorkerSyncRow[] = [];
+  const workersById = new Map<string, WorkerSyncRow>();
   from = 0;
   for (let p = 0; p < 30; p++) {
     const { data, error } = await supabase
       .from('workers')
       .select('id, ho_va_ten, ma_nv, ktx, day, phong_so, giuong')
+      .order('id', { ascending: true })
       .range(from, from + BED_PAGE_SIZE - 1);
     if (error) throw new Error(error.message);
     const list = (data ?? []) as WorkerSyncRow[];
-    allWorkers.push(...list);
+    for (const w of list) {
+      if (w?.id) workersById.set(w.id, w);
+    }
     if (list.length < BED_PAGE_SIZE) break;
     from += BED_PAGE_SIZE;
   }
+  const allWorkers = Array.from(workersById.values());
 
   const workerById = new Map<string, WorkerSyncRow>();
   allWorkers.forEach(w => {

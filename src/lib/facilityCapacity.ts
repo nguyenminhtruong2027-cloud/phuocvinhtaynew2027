@@ -86,25 +86,43 @@ export interface FacilityItem {
   [key: string]: any;
 }
 
-/** Fetch all physical facilities from the database catalog */
+/** Fetch all physical facilities from the database catalog (paginated) */
 export async function fetchFacilitiesList(): Promise<FacilityItem[]> {
   const supabase = createClient();
+  const PAGE_SIZE = 1000;
+  const allRows: any[] = [];
   try {
-    const { data, error } = await supabase
-      .from('facilities')
-      .select('*')
-      .order('day', { ascending: true })
-      .order('phong_khu_vuc', { ascending: true });
+    let from = 0;
+    for (let page = 0; page < 30; page++) {
+      const { data, error } = await supabase
+        .from('facilities')
+        .select('*')
+        .order('day', { ascending: true })
+        .order('phong_khu_vuc', { ascending: true })
+        .order('id', { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
 
-    if (error) {
-      console.warn('[facilityCapacity] fetchFacilitiesList error:', error.message);
-      return [];
+      if (error) {
+        console.warn('[facilityCapacity] fetchFacilitiesList error:', error.message);
+        break;
+      }
+      const chunk = data || [];
+      allRows.push(...chunk);
+      if (chunk.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
     }
-    return (data || []).map((row: any) => ({
-      ...row,
-      room_type: row.room_type || 'accommodation',
-      is_visible: row.is_visible !== false,
-    })) as FacilityItem[];
+
+    const byId = new Map<string, FacilityItem>();
+    allRows.forEach((row: any, idx: number) => {
+      const id = String(row?.id ?? `fac-${idx}`);
+      byId.set(id, {
+        ...row,
+        id,
+        room_type: row.room_type || 'accommodation',
+        is_visible: row.is_visible !== false,
+      });
+    });
+    return Array.from(byId.values());
   } catch (err) {
     console.warn('[facilityCapacity] fetchFacilitiesList error:', err);
     return [];
@@ -115,30 +133,40 @@ export async function fetchFacilitiesList(): Promise<FacilityItem[]> {
 export async function fetchRoomCapacities(): Promise<RoomCapacityMap> {
   const supabase = createClient();
   const map: RoomCapacityMap = {};
+  const PAGE_SIZE = 1000;
 
   try {
-    const { data, error } = await supabase
-      .from('facilities')
-      .select('ktx, day, phong_khu_vuc, giuong, room_type, is_visible');
+    let from = 0;
+    for (let page = 0; page < 30; page++) {
+      const { data, error } = await supabase
+        .from('facilities')
+        .select('id, ktx, day, phong_khu_vuc, giuong, room_type, is_visible')
+        .order('id', { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
 
-    if (error) {
-      console.warn('[facilityCapacity] fetch error:', error.message);
-      return map;
-    }
-
-    for (const row of (data ?? [])) {
-      // Exclude functional rooms and hidden rooms from capacity calculations
-      const roomType = row?.room_type || 'accommodation';
-      const isVisible = row?.is_visible !== false;
-      if (roomType === 'functional' || !isVisible) {
-        continue;
+      if (error) {
+        console.warn('[facilityCapacity] fetch error:', error.message);
+        break;
       }
 
-      const key = buildRoomKey(row?.ktx ?? '', row?.day ?? '', row?.phong_khu_vuc ?? '');
-      const count = Number(row?.giuong ?? 0);
-      if (Number.isFinite(count) && count > 0) {
-        map[key] = count;
+      const chunk = data ?? [];
+      for (const row of chunk) {
+        // Exclude functional rooms and hidden rooms from capacity calculations
+        const roomType = row?.room_type || 'accommodation';
+        const isVisible = row?.is_visible !== false;
+        if (roomType === 'functional' || !isVisible) {
+          continue;
+        }
+
+        const key = buildRoomKey(row?.ktx ?? '', row?.day ?? '', row?.phong_khu_vuc ?? '');
+        const count = Number(row?.giuong ?? 0);
+        if (Number.isFinite(count) && count > 0) {
+          map[key] = count;
+        }
       }
+
+      if (chunk.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
     }
   } catch (err) {
     console.warn('[facilityCapacity] fetch error:', err);

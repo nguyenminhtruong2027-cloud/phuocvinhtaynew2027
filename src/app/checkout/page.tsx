@@ -184,7 +184,10 @@ export default function CheckoutPage() {
           return (a.ho_va_ten || '').localeCompare(b.ho_va_ten || '', 'vi');
         });
 
-        setResidents(sorted);
+        const deduped = Array.from(
+          new Map(sorted.map(r => [r.id, r])).values()
+        );
+        setResidents(deduped);
       } catch (err) {
         console.warn('Load residents failed:', err);
         if (active) setResidents([]);

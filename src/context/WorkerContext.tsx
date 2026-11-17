@@ -177,12 +177,17 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      allRows.sort((a, b) => (a.stt ?? 0) - (b.stt ?? 0) || a.hoVaTen.localeCompare(b.hoVaTen));
       const metaMap = new Map<string, Worker>();
-      allRows.forEach(w => { if (w.id) metaMap.set(w.id, w); });
+      const noIdRows: Worker[] = [];
+      allRows.forEach(w => {
+        if (w.id) metaMap.set(w.id, w);
+        else noIdRows.push(w);
+      });
+      const uniqueRows = [...Array.from(metaMap.values()), ...noIdRows];
+      uniqueRows.sort((a, b) => (a.stt ?? 0) - (b.stt ?? 0) || a.hoVaTen.localeCompare(b.hoVaTen));
       workerMetaByIdRef.current = metaMap;
-      setWorkers(allRows);
-      setTotalWorkerCount(allRows.length);
+      setWorkers(uniqueRows);
+      setTotalWorkerCount(uniqueRows.length);
     } catch (err: any) {
       console.warn('Load workers warning:', err?.message || err);
       if (!isRefresh) {
