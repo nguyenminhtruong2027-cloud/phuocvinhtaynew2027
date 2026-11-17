@@ -33,8 +33,10 @@ import { QrCodeImage, downloadQrPng, generateQrDataUrl } from '@/components/QrCo
 import { printHtmlViaIframe, escapeHtml } from '@/lib/printHtml';
 import {
   fetchWorkerHierarchy,
+  fetchRoomBedAvailability,
   invalidateWorkerHierarchyCache,
   WorkerHierarchyData,
+  RoomBedAvailability,
   checkDuplicateWorker,
 } from '@/lib/workerHierarchy';
 import {
@@ -178,6 +180,23 @@ function DetailModal({
     return hierarchy.roomsByKtxDay[`${editForm.ktx}__${editForm.day}`] || [];
   }, [hierarchy.roomsByKtxDay, editForm.ktx, editForm.day]);
 
+  const [bedAvail, setBedAvail] = useState<RoomBedAvailability | null>(null);
+  const [loadingBeds, setLoadingBeds] = useState(false);
+
+  useEffect(() => {
+    if (!isPending || !editForm.ktx || !editForm.day || !editForm.phong_so) {
+      setBedAvail(null);
+      return;
+    }
+    let active = true;
+    setLoadingBeds(true);
+    fetchRoomBedAvailability(editForm.ktx, editForm.day, editForm.phong_so, hierarchy)
+      .then(res => { if (active) setBedAvail(res); })
+      .catch(() => { if (active) setBedAvail(null); })
+      .finally(() => { if (active) setLoadingBeds(false); });
+    return () => { active = false; };
+  }, [isPending, editForm.ktx, editForm.day, editForm.phong_so, hierarchy]);
+
   useEffect(() => {
     if (isPending && !editForm.day && availableDays.length > 0) {
       const nextDay = availableDays[0];
@@ -191,7 +210,9 @@ function DetailModal({
   }, [editForm.ktx, editForm.day, availableDays, hierarchy.roomsByKtxDay, isPending]);
 
   const handleKtxChange = (newKtx: string) => {
-    const days = hierarchy.daysByKtx[newKtx] || [];
+    const daySet = new Set<string>(hierarchy.daysByKtx[newKtx] || []);
+    ktxGroups.find(g => g.ktx === newKtx)?.days.forEach(d => daySet.add(d));
+    const days = Array.from(daySet).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true, sensitivity: 'base' }));
     const nextDay = days.includes(editForm.day) ? editForm.day : (days[0] || '');
     const rooms = hierarchy.roomsByKtxDay[`${newKtx}__${nextDay}`] || [];
     const nextRoom = rooms.includes(editForm.phong_so) ? editForm.phong_so : (rooms[0] || '');
@@ -510,6 +531,56 @@ function DetailModal({
                 </div>
               </div>
 
+              {editForm.ktx && editForm.day && editForm.phong_so && (loadingBeds || (bedAvail && bedAvail.capacity > 0)) && (
+                <div className="rounded bg-page border border-bdr p-2.5 text-xs space-y-1.5">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-mu font-medium">
+                      Giường trống Phòng {editForm.phong_so}:
+                    </span>
+                    {loadingBeds ? (
+                      <span className="text-mu">Đang tải...</span>
+                    ) : bedAvail && bedAvail.emptyBeds.length > 0 ? (
+                      <span className="text-ok font-semibold">
+                        Còn {bedAvail.emptyBeds.length}/{bedAvail.capacity} giường trống
+                      </span>
+                    ) : (
+                      <span className="text-dgr font-semibold">
+                        Đã kín ({bedAvail?.occupiedCount}/{bedAvail?.capacity})
+                      </span>
+                    )}
+                  </div>
+                  {!loadingBeds && bedAvail && editForm.giuong.trim() && bedAvail.occupiedBeds.includes(editForm.giuong.trim()) && (
+                    <p className="text-[11px] text-wn font-medium">
+                      Lưu ý: Giường {editForm.giuong.trim()} hiện đang có công nhân ở. Nên chọn giường trống bên dưới.
+                    </p>
+                  )}
+                  {!loadingBeds && bedAvail && bedAvail.emptyBeds.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {bedAvail.emptyBeds.slice(0, 14).map(b => {
+                        const selected = editForm.giuong.trim() === b;
+                        return (
+                          <button
+                            key={b}
+                            type="button"
+                            onClick={() => setEditForm(prev => ({ ...prev, giuong: b }))}
+                            className={`px-2 py-0.5 rounded text-[11px] font-mono font-semibold border transition-colors cursor-pointer ${
+                              selected
+                                ? 'bg-wn text-[#0B0F17] border-wn'
+                                : 'bg-surf text-tx border-bdr hover:border-wn'
+                            }`}
+                          >
+                            G.{b}
+                          </button>
+                        );
+                      })}
+                      {bedAvail.emptyBeds.length > 14 && (
+                        <span className="text-[11px] text-mu self-center">+{bedAvail.emptyBeds.length - 14}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div>
                 <label className={labelCls}>Ghi chú</label>
                 <textarea
@@ -747,12 +818,13 @@ export default function QRPortalClient() {
   const [selectedRoom, setSelectedRoom] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Phân cấp KTX / Dãy / Phòng từ dữ liệu công nhân (workers)
+  // Phân cấp KTX / Dãy / Phòng từ dữ liệu công nhân (workers) & cơ sở vật chất
   const [hierarchy, setHierarchy] = useState<WorkerHierarchyData>({
     units: [],
     ktxList: [],
     daysByKtx: {},
     roomsByKtxDay: {},
+    roomCapacities: {},
     workers: [],
   });
 

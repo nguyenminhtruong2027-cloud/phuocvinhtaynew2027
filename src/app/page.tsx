@@ -602,7 +602,6 @@ export default function OccupancyDashboardPage() {
   const [specialists, setSpecialists] = useState<{ id: string; name: string; email?: string; role: 'admin' | 'staff'; assignedBlocks?: string[] }[]>([]);
   const [dutyRoster, setDutyRoster] = useState<SpecialistWithDuty[]>([]);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
-  const [roomUnitMap, setRoomUnitMap] = useState<Record<string, string>>({});
   const [roomGenderMap, setRoomGenderMap] = useState<Record<string, 'male' | 'female' | 'auto'>>({});
   const [capacities, setCapacities] = useState<RoomCapacityMap>({});
   const [facilitiesList, setFacilitiesList] = useState<FacilityItem[]>([]);
@@ -819,40 +818,20 @@ export default function OccupancyDashboardPage() {
     };
   }, []);
 
-  // ── Load room → don_vi mapping ─────────────────────────────────────────────
-  useEffect(() => {
-    const fetchRoomUnits = async () => {
-      try {
-        const supabase = createClient();
-        let allData: { ktx: string; day: string; phong_so: string; don_vi: string }[] = [];
-        let from = 0;
-        const SIZE = 1000;
-        let hasMore = true;
-        while (hasMore) {
-          const { data: batch, error: batchErr } = await supabase
-            .from('workers')
-            .select('ktx, day, phong_so, don_vi')
-            .not('phong_so', 'is', null)
-            .not('don_vi', 'is', null)
-            .order('id', { ascending: true })
-            .range(from, from + SIZE - 1);
-          if (batchErr || !batch || batch.length === 0) { hasMore = false; break; }
-          allData = allData.concat(batch as { ktx: string; day: string; phong_so: string; don_vi: string }[]);
-          if (batch.length < SIZE) hasMore = false; else from += SIZE;
-        }
-        const map: Record<string, string> = {};
-        allData.forEach(row => {
-          if (!row?.ktx || !row?.day || !row?.phong_so || !row?.don_vi?.trim()) return;
-          const key = `${row.ktx}||${row.day}||${row.phong_so}`;
-          if (!map[key]) map[key] = row.don_vi.trim();
-        });
-        setRoomUnitMap(map);
-      } catch (err) {
-        console.warn('[Dashboard] Load room unit map failed (offline?):', err);
-      }
-    };
-    fetchRoomUnits();
-  }, [workers.length]);
+  // ── Derive room → don_vi mapping directly from loaded workers (zero extra queries) ──
+  const roomUnitMap = useMemo<Record<string, string>>(() => {
+    const map: Record<string, string> = {};
+    (workers || []).forEach(w => {
+      const ktx = (w?.ktx || '').trim();
+      const day = (w?.day || '').trim();
+      const room = normalizeRoomLabel(w?.phongSo || '');
+      const unit = (w?.donVi || '').trim();
+      if (!ktx || !day || !room || !unit) return;
+      const key = `${ktx}||${day}||${room}`;
+      if (!map[key]) map[key] = unit;
+    });
+    return map;
+  }, [workers]);
 
   // ── KPI calculations from Single Source of Truth ─────────────────────────
   const totalCapacityAll = systemMetrics.capacity;

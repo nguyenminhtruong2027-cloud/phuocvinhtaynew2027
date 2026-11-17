@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { getVNDateString } from '@/lib/vnDate';
 import { CheckCircle2, AlertCircle, Loader2, QrCode, User, Hash, MapPin } from 'lucide-react';
@@ -38,7 +38,8 @@ export default function AttendancePage() {
   const [checkedInTime, setCheckedInTime] = useState('');
   const [alreadyCheckedInTime, setAlreadyCheckedInTime] = useState('');
 
-  const supabase = createClient();
+  const supabaseRef = useRef(createClient());
+  const supabase = supabaseRef.current;
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -73,7 +74,7 @@ export default function AttendancePage() {
       }
     };
     load();
-  }, [sessionDate, zoneKtx, zoneDay, zonePhong]);
+  }, [sessionDate, zoneKtx, zoneDay, zonePhong, supabase]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

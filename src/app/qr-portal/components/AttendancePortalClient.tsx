@@ -224,7 +224,8 @@ export default function AttendancePortalClient() {
 
   const [attendanceUrl, setAttendanceUrl] = useState('');
   const { currentUser } = useAuth();
-  const supabase = createClient();
+  const supabaseRef = useRef(createClient());
+  const supabase = supabaseRef.current;
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -242,7 +243,7 @@ export default function AttendancePortalClient() {
       setKtxList(Array.from(ktxSet).sort());
     };
     load();
-  }, []);
+  }, [supabase]);
 
   // ─── Cascade: KTX → Dãy list ─────────────────────────────────────────────
   useEffect(() => {
@@ -251,7 +252,7 @@ export default function AttendancePortalClient() {
     setDayList(days);
     // Reset downstream if current value not in new list
     if (!isManualDay && zoneDay && !days.includes(zoneDay)) { setZoneDay(''); setIsManualDay(false); }
-  }, [zoneKtx, allWorkers, isManualKtx]);
+  }, [zoneKtx, allWorkers, isManualKtx, isManualDay, zoneDay]);
 
   // ─── Cascade: Dãy → Phòng list ───────────────────────────────────────────
   useEffect(() => {
@@ -259,7 +260,7 @@ export default function AttendancePortalClient() {
     const phongs = Array.from(new Set(allWorkers.filter(w => w.ktx === zoneKtx && w.day === zoneDay && w.phong_so).map(w => w.phong_so))).sort();
     setPhongList(phongs);
     if (!isManualPhong && zonePhong && !phongs.includes(zonePhong)) { setZonePhong(''); setIsManualPhong(false); }
-  }, [zoneKtx, zoneDay, allWorkers, isManualDay]);
+  }, [zoneKtx, zoneDay, allWorkers, isManualDay, isManualPhong, zonePhong]);
 
   // ─── Load sessions ────────────────────────────────────────────────────────
   const fetchSessions = useCallback(async (date: string, silent = false) => {
@@ -286,7 +287,7 @@ export default function AttendancePortalClient() {
     } finally {
       setSessionLoading(false);
     }
-  }, []);
+  }, [supabase]);
 
   useEffect(() => { fetchSessions(selectedDate); }, [selectedDate, fetchSessions]);
 
@@ -301,15 +302,17 @@ export default function AttendancePortalClient() {
   }, [fetchSessions, selectedDate, supabase]);
 
   // ─── Load records ─────────────────────────────────────────────────────────
+  const activeSessionId = activeSession?.id ?? null;
+
   const fetchRecords = useCallback(async (silent = false) => {
-    if (!activeSession) return;
+    if (!activeSessionId) return;
     if (!silent) setRecordsLoading(true);
     else setRefreshing(true);
     try {
       const { data, error } = await supabase
         .from('attendance_records')
         .select('*')
-        .eq('session_id', activeSession.id)
+        .eq('session_id', activeSessionId)
         .order('checked_in_at', { ascending: false })
         .order('id', { ascending: true });
       if (!error) {
@@ -324,22 +327,22 @@ export default function AttendancePortalClient() {
       setRecordsLoading(false);
       setRefreshing(false);
     }
-  }, [activeSession?.id]);
+  }, [activeSessionId, supabase]);
 
   useEffect(() => {
-    if (activeSession) fetchRecords();
-  }, [activeSession?.id, fetchRecords]);
+    if (activeSessionId) fetchRecords();
+  }, [activeSessionId, fetchRecords]);
 
   // ─── Realtime subscription ────────────────────────────────────────────────
   useEffect(() => {
-    if (!activeSession?.id) return;
+    if (!activeSessionId) return;
     if (realtimeChannelRef.current) {
       supabase.removeChannel(realtimeChannelRef.current);
       realtimeChannelRef.current = null;
     }
     const channel = supabase
-      .channel(`attendance_records_${activeSession.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_records', filter: `session_id=eq.${activeSession.id}` },
+      .channel(`attendance_records_${activeSessionId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_records', filter: `session_id=eq.${activeSessionId}` },
         (payload) => {
           if (payload.eventType === 'INSERT') {
             const newRec = payload.new as AttendanceRecord;
@@ -366,7 +369,7 @@ export default function AttendancePortalClient() {
       realtimeChannelRef.current = null;
       setRealtimeConnected(false);
     };
-  }, [activeSession?.id]);
+  }, [activeSessionId, supabase]);
 
   // ─── Compute consecutive absence alerts ──────────────────────────────────
   const computeAbsenceAlerts = useCallback(async () => {
@@ -419,11 +422,11 @@ export default function AttendancePortalClient() {
     } finally {
       setAlertsLoading(false);
     }
-  }, [allWorkers, absenceThreshold, alertKtxFilter]);
+  }, [allWorkers, absenceThreshold, alertKtxFilter, supabase]);
 
   useEffect(() => {
     if (activeTab === 'alerts' && allWorkers.length > 0) computeAbsenceAlerts();
-  }, [activeTab, computeAbsenceAlerts]);
+  }, [activeTab, allWorkers.length, computeAbsenceAlerts]);
 
   // ─── Derive filter options ────────────────────────────────────────────────
   const filterKtxOptions = Array.from(new Set([

@@ -2,7 +2,13 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useKtxStructure } from '@/lib/ktxStructure';
-import { fetchWorkerHierarchy, naturalCompare } from '@/lib/workerHierarchy';
+import {
+  fetchWorkerHierarchy,
+  fetchRoomBedAvailability,
+  naturalCompare,
+  RoomBedAvailability,
+  WorkerRef,
+} from '@/lib/workerHierarchy';
 import { CheckCircle2, AlertCircle, Loader2, User, X, QrCode, Home, ScanLine, CheckCircle, Camera, AlertTriangle, Check, RefreshCw } from 'lucide-react';
 
 interface RegistrationForm {
@@ -477,12 +483,18 @@ export default function RegisterPage() {
     ktxList: string[];
     daysByKtx: Record<string, string[]>;
     roomsByKtxDay: Record<string, string[]>;
+    roomCapacities: Record<string, number>;
+    workers: WorkerRef[];
   }>({
     units: ['XD', 'ME', 'Vin Alpha', 'Trắc đạc', 'DVVS', 'QC', 'Ép cọc', 'QLVTTB', 'Lái xe', 'Tuyển dụng'],
     ktxList: [],
     daysByKtx: {},
     roomsByKtxDay: {},
+    roomCapacities: {},
+    workers: [],
   });
+  const [bedAvail, setBedAvail] = useState<RoomBedAvailability | null>(null);
+  const [loadingBeds, setLoadingBeds] = useState(false);
 
   const [showScanner, setShowScanner] = useState(false);
   const [scanSuccess, setScanSuccess] = useState(false);
@@ -502,6 +514,8 @@ export default function RegisterPage() {
           ktxList: data.ktxList || [],
           daysByKtx: data.daysByKtx || {},
           roomsByKtxDay: data.roomsByKtxDay || {},
+          roomCapacities: data.roomCapacities || {},
+          workers: data.workers || [],
         });
         if (data.units?.length) {
           setUnitOptions(data.units);
@@ -513,7 +527,24 @@ export default function RegisterPage() {
     return () => { active = false; };
   }, []);
 
-  // Cascading lists - strictly based on real worker residency hierarchy
+  useEffect(() => {
+    const k = (form.ktx || '').trim();
+    const d = (form.day || '').trim();
+    const p = (form.phong_so || '').trim();
+    if (!k || !d || !p) {
+      setBedAvail(null);
+      return;
+    }
+    let active = true;
+    setLoadingBeds(true);
+    fetchRoomBedAvailability(k, d, p, hierarchy)
+      .then(res => { if (active) setBedAvail(res); })
+      .catch(() => { if (active) setBedAvail(null); })
+      .finally(() => { if (active) setLoadingBeds(false); });
+    return () => { active = false; };
+  }, [form.ktx, form.day, form.phong_so, hierarchy]);
+
+  // Cascading lists - merge real worker residency hierarchy + facilities structure
   const availableKtxList = useMemo(() => {
     const set = new Set<string>();
     (hierarchy.ktxList || []).forEach(k => { if (k?.trim()) set.add(k.trim()); });
@@ -526,14 +557,12 @@ export default function RegisterPage() {
     if (!currentKtx) return [];
 
     const set = new Set<string>();
-    const daysFromHierarchy = hierarchy.daysByKtx[currentKtx];
-    if (daysFromHierarchy && daysFromHierarchy.length > 0) {
-      daysFromHierarchy.forEach(d => { if (d?.trim()) set.add(d.trim()); });
-    } else {
-      const group = (ktxGroups || []).find(g => g.ktx.trim().toLowerCase() === currentKtx.toLowerCase());
-      if (group?.days) {
-        group.days.forEach(d => { if (d?.trim()) set.add(d.trim()); });
-      }
+    const daysFromHierarchy = hierarchy.daysByKtx[currentKtx] || [];
+    daysFromHierarchy.forEach(d => { if (d?.trim()) set.add(d.trim()); });
+
+    const group = (ktxGroups || []).find(g => g.ktx.trim().toLowerCase() === currentKtx.toLowerCase());
+    if (group?.days) {
+      group.days.forEach(d => { if (d?.trim()) set.add(d.trim()); });
     }
 
     return Array.from(set).sort(naturalCompare);
@@ -1031,6 +1060,53 @@ export default function RegisterPage() {
                   />
                 </div>
               </div>
+
+              {form.ktx && form.day && form.phong_so && (loadingBeds || (bedAvail && bedAvail.capacity > 0)) && (
+                <div className="rounded-xl bg-muted/40 border border-border px-3 py-2 text-xs space-y-1.5" suppressHydrationWarning>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-muted-foreground font-medium">
+                      Tình trạng Phòng {form.phong_so}:
+                    </span>
+                    {loadingBeds ? (
+                      <span className="text-muted-foreground">Đang kiểm tra giường trống...</span>
+                    ) : bedAvail && bedAvail.emptyBeds.length > 0 ? (
+                      <span className="text-ok font-semibold">
+                        Còn {bedAvail.emptyBeds.length}/{bedAvail.capacity} giường trống
+                      </span>
+                    ) : (
+                      <span className="text-dgr font-semibold">
+                        Đã đủ {bedAvail?.occupiedCount}/{bedAvail?.capacity} giường
+                      </span>
+                    )}
+                  </div>
+                  {!loadingBeds && bedAvail && bedAvail.emptyBeds.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {bedAvail.emptyBeds.slice(0, 12).map(b => {
+                        const selected = form.giuong.trim() === b;
+                        return (
+                          <button
+                            key={b}
+                            type="button"
+                            onClick={() => setForm(f => ({ ...f, giuong: b }))}
+                            className={`px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold border transition-colors cursor-pointer ${
+                              selected
+                                ? 'bg-primary text-primary-foreground border-primary'
+                                : 'bg-background text-foreground border-border hover:border-primary'
+                            }`}
+                          >
+                            G.{b}
+                          </button>
+                        );
+                      })}
+                      {bedAvail.emptyBeds.length > 12 && (
+                        <span className="text-[11px] text-muted-foreground self-center">
+                          +{bedAvail.emptyBeds.length - 12} giường khác
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3" suppressHydrationWarning>
                 <div>

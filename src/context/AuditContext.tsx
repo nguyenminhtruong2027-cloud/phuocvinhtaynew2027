@@ -30,11 +30,22 @@ export interface AuditEntry {
   detail: string;
 }
 
+import { dedupeById } from '@/lib/dedupe';
+
+export interface AuditFilterParams {
+  account?: string;
+  action?: string;
+  keyword?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
 interface AuditContextValue {
   logs: AuditEntry[];
   addLog: (account: string, action: AuditAction, detail: string) => void;
   loading: boolean;
   refetchLogs: () => Promise<void>;
+  fetchFilteredLogs: (filters: AuditFilterParams) => Promise<AuditEntry[]>;
 }
 
 const AuditContext = createContext<AuditContextValue | null>(null);
@@ -65,10 +76,56 @@ export function AuditProvider({ children }: { children: React.ReactNode }) {
           action: row.action as AuditAction,
           detail: row.detail,
         }));
-        setLogs(Array.from(new Map(mapped.map(l => [l.id, l])).values()));
+        setLogs(dedupeById(mapped));
       }
     } catch {}
     setLoading(false);
+  }, [supabase]);
+
+  const fetchFilteredLogs = useCallback(async (filters: AuditFilterParams): Promise<AuditEntry[]> => {
+    try {
+      let query = supabase
+        .from('audit_logs')
+        .select('*')
+        .order('timestamp', { ascending: false })
+        .limit(2000);
+
+      if (filters.account) {
+        query = query.eq('account', filters.account);
+      }
+      if (filters.action) {
+        query = query.eq('action', filters.action);
+      }
+      if (filters.dateFrom) {
+        const fromIso = new Date(`${filters.dateFrom}T00:00:00+07:00`).toISOString();
+        query = query.gte('timestamp', fromIso);
+      }
+      if (filters.dateTo) {
+        const toIso = new Date(`${filters.dateTo}T23:59:59+07:00`).toISOString();
+        query = query.lte('timestamp', toIso);
+      }
+      const kw = (filters.keyword || '').trim();
+      if (kw) {
+        const safeKw = kw.replace(/[,%()]/g, ' ').trim();
+        if (safeKw) {
+          query = query.or(`account.ilike.%${safeKw}%,detail.ilike.%${safeKw}%`);
+        }
+      }
+
+      const { data, error } = await query;
+      if (error || !data) return [];
+      return dedupeById(
+        data.map(row => ({
+          id: row.id,
+          timestamp: row.timestamp,
+          account: row.account,
+          action: row.action as AuditAction,
+          detail: row.detail,
+        }))
+      );
+    } catch {
+      return [];
+    }
   }, [supabase]);
 
   useEffect(() => {
@@ -102,7 +159,7 @@ export function AuditProvider({ children }: { children: React.ReactNode }) {
   }, [supabase]);
 
   return (
-    <AuditContext.Provider value={{ logs, addLog, loading, refetchLogs: fetchLogs }}>
+    <AuditContext.Provider value={{ logs, addLog, loading, refetchLogs: fetchLogs, fetchFilteredLogs }}>
       {children}
     </AuditContext.Provider>
   );

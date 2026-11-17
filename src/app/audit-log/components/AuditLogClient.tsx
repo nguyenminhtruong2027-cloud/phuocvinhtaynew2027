@@ -1,6 +1,6 @@
 'use client';
-import React, { useState, useMemo } from 'react';
-import { useAudit, AuditAction } from '@/context/AuditContext';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useAudit, AuditAction, AuditEntry } from '@/context/AuditContext';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { Filter, Clock, User, Activity, Calendar, X, Download } from 'lucide-react';
@@ -116,7 +116,7 @@ function parseFilterDate(dateStr: string, endOfDay = false): Date | null {
 }
 
 export default function AuditLogClient() {
-  const { logs, loading } = useAudit();
+  const { logs, loading, fetchFilteredLogs } = useAudit();
   const { isAdmin } = useAuth();
   const router = useRouter();
   const [filterAccount, setFilterAccount] = useState('');
@@ -124,16 +124,50 @@ export default function AuditLogClient() {
   const [filterStaff, setFilterStaff] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
+  const [serverFilteredLogs, setServerFilteredLogs] = useState<AuditEntry[] | null>(null);
+  const [searchingServer, setSearchingServer] = useState(false);
   const [page, setPage] = useState(1);
   const pageSize = 20;
+
+  const hasActiveFilter = Boolean(filterAccount || filterAction || filterStaff || filterDateFrom || filterDateTo);
+
+  useEffect(() => {
+    if (!isAdmin || !hasActiveFilter) {
+      setServerFilteredLogs(null);
+      setSearchingServer(false);
+      return;
+    }
+    let active = true;
+    const timer = setTimeout(() => {
+      setSearchingServer(true);
+      fetchFilteredLogs({
+        account: filterAccount || undefined,
+        action: filterAction || undefined,
+        keyword: filterStaff || undefined,
+        dateFrom: filterDateFrom || undefined,
+        dateTo: filterDateTo || undefined,
+      })
+        .then(res => {
+          if (active) setServerFilteredLogs(res);
+        })
+        .finally(() => {
+          if (active) setSearchingServer(false);
+        });
+    }, 250);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [isAdmin, hasActiveFilter, filterAccount, filterAction, filterStaff, filterDateFrom, filterDateTo, fetchFilteredLogs]);
 
   const uniqueAccounts = useMemo(() => [...new Set(logs.map(l => l.account))].sort(), [logs]);
 
   const filtered = useMemo(() => {
+    const source = hasActiveFilter && serverFilteredLogs !== null ? serverFilteredLogs : logs;
     const fromDate = parseFilterDate(filterDateFrom, false);
     const toDate = parseFilterDate(filterDateTo, true);
 
-    return logs.filter(l => {
+    return source.filter(l => {
       if (filterAccount && l.account !== filterAccount) return false;
       if (filterAction && l.action !== filterAction) return false;
       // Staff name/email search (partial match)
@@ -151,12 +185,10 @@ export default function AuditLogClient() {
       }
       return true;
     });
-  }, [logs, filterAccount, filterAction, filterStaff, filterDateFrom, filterDateTo]);
+  }, [logs, serverFilteredLogs, hasActiveFilter, filterAccount, filterAction, filterStaff, filterDateFrom, filterDateTo]);
 
   const totalPages = Math.ceil(filtered.length / pageSize);
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
-
-  const hasActiveFilter = filterAccount || filterAction || filterStaff || filterDateFrom || filterDateTo;
 
   const clearFilters = () => {
     setFilterAccount('');
@@ -217,7 +249,9 @@ export default function AuditLogClient() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 sm:mb-6">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-foreground">Nhật Ký Hệ Thống</h1>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">{filtered.length} bản ghi · Tất cả tài khoản Admin</p>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
+            {searchingServer ? 'Đang truy vấn lịch sử...' : `${filtered.length} bản ghi${hasActiveFilter ? ' (tra cứu toàn bộ lịch sử)' : ' gần nhất'} · Tất cả tài khoản Admin`}
+          </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button

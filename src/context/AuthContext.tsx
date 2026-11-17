@@ -58,71 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
 
-  useEffect(() => {
-    let mounted = true;
-
-    const resolveUser = async () => {
-      try {
-        const res = await supabase.auth.getUser();
-        if (!mounted) return;
-        const user = res?.data?.user;
-        if (user) {
-          await loadUserProfile(user.id, user.email ?? '');
-        } else {
-          setCurrentUserState(null);
-          setLoading(false);
-        }
-      } catch (err) {
-        console.warn('[AuthContext] resolveUser notice:', err);
-        if (mounted) {
-          setCurrentUserState(null);
-          setLoading(false);
-        }
-      }
-    };
-
-    resolveUser();
-
-    let subscription: { unsubscribe: () => void } | undefined;
-    try {
-      const authSubRes = supabase.auth.onAuthStateChange(async (_event, session) => {
-        if (session?.user) {
-          await loadUserProfile(session.user.id, session.user.email ?? '');
-        } else {
-          setCurrentUserState(null);
-          setLoading(false);
-        }
-      });
-      subscription = authSubRes?.data?.subscription;
-    } catch (subErr) {
-      console.warn('[AuthContext] onAuthStateChange notice:', subErr);
-    }
-
-    return () => {
-      mounted = false;
-      subscription?.unsubscribe();
-    };
-  }, []);
-
-  // Keep the current user's displayed name/role in sync with `profiles` in real time.
-  useEffect(() => {
-    if (!currentUser?.id) return;
-    const channel = supabase
-      .channel(`profile_realtime_${currentUser.id}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${currentUser.id}` },
-        () => {
-          loadUserProfile(currentUser.id, currentUser.email ?? '');
-        }
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [currentUser?.id, currentUser?.email, supabase]);
-
-  const loadUserProfile = async (userId: string, email: string) => {
+  const loadUserProfile = useCallback(async (userId: string, email: string) => {
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -169,7 +105,71 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [supabase]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const resolveUser = async () => {
+      try {
+        const res = await supabase.auth.getUser();
+        if (!mounted) return;
+        const user = res?.data?.user;
+        if (user) {
+          await loadUserProfile(user.id, user.email ?? '');
+        } else {
+          setCurrentUserState(null);
+          setLoading(false);
+        }
+      } catch (err) {
+        console.warn('[AuthContext] resolveUser notice:', err);
+        if (mounted) {
+          setCurrentUserState(null);
+          setLoading(false);
+        }
+      }
+    };
+
+    resolveUser();
+
+    let subscription: { unsubscribe: () => void } | undefined;
+    try {
+      const authSubRes = supabase.auth.onAuthStateChange(async (_event, session) => {
+        if (session?.user) {
+          await loadUserProfile(session.user.id, session.user.email ?? '');
+        } else {
+          setCurrentUserState(null);
+          setLoading(false);
+        }
+      });
+      subscription = authSubRes?.data?.subscription;
+    } catch (subErr) {
+      console.warn('[AuthContext] onAuthStateChange notice:', subErr);
+    }
+
+    return () => {
+      mounted = false;
+      subscription?.unsubscribe();
+    };
+  }, [supabase, loadUserProfile]);
+
+  // Keep the current user's displayed name/role in sync with `profiles` in real time.
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const channel = supabase
+      .channel(`profile_realtime_${currentUser.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${currentUser.id}` },
+        () => {
+          loadUserProfile(currentUser.id, currentUser.email ?? '');
+        }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser?.id, currentUser?.email, supabase, loadUserProfile]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     const trimmedEmail = (email || '').trim();
@@ -198,7 +198,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (data?.session?.user) {
       await loadUserProfile(data.session.user.id, data.session.user.email ?? trimmedEmail);
     }
-  }, [supabase]);
+  }, [supabase, loadUserProfile]);
 
   const signOut = useCallback(async () => {
     try {

@@ -4,6 +4,9 @@ import { useForm } from 'react-hook-form';
 import { Worker, calcSoNgay, compareKtxNames } from '@/data/workers';
 import { X, Loader2, Save, ScanLine, CheckCircle2, Camera, AlertTriangle, AlertCircle, Check, RefreshCw } from 'lucide-react';
 import { useKtxStructure, compareDayNames } from '@/lib/ktxStructure';
+import { fetchRoomBedAvailability, RoomBedAvailability } from '@/lib/workerHierarchy';
+import { normalizeRoomLabel } from '@/lib/facilityCapacity';
+import { normalizeBedLabel } from '@/lib/bedSync';
 
 interface Props {
   worker: Worker | null;
@@ -525,7 +528,86 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
 
   const watchedCheckIn = watch('ngayVaoKTX');
   const watchedCheckOut = watch('ngayRaKTX');
+  const watchedMaNV = watch('maNV') || '';
+  const watchedCccd = watch('cccd') || '';
+  const watchedKtx = watch('ktx') || '';
+  const watchedDay = watch('day') || '';
+  const watchedPhong = watch('phongSo') || '';
+  const watchedGiuong = watch('giuong') || '';
   const previewDays = calcSoNgay(watchedCheckIn || '', watchedCheckOut || '');
+
+  // Real-time duplicate MaNV / CCCD warning against existing workers
+  const duplicateAlerts = useMemo(() => {
+    const warnings: { field: string; workerName: string; detail: string }[] = [];
+    const cleanMa = watchedMaNV.trim().toLowerCase();
+    const isPlaceholderMa = !cleanMa || ['chờ mã', 'cho ma', '-', 'n/a', 'na', '0'].includes(cleanMa);
+    const cleanCccd = watchedCccd.replace(/\s+/g, '').trim();
+
+    if (!isPlaceholderMa) {
+      const match = allWorkers.find(
+        w => w.id !== worker?.id && (w.maNV || '').trim().toLowerCase() === cleanMa
+      );
+      if (match) {
+        warnings.push({
+          field: 'Mã NV',
+          workerName: match.hoVaTen,
+          detail: `${match.ktx || 'KTX?'} · ${match.day || ''} · P.${match.phongSo || '?'}`,
+        });
+      }
+    }
+
+    if (cleanCccd.length >= 8) {
+      const match = allWorkers.find(
+        w => w.id !== worker?.id && (w.cccd || '').replace(/\s+/g, '').trim() === cleanCccd
+      );
+      if (match) {
+        warnings.push({
+          field: 'CCCD',
+          workerName: match.hoVaTen,
+          detail: `${match.ktx || 'KTX?'} · ${match.day || ''} · P.${match.phongSo || '?'}`,
+        });
+      }
+    }
+
+    return warnings;
+  }, [allWorkers, worker?.id, watchedMaNV, watchedCccd]);
+
+  // Live room bed availability for quick-pick empty beds
+  const [bedAvail, setBedAvail] = useState<RoomBedAvailability | null>(null);
+  const [loadingBeds, setLoadingBeds] = useState(false);
+
+  const roomOccupants = useMemo(() => {
+    const k = watchedKtx.trim();
+    const d = watchedDay.trim();
+    const p = normalizeRoomLabel(watchedPhong);
+    if (!k || !d || !p) return [];
+    return allWorkers.filter(
+      w => w.id !== worker?.id && w.ktx?.trim() === k && w.day?.trim() === d && normalizeRoomLabel(w.phongSo) === p
+    );
+  }, [allWorkers, worker?.id, watchedKtx, watchedDay, watchedPhong]);
+
+  useEffect(() => {
+    const k = watchedKtx.trim();
+    const d = watchedDay.trim();
+    const p = watchedPhong.trim();
+    if (!k || !d || !p) {
+      setBedAvail(null);
+      return;
+    }
+    let active = true;
+    setLoadingBeds(true);
+    fetchRoomBedAvailability(k, d, p)
+      .then(res => { if (active) setBedAvail(res); })
+      .catch(() => { if (active) setBedAvail(null); })
+      .finally(() => { if (active) setLoadingBeds(false); });
+    return () => { active = false; };
+  }, [watchedKtx, watchedDay, watchedPhong]);
+
+  const conflictingOccupant = useMemo(() => {
+    const normBed = normalizeBedLabel(watchedGiuong);
+    if (!normBed) return null;
+    return roomOccupants.find(w => normalizeBedLabel(w.giuong) === normBed) || null;
+  }, [roomOccupants, watchedGiuong]);
 
   const handleScanned = (parsed: CCCDData | null) => {
     setShowScanner(false);
@@ -586,6 +668,19 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
                   <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-okbg border border-bdr2 rounded-lg text-xs text-ok">
                     <CheckCircle2 size={13} />
                     Đã tự động điền thông tin từ CCCD
+                  </div>
+                )}
+                {duplicateAlerts.length > 0 && (
+                  <div className="mb-3 px-3 py-2 tint-wn border border-wn/40 rounded-lg text-xs text-wn space-y-1">
+                    {duplicateAlerts.map((dup, i) => (
+                      <div key={`${dup.field}-${i}`} className="flex items-start gap-1.5">
+                        <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                        <span>
+                          Trùng <strong>{dup.field}</strong> với công nhân{' '}
+                          <strong className="text-foreground">{dup.workerName}</strong> ({dup.detail})
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -673,6 +768,57 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
                     </div>
                   </div>
                 </div>
+
+                {watchedKtx.trim() && watchedDay.trim() && watchedPhong.trim() && (
+                  <div className="mt-3 rounded-lg bg-muted/40 border border-border p-2.5 text-xs space-y-1.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-muted-foreground font-medium">
+                        Phòng {normalizeRoomLabel(watchedPhong)} ({watchedKtx.trim()} · {watchedDay.trim()}): Đang ở {roomOccupants.length} người
+                      </span>
+                      {loadingBeds ? (
+                        <span className="text-muted-foreground">Đang kiểm tra giường...</span>
+                      ) : bedAvail && bedAvail.capacity > 0 ? (
+                        <span className={bedAvail.emptyBeds.length > 0 ? 'text-ok font-semibold' : 'text-dgr font-semibold'}>
+                          Trống {bedAvail.emptyBeds.length}/{bedAvail.capacity} giường
+                        </span>
+                      ) : null}
+                    </div>
+                    {conflictingOccupant && (
+                      <div className="flex items-center gap-1.5 text-wn font-medium">
+                        <AlertTriangle size={12} className="shrink-0" />
+                        <span>
+                          Giường {normalizeBedLabel(watchedGiuong)} đang có <strong>{conflictingOccupant.hoVaTen}</strong> ở.
+                        </span>
+                      </div>
+                    )}
+                    {!loadingBeds && bedAvail && bedAvail.emptyBeds.length > 0 && (
+                      <div className="flex flex-wrap gap-1 pt-0.5">
+                        {bedAvail.emptyBeds.slice(0, 14).map(b => {
+                          const selected = normalizeBedLabel(watchedGiuong) === b;
+                          return (
+                            <button
+                              key={b}
+                              type="button"
+                              onClick={() => setValue('giuong', b, { shouldDirty: true })}
+                              className={`px-2 py-0.5 rounded text-[11px] font-mono font-semibold border transition-colors ${
+                                selected
+                                  ? 'bg-primary text-primary-foreground border-primary'
+                                  : 'bg-background text-foreground border-border hover:border-primary'
+                              }`}
+                            >
+                              G.{b}
+                            </button>
+                          );
+                        })}
+                        {bedAvail.emptyBeds.length > 14 && (
+                          <span className="text-[11px] text-muted-foreground self-center">
+                            +{bedAvail.emptyBeds.length - 14} giường khác
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Tổ trưởng */}

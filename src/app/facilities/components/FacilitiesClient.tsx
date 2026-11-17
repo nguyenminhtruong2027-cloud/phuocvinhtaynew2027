@@ -1317,12 +1317,18 @@ export default function FacilitiesClient() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const { error } = await supabase.from('facilities').delete().eq('id', deleteTarget.id);
+      const deletedTarget = deleteTarget;
+      const { error } = await supabase.from('facilities').delete().eq('id', deletedTarget.id);
       if (!error) {
-        setRows(prev => prev.filter(r => r.id !== deleteTarget.id));
+        await syncBedsForFacilityRoom(supabase, {
+          ...deletedTarget,
+          giuong: 0,
+          is_visible: false,
+        });
+        setRows(prev => prev.filter(r => r.id !== deletedTarget.id));
         setSelectedIds(prev => {
           const next = new Set(prev);
-          next.delete(deleteTarget.id);
+          next.delete(deletedTarget.id);
           return next;
         });
         setDeleteTarget(null);
@@ -1445,13 +1451,22 @@ export default function FacilitiesClient() {
     if (!bulkDeleteModal || bulkDeleteModal.safeToDelete.length === 0) return;
     setBulkDeleting(true);
     try {
-      const idsToDelete = bulkDeleteModal.safeToDelete.map(r => r.id);
+      const safeRooms = bulkDeleteModal.safeToDelete;
+      const idsToDelete = safeRooms.map(r => r.id);
       const { error } = await supabase
         .from('facilities')
         .delete()
         .in('id', idsToDelete);
 
       if (error) throw new Error(error.message);
+
+      for (let i = 0; i < safeRooms.length; i += 10) {
+        await Promise.all(
+          safeRooms.slice(i, i + 10).map(r =>
+            syncBedsForFacilityRoom(supabase, { ...r, giuong: 0, is_visible: false })
+          )
+        );
+      }
 
       setRows(prev => prev.filter(r => !idsToDelete.includes(r.id)));
       setSelectedIds(prev => {

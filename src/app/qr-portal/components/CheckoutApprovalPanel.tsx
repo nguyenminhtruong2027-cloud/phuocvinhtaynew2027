@@ -5,6 +5,9 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
 import { fetchWorkerHierarchy, WorkerHierarchyData, invalidateWorkerHierarchyCache } from '@/lib/workerHierarchy';
 import { invalidateKtxStructureCache } from '@/lib/ktxStructure';
+import { releaseBedsForWorkers, normalizeBedLabel } from '@/lib/bedSync';
+import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
+import { normalizeRoomLabel } from '@/lib/facilityCapacity';
 import { toast } from 'sonner';
 import {
   CheckCircle2,
@@ -225,6 +228,7 @@ export default function CheckoutApprovalPanel({
     ktxList: [],
     daysByKtx: {},
     roomsByKtxDay: {},
+    roomCapacities: {},
     workers: [],
   });
 
@@ -363,27 +367,29 @@ export default function CheckoutApprovalPanel({
 
       if (updateErr) throw new Error(updateErr.message);
 
-      let matchedWorker: any = null;
+      const matchedWorkersMap = new Map<string, any>();
 
       if (req.ma_nv && req.ma_nv.trim()) {
         const { data: byCode } = await supabase
           .from('workers')
           .select('*')
-          .eq('ma_nv', req.ma_nv.trim())
-          .limit(1);
-        if (byCode && byCode.length > 0) matchedWorker = byCode[0];
+          .eq('ma_nv', req.ma_nv.trim());
+        (byCode || []).forEach((w: any) => {
+          if (w?.id) matchedWorkersMap.set(w.id, w);
+        });
       }
 
-      if (!matchedWorker && req.so_cccd && req.so_cccd.trim()) {
+      if (req.so_cccd && req.so_cccd.trim()) {
         const { data: byCccd } = await supabase
           .from('workers')
           .select('*')
-          .eq('cccd', req.so_cccd.trim())
-          .limit(1);
-        if (byCccd && byCccd.length > 0) matchedWorker = byCccd[0];
+          .eq('cccd', req.so_cccd.trim());
+        (byCccd || []).forEach((w: any) => {
+          if (w?.id) matchedWorkersMap.set(w.id, w);
+        });
       }
 
-      if (!matchedWorker && req.ho_va_ten && req.phong_so) {
+      if (matchedWorkersMap.size === 0 && req.ho_va_ten && req.phong_so) {
         const { data: byLocation } = await supabase
           .from('workers')
           .select('*')
@@ -391,19 +397,38 @@ export default function CheckoutApprovalPanel({
           .eq('ktx', req.ktx.trim())
           .eq('phong_so', req.phong_so.trim())
           .limit(1);
-        if (byLocation && byLocation.length > 0) matchedWorker = byLocation[0];
+        (byLocation || []).forEach((w: any) => {
+          if (w?.id) matchedWorkersMap.set(w.id, w);
+        });
       }
 
-      if (matchedWorker) {
+      const matchedWorkers = Array.from(matchedWorkersMap.values());
+      const matchedIds = matchedWorkers.map(w => String(w.id)).filter(Boolean);
+
+      if (matchedWorkers.length > 0) {
+        preserveDeletedWorkerEntries(
+          matchedWorkers.map(w => ({
+            id: String(w.id),
+            hoVaTen: w.ho_va_ten || req.ho_va_ten || '',
+            maNV: w.ma_nv || req.ma_nv || '',
+            ktx: w.ktx || req.ktx || '',
+            day: w.day || req.day || '',
+            createdAt: w.created_at || undefined,
+            ngayVaoKTX: w.ngay_vao_ktx || undefined,
+          }))
+        );
+
         try {
-          await supabase.from('worker_deletion_log').insert({
-            worker_id: matchedWorker.id,
-            ho_va_ten: matchedWorker.ho_va_ten || req.ho_va_ten,
-            ma_nv: matchedWorker.ma_nv || req.ma_nv,
-            ktx: matchedWorker.ktx || req.ktx,
-            day: matchedWorker.day || req.day,
-            deleted_at: nowStr,
-          });
+          await supabase.from('worker_deletion_log').insert(
+            matchedWorkers.map(w => ({
+              worker_id: w.id,
+              ho_va_ten: w.ho_va_ten || req.ho_va_ten,
+              ma_nv: w.ma_nv || req.ma_nv,
+              ktx: w.ktx || req.ktx,
+              day: w.day || req.day,
+              deleted_at: nowStr,
+            }))
+          );
         } catch {
           // ignore log error
         }
@@ -411,14 +436,43 @@ export default function CheckoutApprovalPanel({
         await supabase
           .from('workers')
           .delete()
-          .eq('id', matchedWorker.id);
+          .in('id', matchedIds);
+
+        await releaseBedsForWorkers(supabase, matchedIds);
       }
 
-      if (req.ma_nv && req.ma_nv.trim()) {
-        await supabase.from('workers').delete().eq('ma_nv', req.ma_nv.trim());
-      }
-      if (req.so_cccd && req.so_cccd.trim()) {
-        await supabase.from('workers').delete().eq('cccd', req.so_cccd.trim());
+      // Fallback: if the bed row was not linked by worker_id, clear matching bed slot cleanly
+      if (req.ktx && req.day && req.phong_so && req.giuong) {
+        try {
+          const normRoom = normalizeRoomLabel(req.phong_so);
+          const normBed = normalizeBedLabel(req.giuong);
+          const { data: roomBeds } = await supabase
+            .from('beds')
+            .select('id, phong_so, giuong, status')
+            .eq('ktx', req.ktx.trim())
+            .eq('day', req.day.trim())
+            .eq('status', 'occupied');
+          const fallbackIds = (roomBeds || [])
+            .filter(
+              (b: any) =>
+                normalizeRoomLabel(String(b?.phong_so ?? '')) === normRoom &&
+                normalizeBedLabel(String(b?.giuong ?? '')) === normBed
+            )
+            .map((b: any) => String(b.id));
+          if (fallbackIds.length > 0) {
+            await supabase
+              .from('beds')
+              .update({
+                status: 'empty',
+                worker_id: null,
+                ma_nv: null,
+                ho_va_ten: null,
+              })
+              .in('id', fallbackIds);
+          }
+        } catch {
+          // ignore fallback bed release error
+        }
       }
 
       setCheckouts(prev =>
