@@ -26,7 +26,7 @@ interface SpecialistItem {
   name: string;
   email?: string;
   phone?: string;
-  role: 'admin' | 'staff';
+  role: 'super_admin' | 'admin' | 'staff';
   assignedBlocks?: string[];
 }
 
@@ -50,11 +50,11 @@ ALTER TABLE public.duty_assignments ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow read duty_assignments for all" ON public.duty_assignments;
 CREATE POLICY "Allow read duty_assignments for all" ON public.duty_assignments FOR SELECT USING (true);
 DROP POLICY IF EXISTS "Allow admin to insert duty_assignments" ON public.duty_assignments;
-CREATE POLICY "Allow admin to insert duty_assignments" ON public.duty_assignments FOR INSERT TO authenticated WITH CHECK (EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
+CREATE POLICY "Allow admin to insert duty_assignments" ON public.duty_assignments FOR INSERT TO authenticated WITH CHECK (EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role IN ('super_admin', 'admin')));
 DROP POLICY IF EXISTS "Allow admin to update duty_assignments" ON public.duty_assignments;
-CREATE POLICY "Allow admin to update duty_assignments" ON public.duty_assignments FOR UPDATE TO authenticated USING (EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin')) WITH CHECK (EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
+CREATE POLICY "Allow admin to update duty_assignments" ON public.duty_assignments FOR UPDATE TO authenticated USING (EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role IN ('super_admin', 'admin'))) WITH CHECK (EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role IN ('super_admin', 'admin')));
 DROP POLICY IF EXISTS "Allow admin to delete duty_assignments" ON public.duty_assignments;
-CREATE POLICY "Allow admin to delete duty_assignments" ON public.duty_assignments FOR DELETE TO authenticated USING (EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
+CREATE POLICY "Allow admin to delete duty_assignments" ON public.duty_assignments FOR DELETE TO authenticated USING (EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role IN ('super_admin', 'admin')));
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'duty_assignments') THEN
         ALTER PUBLICATION supabase_realtime ADD TABLE public.duty_assignments;
@@ -147,7 +147,7 @@ export default function ExecutiveSpecialistsCard({
             id: p.id || `sp-${idx}`,
             name: p.full_name || p.name || p.email?.split('@')[0] || `Chuyên viên ${idx + 1}`,
             email: p.email,
-            role: (p.role === 'admin' ? 'admin' : 'staff') as 'admin' | 'staff',
+            role: (p.role === 'super_admin' ? 'super_admin' : p.role === 'admin' ? 'admin' : 'staff') as 'super_admin' | 'admin' | 'staff',
             assignedBlocks: p.assigned_blocks || [],
           }));
         }
@@ -190,7 +190,7 @@ export default function ExecutiveSpecialistsCard({
             id: p.id || `sp-${idx}`,
             name: p.full_name || p.name || p.email?.split('@')[0] || `Chuyên viên ${idx + 1}`,
             email: p.email,
-            role: (p.role === 'admin' ? 'admin' : 'staff') as 'admin' | 'staff',
+            role: (p.role === 'super_admin' ? 'super_admin' : p.role === 'admin' ? 'admin' : 'staff') as 'super_admin' | 'admin' | 'staff',
             assignedBlocks: p.assigned_blocks || [],
           }));
         }
@@ -216,7 +216,7 @@ export default function ExecutiveSpecialistsCard({
           id: p.id,
           name: p.full_name || p.email?.split('@')[0] || `Chuyên viên ${idx + 1}`,
           email: p.email || undefined,
-          role: (p.role === 'admin' ? 'admin' : 'staff') as 'admin' | 'staff',
+          role: (p.role === 'super_admin' ? 'super_admin' : p.role === 'admin' ? 'admin' : 'staff') as 'super_admin' | 'admin' | 'staff',
           assignedBlocks: Array.isArray(p.assigned_blocks) ? p.assigned_blocks : [],
         }));
         setInternalProfiles(dbList);
@@ -344,7 +344,7 @@ export default function ExecutiveSpecialistsCard({
         email: sp.email,
         phone: sp.phone,
         role: sp.role,
-        assignedBlocks: sp.role === 'admin' ? [] : (sp.assignedBlocks ?? []),
+        assignedBlocks: (sp.role === 'super_admin' || sp.role === 'admin') ? [] : (sp.assignedBlocks ?? []),
         dutyKtx: effectiveDutyKtx,
         status: isAssignedOnDuty ? 'on_duty' : 'off_duty',
       };
@@ -524,7 +524,8 @@ export default function ExecutiveSpecialistsCard({
 
   // Render a Single Specialist Card (used in modal and list views)
   const renderSpecialistItem = (sp: SpecialistWithDuty, showFullContact = true) => {
-    const isAdminUser = sp.role === 'admin';
+    const isSuperAdminUser = sp.role === 'super_admin';
+    const isAdminUser = sp.role === 'super_admin' || sp.role === 'admin';
     const isOnDuty = sp.status === 'on_duty' && sp.dutyKtx !== 'Nghỉ';
     const theme = isOnDuty ? getKtxTheme(sp.dutyKtx) : null;
 
@@ -541,7 +542,9 @@ export default function ExecutiveSpecialistsCard({
         <div className="flex items-start gap-3 min-w-0 flex-1">
           <div className="relative flex-shrink-0 mt-0.5">
             <div className={`w-10 h-10 rounded-xl border font-bold text-sm flex items-center justify-center shadow-inner ${
-              isAdminUser
+              isSuperAdminUser
+                ? 'tint-wn border-wn text-wn'
+                : isAdminUser
                 ? 'bg-pri/30 border-bdr2 text-lnk'
                 : isOnDuty
                 ? `${theme?.badgeBg}`
@@ -560,11 +563,11 @@ export default function ExecutiveSpecialistsCard({
                 {sp.name}
               </span>
               <span className={`px-2 py-0.5 rounded text-[10px] font-bold border shrink-0 ${
-                isAdminUser
-                  ? 'bg-bdg text-lnk border-bdr2'
+                isSuperAdminUser
+                  ? 'tint-wn text-wn border-wn'
                   : 'bg-bdg text-lnk border-bdr2'
               }`}>
-                {isAdminUser ? 'Quản trị viên' : 'Chuyên viên'}
+                {isSuperAdminUser ? 'Quản trị tối cao' : isAdminUser ? 'Quản trị viên' : 'Chuyên viên'}
               </span>
 
               {/* ── HIGH VISIBILITY PROMINENT KTX DUTY BADGE ── */}
@@ -892,7 +895,8 @@ export default function ExecutiveSpecialistsCard({
               </div>
             ) : (
               cardFilteredList.slice(0, 6).map((sp) => {
-                const isAdminUser = sp.role === 'admin';
+                const isSuperAdminUser = sp.role === 'super_admin';
+                const isAdminUser = sp.role === 'super_admin' || sp.role === 'admin';
                 const isOnDuty = sp.status === 'on_duty' && sp.dutyKtx !== 'Nghỉ';
                 const theme = isOnDuty ? getKtxTheme(sp.dutyKtx) : null;
 
@@ -909,7 +913,9 @@ export default function ExecutiveSpecialistsCard({
                     <div className="flex items-start gap-2.5 min-w-0 flex-1">
                       <div className="relative flex-shrink-0 mt-0.5 sm:mt-0">
                         <div className={`w-8 h-8 rounded-lg border text-xs font-bold flex items-center justify-center ${
-                          isAdminUser
+                          isSuperAdminUser
+                            ? 'tint-wn border-wn text-wn'
+                            : isAdminUser
                             ? 'bg-pri/25 border-bdr2 text-lnk'
                             : isOnDuty
                             ? `${theme?.badgeBg}`
@@ -927,7 +933,11 @@ export default function ExecutiveSpecialistsCard({
                           <span className="text-xs sm:text-sm font-bold text-tx whitespace-normal break-words leading-tight">
                             {sp.name}
                           </span>
-                          {isAdminUser ? (
+                          {isSuperAdminUser ? (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded tint-wn text-wn border border-wn font-bold shrink-0">
+                              Chủ HT
+                            </span>
+                          ) : isAdminUser ? (
                             <span className="text-[9px] px-1.5 py-0.2 rounded bg-bdg text-lnk border border-bdr2 font-semibold shrink-0">
                               Admin
                             </span>

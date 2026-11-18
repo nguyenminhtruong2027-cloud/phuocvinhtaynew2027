@@ -26,12 +26,21 @@ const INITIAL_FACILITIES: MockRow[] = [
 const INITIAL_PROFILES: MockRow[] = [
   {
     id: '00000000-0000-0000-0000-000000000001',
-    email: 'admin@ktx.vn',
-    full_name: 'Quản Trị Viên KTX',
-    role: 'admin',
-    assigned_blocks: ['KTX 1 - Dãy 1', 'KTX 1 - Dãy 2', 'KTX 1 - Dãy 3', 'KTX 2 - Dãy 1'],
+    email: 'nguyenminhtruong2027@gmail.com',
+    full_name: 'Nguyễn Minh Trường (Chủ HT)',
+    role: 'super_admin',
+    assigned_blocks: [],
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    id: '00000000-0000-0000-0000-000000000003',
+    email: 'admin@ktx.vn',
+    full_name: 'Quản Lý Điều Hành KTX',
+    role: 'admin',
+    assigned_blocks: [],
+    created_at: '2026-01-02T00:00:00.000Z',
+    updated_at: '2026-01-02T00:00:00.000Z',
   },
   {
     id: '00000000-0000-0000-0000-000000000002',
@@ -39,8 +48,8 @@ const INITIAL_PROFILES: MockRow[] = [
     full_name: 'Trần Văn Cán Bộ',
     role: 'staff',
     assigned_blocks: ['KTX 1 - Dãy 1', 'KTX 1 - Dãy 2'],
-    created_at: '2026-01-01T00:00:00.000Z',
-    updated_at: '2026-01-01T00:00:00.000Z',
+    created_at: '2026-01-03T00:00:00.000Z',
+    updated_at: '2026-01-03T00:00:00.000Z',
   },
 ];
 
@@ -620,9 +629,9 @@ export class MockChannel {
 export function createMockSupabaseClient() {
   const currentAdminUser = {
     id: '00000000-0000-0000-0000-000000000001',
-    email: 'admin@ktx.vn',
-    user_metadata: { full_name: 'Quản Trị Viên KTX' },
-    app_metadata: { role: 'admin' },
+    email: 'nguyenminhtruong2027@gmail.com',
+    user_metadata: { full_name: 'Nguyễn Minh Trường (Chủ HT)' },
+    app_metadata: { role: 'super_admin' },
     role: 'authenticated',
     aud: 'authenticated',
     created_at: '2026-01-01T00:00:00.000Z',

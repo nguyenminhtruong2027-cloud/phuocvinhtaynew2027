@@ -599,7 +599,7 @@ export default function OccupancyDashboardPage() {
   const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null);
   const [todayStats, setTodayStats] = useState<{ entered: number; left: number }>({ entered: 0, left: 0 });
   const [blockAssignments, setBlockAssignments] = useState<BlockAssignment[]>([]);
-  const [specialists, setSpecialists] = useState<{ id: string; name: string; email?: string; role: 'admin' | 'staff'; assignedBlocks?: string[] }[]>([]);
+  const [specialists, setSpecialists] = useState<{ id: string; name: string; email?: string; role: 'super_admin' | 'admin' | 'staff'; assignedBlocks?: string[] }[]>([]);
   const [dutyRoster, setDutyRoster] = useState<SpecialistWithDuty[]>([]);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [roomGenderMap, setRoomGenderMap] = useState<Record<string, 'male' | 'female' | 'auto'>>({});
@@ -787,11 +787,13 @@ export default function OccupancyDashboardPage() {
       } catch {}
 
       const assignments: BlockAssignment[] = [];
-      const listById = new Map<string, { id: string; name: string; email?: string; role: 'admin' | 'staff'; assignedBlocks?: string[] }>();
+      const listById = new Map<string, { id: string; name: string; email?: string; role: 'super_admin' | 'admin' | 'staff'; assignedBlocks?: string[] }>();
       rawProfiles.forEach((profile, idx) => {
         const id = String(profile?.id || `sp-${idx}`);
         const blocks: string[] = Array.isArray(profile?.assigned_blocks) ? profile.assigned_blocks : [];
-        if (!listById.has(id)) {
+        const resolvedRole: 'super_admin' | 'admin' | 'staff' =
+          profile?.role === 'super_admin' ? 'super_admin' : profile?.role === 'admin' ? 'admin' : 'staff';
+        if (!listById.has(id) && resolvedRole === 'staff') {
           blocks.forEach(block => {
             if (block && profile?.full_name) {
               assignments.push({ blockKey: block, staffName: profile.full_name });
@@ -802,7 +804,7 @@ export default function OccupancyDashboardPage() {
           id,
           name: profile?.full_name || profile?.name || profile?.email?.split('@')[0] || `Chuyên viên ${idx + 1}`,
           email: profile?.email,
-          role: (profile?.role === 'admin' ? 'admin' : 'staff') as 'admin' | 'staff',
+          role: resolvedRole,
           assignedBlocks: blocks,
         });
       });
@@ -1716,9 +1718,9 @@ export default function OccupancyDashboardPage() {
                                   >
                                     <span className="w-1.5 h-1.5 rounded-full bg-ok2 animate-pulse" />
                                     <span>{s.name}</span>
-                                    {s.role === 'admin' && (
+                                    {(s.role === 'super_admin' || s.role === 'admin') && (
                                       <span className="text-[9px] px-1 py-0.2 rounded bg-bdg text-lnk border border-bdr2 font-medium">
-                                        Admin
+                                        {s.role === 'super_admin' ? 'Chủ HT' : 'Admin'}
                                       </span>
                                     )}
                                   </span>

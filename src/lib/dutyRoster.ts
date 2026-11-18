@@ -18,7 +18,7 @@ export interface SpecialistWithDuty {
   name: string;
   email?: string;
   phone?: string;
-  role: 'admin' | 'staff';
+  role: 'super_admin' | 'admin' | 'staff';
   assignedBlocks: string[];
   dutyKtx: DutyKtx;
   status: 'on_duty' | 'off_duty';

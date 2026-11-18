@@ -26,21 +26,18 @@ Deno?.serve(async (req) => {
       });
     }
 
-    // Admin client with service role key - bypasses RLS entirely
     const supabaseAdmin = createClient(
       Deno?.env?.get('SUPABASE_URL') ?? '',
       Deno?.env?.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
       { auth: { autoRefreshToken: false, persistSession: false } }
     );
 
-    // Caller client to verify the requesting user
     const supabaseClient = createClient(
       Deno?.env?.get('SUPABASE_URL') ?? '',
       Deno?.env?.get('SUPABASE_ANON_KEY') ?? '',
       { global: { headers: { Authorization: authHeader } } }
     );
 
-    // Verify caller identity
     const { data: { user: callerUser }, error: callerError } = await supabaseClient?.auth?.getUser();
     if (callerError || !callerUser) {
       return new Response(JSON.stringify({ error: 'Không thể xác thực người dùng.' }), {
@@ -49,21 +46,36 @@ Deno?.serve(async (req) => {
       });
     }
 
-    // Check caller is admin using service role (bypasses RLS)
     const { data: callerProfile, error: profileCheckError } = await supabaseAdmin
       .from('profiles')
       .select('role')
       .eq('id', callerUser.id)
       .single();
 
-    if (profileCheckError || !callerProfile || callerProfile.role !== 'admin') {
-      return new Response(JSON.stringify({ error: 'Chỉ Admin mới có quyền tạo tài khoản.' }), {
+    const callerRole = callerProfile?.role;
+    if (profileCheckError || !callerRole || (callerRole !== 'super_admin' && callerRole !== 'admin')) {
+      return new Response(JSON.stringify({ error: 'Chỉ Admin hoặc Super Admin mới có quyền tạo tài khoản.' }), {
         status: 403,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     const { email, password, full_name, role, assigned_blocks } = await req?.json();
+    const targetRole = (role || 'staff') as string;
+
+    if (!['admin', 'staff'].includes(targetRole)) {
+      return new Response(JSON.stringify({ error: 'Vai trò tạo mới chỉ được phép là Admin hoặc Staff.' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (targetRole === 'admin' && callerRole !== 'super_admin') {
+      return new Response(JSON.stringify({ error: 'Chỉ Quản trị tối cao (Super Admin) mới có quyền tạo tài khoản Admin.' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     if (!email || !password || !full_name) {
       return new Response(JSON.stringify({ error: 'Vui lòng cung cấp đầy đủ email, mật khẩu và họ tên.' }), {
@@ -79,12 +91,13 @@ Deno?.serve(async (req) => {
       });
     }
 
-    // Create user in Supabase Auth using admin client
+    const effectiveBlocks = targetRole === 'admin' ? [] : (assigned_blocks ?? []);
+
     const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
       email_confirm: true,
-      user_metadata: { full_name, role: role || 'staff' },
+      user_metadata: { full_name, role: targetRole },
     });
 
     if (createError) {
@@ -108,15 +121,14 @@ Deno?.serve(async (req) => {
       });
     }
 
-    // Upsert profile using service role (bypasses RLS) - ensures profile exists even if trigger failed
     const { error: profileError } = await supabaseAdmin
       .from('profiles')
       .upsert({
         id: newUserId,
         email,
         full_name,
-        role: role || 'staff',
-        assigned_blocks: assigned_blocks ?? [],
+        role: targetRole,
+        assigned_blocks: effectiveBlocks,
       }, { onConflict: 'id' });
 
     if (profileError) {
@@ -134,8 +146,8 @@ Deno?.serve(async (req) => {
         id: newUserId,
         email,
         full_name,
-        role: role || 'staff',
-        assigned_blocks: assigned_blocks ?? [],
+        role: targetRole,
+        assigned_blocks: effectiveBlocks,
       }
     }), {
       status: 200,

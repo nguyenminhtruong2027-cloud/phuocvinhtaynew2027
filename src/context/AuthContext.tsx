@@ -2,7 +2,27 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
-export type UserRole = 'admin' | 'staff';
+export type UserRole = 'super_admin' | 'admin' | 'staff';
+
+export function isSuperAdminRole(role?: string | null): boolean {
+  return role === 'super_admin';
+}
+
+export function isAdminRole(role?: string | null): boolean {
+  return role === 'super_admin' || role === 'admin';
+}
+
+export function normalizeUserRole(role?: string | null): UserRole {
+  if (role === 'super_admin') return 'super_admin';
+  if (role === 'admin') return 'admin';
+  return 'staff';
+}
+
+export function getRoleDisplayLabel(role?: string | null): string {
+  if (role === 'super_admin') return 'Quản trị tối cao';
+  if (role === 'admin') return 'Quản trị viên';
+  return 'Chuyên viên';
+}
 
 export interface AppUser {
   id: string;
@@ -13,26 +33,42 @@ export interface AppUser {
   assignedBlocks: string[];
 }
 
+export interface AccountPermissionResult {
+  canEdit: boolean;
+  canDelete: boolean;
+  canChangeRole: boolean;
+}
+
 interface AuthContextValue {
   currentUser: AppUser | null;
   /** Convenient alias for currentUser */
   user: AppUser | null;
+  /** Tier 1: Owner / Supreme Admin */
+  isSuperAdmin: boolean;
+  /** Tier 2: Full-KTX Operational Admin (under Super Admin) */
+  isSubAdmin: boolean;
+  /** Tier 1 or Tier 2: Operational access across all KTX */
   isAdmin: boolean;
+  /** Tier 3: Block-scoped specialist */
   isStaff: boolean;
-  /** Can delete a single worker (admin + staff) */
+  /** Can delete a single worker (admin + staff within scope) */
   canDeleteSingle: boolean;
-  /** Can bulk delete multiple workers (admin only) */
+  /** Can bulk delete filtered/selected records (super_admin + admin) */
   canBulkDelete: boolean;
-  /** Can delete all workers (admin only) */
+  /** Can execute global "Delete All" wipes (super_admin only) */
   canDeleteAll: boolean;
   /** Legacy alias for canDeleteSingle */
   canDelete: boolean;
   canManageAccounts: boolean;
+  canManageAdmins: boolean;
+  canRunMigrations: boolean;
   canConfigKTX: boolean;
   /** Supabase session loading state */
   loading: boolean;
   /** Check if staff can write to a specific block */
   canWriteBlock: (blockName: string, ktxName?: string) => boolean;
+  /** Evaluate hierarchical permissions against a target account */
+  getAccountPermissions: (targetRole: UserRole, targetId?: string) => AccountPermissionResult;
   /** Supabase sign in */
   signIn: (email: string, password: string) => Promise<void>;
   /** Supabase sign out */
@@ -78,7 +114,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             id: newProfile.id,
             email: newProfile.email ?? email,
             name: newProfile.full_name ?? email.split('@')[0],
-            role: (newProfile.role as UserRole) ?? 'staff',
+            role: normalizeUserRole(newProfile.role),
             status: 'active',
             assignedBlocks: newProfile.assigned_blocks ?? [],
           });
@@ -88,7 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           id: data.id,
           email: data.email ?? email,
           name: data.full_name ?? email.split('@')[0],
-          role: (data.role as UserRole) ?? 'staff',
+          role: normalizeUserRole(data.role),
           status: 'active',
           assignedBlocks: data.assigned_blocks ?? [],
         });
@@ -210,19 +246,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setCurrentUserState(null);
   }, [supabase]);
 
-  const isAdmin = currentUser?.role === 'admin';
+  const isSuperAdmin = currentUser?.role === 'super_admin';
+  const isSubAdmin = currentUser?.role === 'admin';
+  const isAdmin = isSuperAdmin || isSubAdmin;
   const isStaff = currentUser?.role === 'staff';
   const isManager = false;
 
   const canDeleteSingle = isAdmin || isStaff;
   const canBulkDelete = isAdmin;
-  const canDeleteAll = isAdmin;
+  const canDeleteAll = isSuperAdmin;
   const canManageAccounts = isAdmin;
+  const canManageAdmins = isSuperAdmin;
+  const canRunMigrations = isSuperAdmin;
   const canConfigKTX = isAdmin;
+
+  const getAccountPermissions = useCallback(
+    (targetRole: UserRole, targetId?: string): AccountPermissionResult => {
+      if (!currentUser) {
+        return { canEdit: false, canDelete: false, canChangeRole: false };
+      }
+      const isSelf = Boolean(targetId && currentUser.id === targetId);
+
+      if (isSuperAdmin) {
+        if (targetRole === 'super_admin') {
+          return {
+            canEdit: isSelf,
+            canDelete: false,
+            canChangeRole: false,
+          };
+        }
+        return {
+          canEdit: true,
+          canDelete: !isSelf,
+          canChangeRole: true,
+        };
+      }
+
+      if (isSubAdmin) {
+        if (targetRole === 'staff') {
+          return {
+            canEdit: true,
+            canDelete: !isSelf,
+            canChangeRole: false,
+          };
+        }
+        return {
+          canEdit: false,
+          canDelete: false,
+          canChangeRole: false,
+        };
+      }
+
+      return { canEdit: false, canDelete: false, canChangeRole: false };
+    },
+    [currentUser, isSuperAdmin, isSubAdmin]
+  );
 
   /**
    * Returns true if the current user can write (add/edit/delete) workers in the given KTX + block combination.
-   * Admin can write to all blocks. Staff can only write to their assigned KTX+Block combinations.
+   * Super Admin & Admin can write to all blocks. Staff can only write to their assigned KTX+Block combinations.
    * assignedBlocks stores entries like "KTX 1 - Dãy 1", "KTX 2 - Dãy 3", etc.
    */
   const canWriteBlock = useCallback((blockName: string, ktxName?: string): boolean => {
@@ -231,19 +313,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const assigned = currentUser.assignedBlocks ?? [];
     if (assigned.length === 0) return false;
 
-    // If ktxName is provided, check the combined "KTX X - Dãy Y" format
     if (ktxName) {
       const combined = `${ktxName.trim()} - ${blockName.trim()}`;
       return assigned.some(b => b.trim().toLowerCase() === combined.toLowerCase());
     }
 
-    // Fallback: check if blockName matches any assigned block (supports both old "Dãy X" and new "KTX X - Dãy Y" formats)
     return assigned.some(b => {
       const bLower = b.trim().toLowerCase();
       const nameLower = blockName.trim().toLowerCase();
-      // Exact match (old format "Dãy 1" or new format "KTX 1 - Dãy 1")
       if (bLower === nameLower) return true;
-      // New format: check if the block part after " - " matches
       const parts = b.split(' - ');
       if (parts.length === 2 && parts[1].trim().toLowerCase() === nameLower) return true;
       return false;
@@ -287,6 +365,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider value={{
       currentUser,
       user: currentUser,
+      isSuperAdmin,
+      isSubAdmin,
       isAdmin,
       isStaff,
       isManager,
@@ -295,9 +375,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       canDeleteAll,
       canDelete: canDeleteSingle,
       canManageAccounts,
+      canManageAdmins,
+      canRunMigrations,
       canConfigKTX,
       loading,
       canWriteBlock,
+      getAccountPermissions,
       signIn,
       signOut,
       users,

@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { User, Lock, Save, CheckCircle, Shield, ShieldCheck } from 'lucide-react';
+import { User, Lock, Save, CheckCircle, Shield, ShieldCheck, Crown } from 'lucide-react';
 
 export default function ProfileClient() {
   const { currentUser, updateProfile, changePassword } = useAuth();
@@ -65,20 +65,32 @@ export default function ProfileClient() {
 
       {/* Avatar + Info Card */}
       <div className="bg-card border border-border rounded-2xl p-6 mb-6 flex items-center gap-5">
-        <div className={`w-16 h-16 rounded-full flex items-center justify-center text-white text-2xl font-bold flex-shrink-0 ${currentUser?.role === 'admin' ? 'bg-pri' : 'bg-ok2'}`}>
+        <div
+          className={`w-16 h-16 rounded-full flex items-center justify-center text-white text-2xl font-bold flex-shrink-0 ${
+            currentUser?.role === 'super_admin'
+              ? 'bg-gradient-to-tr from-amber-500 to-rose-600'
+              : currentUser?.role === 'admin'
+              ? 'bg-pri'
+              : 'bg-ok2'
+          }`}
+        >
           {currentUser?.name?.charAt(0)?.toUpperCase()}
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-lg font-bold text-foreground truncate">{currentUser?.name}</p>
           <p className="text-sm text-muted-foreground truncate">{currentUser?.email}</p>
           <div className="mt-1.5">
-            {currentUser?.role === 'admin' ? (
+            {currentUser?.role === 'super_admin' ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold tint-wn text-wn border border-wn">
+                <Crown size={11} /> Quản trị tối cao (Super Admin)
+              </span>
+            ) : currentUser?.role === 'admin' ? (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-dgrbg text-dgr">
-                <ShieldCheck size={11} /> Quản trị viên
+                <ShieldCheck size={11} /> Quản trị viên (Admin)
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-bdg text-lnk">
-                <Shield size={11} /> Quản lý
+                <Shield size={11} /> Chuyên viên (Staff)
               </span>
             )}
           </div>

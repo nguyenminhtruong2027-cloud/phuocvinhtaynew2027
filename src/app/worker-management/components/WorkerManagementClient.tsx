@@ -2011,23 +2011,28 @@ export function WorkerManagementClient() {
 
           {/* ── Action Buttons (dgr = delete only, pri = add, outline = rest) ── */}
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Đỏ xóa: Xóa bộ lọc / Xóa tất cả */}
-            {canDeleteAll && (
+            {/* Đỏ xóa: Xóa theo bộ lọc (Admin + Super Admin) / Xóa tất cả (chỉ Super Admin) */}
+            {(canBulkDelete || canDeleteAll) && (
               <>
-                <button
-                  onClick={() => setShowBulkDeleteFilter(true)}
-                  className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-dgr hover:opacity-90 text-white text-xs sm:text-sm font-semibold transition-opacity duration-100 active:opacity-85"
-                >
-                  <Filter size={15} />
-                  <span>Xóa theo bộ lọc</span>
-                </button>
-                <button
-                  onClick={() => setShowDeleteAll(true)}
-                  className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-dgr hover:opacity-90 text-white text-xs sm:text-sm font-semibold transition-opacity duration-100 active:opacity-85"
-                >
-                  <Trash2 size={15} />
-                  <span>Xóa tất cả</span>
-                </button>
+                {canBulkDelete && (
+                  <button
+                    onClick={() => setShowBulkDeleteFilter(true)}
+                    className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-dgr hover:opacity-90 text-white text-xs sm:text-sm font-semibold transition-opacity duration-100 active:opacity-85"
+                  >
+                    <Filter size={15} />
+                    <span>Xóa theo bộ lọc</span>
+                  </button>
+                )}
+                {canDeleteAll && (
+                  <button
+                    onClick={() => setShowDeleteAll(true)}
+                    title="Chỉ Quản trị tối cao (Super Admin) có quyền xóa toàn bộ danh sách công nhân"
+                    className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-dgr hover:opacity-90 text-white text-xs sm:text-sm font-semibold transition-opacity duration-100 active:opacity-85"
+                  >
+                    <Trash2 size={15} />
+                    <span>Xóa tất cả</span>
+                  </button>
+                )}
               </>
             )}
 

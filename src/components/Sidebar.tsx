@@ -77,8 +77,18 @@ export default function Sidebar() {
   if (!currentUser) return null;
 
   const displayName = currentUser.name || currentUser.email || 'Người dùng';
-  const roleLabel = currentUser.role === 'admin' ? 'Quản trị viên' : 'Chuyên viên';
-  const avatarColor = currentUser.role === 'admin' ? 'bg-gradient-to-tr from-rose-600 to-red-500' : 'bg-gradient-to-tr from-blue-600 to-indigo-600';
+  const roleLabel =
+    currentUser.role === 'super_admin'
+      ? 'Quản trị tối cao'
+      : currentUser.role === 'admin'
+      ? 'Quản trị viên'
+      : 'Chuyên viên';
+  const avatarColor =
+    currentUser.role === 'super_admin'
+      ? 'bg-gradient-to-tr from-amber-500 via-orange-500 to-rose-600'
+      : currentUser.role === 'admin'
+      ? 'bg-gradient-to-tr from-rose-600 to-red-500'
+      : 'bg-gradient-to-tr from-blue-600 to-indigo-600';
   const avatarInitial = displayName.charAt(0).toUpperCase();
 
   const NavLink = ({ item, isMobile = false }: { item: NavItem; isMobile?: boolean }) => {

@@ -3,8 +3,9 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth, UserRole } from '@/context/AuthContext';
+import { useAudit } from '@/context/AuditContext';
 import { createClient, normalizeSupabaseUrl } from '@/lib/supabase/client';
-import { UserPlus, Pencil, Trash2, Shield, ShieldCheck, RefreshCw, AlertCircle, CheckCircle, Building2, Search, KeyRound, Database, Check, Copy } from 'lucide-react';
+import { UserPlus, Pencil, Trash2, Shield, ShieldCheck, Crown, Lock, RefreshCw, AlertCircle, CheckCircle, Building2, Search, Database, Check, Copy } from 'lucide-react';
 import { useKtxStructure, KtxBlockGroup } from '@/lib/ktxStructure';
 
 interface ProfileRecord {
@@ -70,7 +71,17 @@ function saveLocalProfiles(profs: ProfileRecord[]) {
 }
 
 export default function UserManagementClient() {
-  const { isAdmin, currentUser, loading: authLoading, signIn } = useAuth();
+  const {
+    isAdmin,
+    isSuperAdmin,
+    canManageAdmins,
+    canRunMigrations,
+    getAccountPermissions,
+    currentUser,
+    loading: authLoading,
+    signOut,
+  } = useAuth();
+  const { addLog } = useAudit();
   const router = useRouter();
   const supabase = createClient();
   const { ktxGroups, reload: reloadKtxStructure } = useKtxStructure();
@@ -83,21 +94,23 @@ export default function UserManagementClient() {
   const [deleteTarget, setDeleteTarget] = useState<ProfileRecord | null>(null);
   const [form, setForm] = useState<UserFormData>(emptyForm);
   const [formError, setFormError] = useState('');
-  const [activeTab, setActiveTab] = useState<'all' | 'admin' | 'staff'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'super_admin' | 'admin' | 'staff'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [checkingMigrations, setCheckingMigrations] = useState(false);
   const [migrationStatus, setMigrationStatus] = useState<{
     entryLog: 'unknown' | 'applied' | 'missing';
     rlsLookup: 'unknown' | 'applied' | 'missing';
+    superAdminRbac: 'unknown' | 'applied' | 'missing';
     checkedAt?: string;
-  }>({ entryLog: 'unknown', rlsLookup: 'unknown' });
+  }>({ entryLog: 'unknown', rlsLookup: 'unknown', superAdminRbac: 'unknown' });
   const [copiedMigrationPath, setCopiedMigrationPath] = useState<string | null>(null);
 
   const checkDatabaseMigrations = useCallback(async () => {
     setCheckingMigrations(true);
     let entryLog: 'applied' | 'missing' = 'missing';
     let rlsLookup: 'applied' | 'missing' = 'missing';
+    let superAdminRbac: 'applied' | 'missing' = 'missing';
 
     try {
       const { error: entryErr } = await supabase.from('worker_entry_log').select('id').limit(1);
@@ -123,9 +136,21 @@ export default function UserManagementClient() {
       rlsLookup = 'missing';
     }
 
+    try {
+      const { data: rbacReady, error: rbacErr } = await supabase.rpc('check_super_admin_rbac_ready');
+      if (!rbacErr && rbacReady === true) {
+        superAdminRbac = 'applied';
+      } else {
+        superAdminRbac = 'missing';
+      }
+    } catch {
+      superAdminRbac = 'missing';
+    }
+
     setMigrationStatus({
       entryLog,
       rlsLookup,
+      superAdminRbac,
       checkedAt: new Date().toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
     });
     setCheckingMigrations(false);
@@ -198,30 +223,31 @@ export default function UserManagementClient() {
     );
   }
 
-  // Route protection with instant 1-click admin login fallback
+  // Route protection (strictly requires admin or super_admin role — no hardcoded escalation shortcut)
   if (!isAdmin) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 p-6 text-center">
         <div className="w-14 h-14 rounded-2xl bg-amber-500/15 border border-wn flex items-center justify-center text-wn">
-          <Shield size={32} />
+          <Lock size={28} />
         </div>
         <div className="space-y-1 max-w-md">
           <h2 className="text-lg font-bold text-foreground">Khu vực dành cho Quản trị viên</h2>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            Bạn đang đăng nhập với tài khoản <strong>{currentUser?.name || currentUser?.email || 'Chuyên viên'}</strong>. Chỉ tài khoản Quản trị viên (Admin) mới có quyền tạo và chỉnh sửa phân quyền tài khoản.
+            Bạn đang đăng nhập với tài khoản <strong>{currentUser?.name || currentUser?.email || 'Chuyên viên'}</strong>. Chỉ Quản trị tối cao (Super Admin) hoặc Quản trị viên (Admin) mới có quyền truy cập trang phân quyền tài khoản.
           </p>
         </div>
-        <div className="flex items-center gap-3 pt-2">
+        <div className="flex items-center gap-3 pt-2 flex-wrap justify-center">
           <button
             onClick={async () => {
               try {
-                await signIn('adminpvt@ktx.com', 'admin123');
+                await signOut();
               } catch {}
+              router.replace('/sign-up-login');
             }}
             className="btn-primary px-4 py-2 text-xs font-bold flex items-center gap-2 cursor-pointer shadow-sm"
           >
             <ShieldCheck size={16} />
-            <span>Chuyển sang quyền Quản trị viên (Admin)</span>
+            <span>Đăng nhập tài khoản Quản trị khác</span>
           </button>
           <button
             onClick={() => router.push('/')}
@@ -248,12 +274,17 @@ export default function UserManagementClient() {
 
   const openAdd = () => {
     setEditTarget(null);
-    setForm(emptyForm);
+    setForm({ ...emptyForm, role: 'staff' });
     setFormError('');
     setShowModal(true);
   };
 
   const openEdit = (profile: ProfileRecord) => {
+    const perms = getAccountPermissions(profile.role, profile.id);
+    if (!perms.canEdit) {
+      showToast('Tài khoản này thuộc cấp quản trị cao hơn hoặc ngang cấp được bảo vệ, bạn không có quyền chỉnh sửa.', 'error');
+      return;
+    }
     setEditTarget(profile);
     setForm({
       full_name: profile.full_name,
@@ -304,42 +335,75 @@ export default function UserManagementClient() {
       return;
     }
 
+    // Client-side RBAC guard before hitting database
+    const requestedRole: UserRole = editTarget
+      ? (getAccountPermissions(editTarget.role, editTarget.id).canChangeRole ? form.role : editTarget.role)
+      : (canManageAdmins ? form.role : 'staff');
+
+    if (!canManageAdmins && requestedRole !== 'staff') {
+      setFormError('Chỉ Quản trị tối cao (Super Admin) mới có quyền tạo hoặc gán tài khoản Admin.');
+      return;
+    }
+    if (editTarget) {
+      const perms = getAccountPermissions(editTarget.role, editTarget.id);
+      if (!perms.canEdit) {
+        setFormError('Bạn không có quyền chỉnh sửa tài khoản quản trị được bảo vệ.');
+        return;
+      }
+    }
+    if (requestedRole === 'super_admin' && editTarget?.role !== 'super_admin') {
+      setFormError('Không thể cấp vai trò Quản trị tối cao (Super Admin) từ giao diện.');
+      return;
+    }
+
+    const effectiveBlocks = requestedRole === 'staff' ? form.assigned_blocks : [];
+
     setSubmitting(true);
     setFormError('');
 
     try {
       if (editTarget) {
-        try {
-          await supabase
-            .from('profiles')
-            .update({
-              full_name: form.full_name,
-              role: form.role,
-              assigned_blocks: form.assigned_blocks,
-            })
-            .eq('id', editTarget.id);
-        } catch {}
+        const { error: updateErr } = await supabase
+          .from('profiles')
+          .update({
+            full_name: form.full_name.trim(),
+            role: requestedRole,
+            assigned_blocks: effectiveBlocks,
+          })
+          .eq('id', editTarget.id);
+
+        if (updateErr) {
+          setFormError(`Không thể cập nhật trên Supabase: ${updateErr.message}`);
+          return;
+        }
 
         const updatedList = profiles.map(p =>
           p.id === editTarget.id
             ? {
                 ...p,
-                full_name: form.full_name,
-                role: form.role,
-                assigned_blocks: form.assigned_blocks,
+                full_name: form.full_name.trim(),
+                role: requestedRole,
+                assigned_blocks: effectiveBlocks,
                 ...(form.password.trim() ? { password: form.password.trim() } : {}),
               }
             : p
         );
         setProfiles(updatedList);
         saveLocalProfiles(updatedList);
+        addLog(
+          currentUser?.email || 'system',
+          'UPDATE',
+          `Cập nhật tài khoản ${form.email} (${form.full_name.trim()}) → vai trò ${requestedRole}`
+        );
         setShowModal(false);
         showToast(`Đã cập nhật tài khoản ${form.full_name} thành công.`, 'success');
       } else {
-        let createdInDb = false;
+        let createdUserId: string | null = null;
+        let edgeError: string | null = null;
+
         try {
           const { data: { session } } = await supabase.auth.getSession();
-          if (session) {
+          if (session && session.access_token !== 'mock-access-token-ktx') {
             const supabaseUrl = normalizeSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
             const response = await fetch(`${supabaseUrl}/functions/v1/create-user`, {
               method: 'POST',
@@ -351,42 +415,58 @@ export default function UserManagementClient() {
                 email: form.email.trim(),
                 password: form.password,
                 full_name: form.full_name.trim(),
-                role: form.role,
-                assigned_blocks: form.assigned_blocks,
+                role: requestedRole,
+                assigned_blocks: effectiveBlocks,
               }),
             });
             const result = await response.json();
             if (response.ok && !result.error) {
-              createdInDb = true;
+              createdUserId = result.user?.id || null;
+            } else if (result?.error) {
+              edgeError = result.error;
             }
           }
-        } catch {}
+        } catch {
+          // Offline or Edge Function unreachable — fall back to profile record below
+        }
+
+        if (edgeError) {
+          setFormError(edgeError);
+          return;
+        }
 
         const newRecord: ProfileRecord = {
-          id: `user-${Date.now()}`,
+          id: createdUserId || `user-${Date.now()}`,
           email: form.email.trim(),
           full_name: form.full_name.trim(),
-          role: form.role,
-          assigned_blocks: form.assigned_blocks,
+          role: requestedRole,
+          assigned_blocks: effectiveBlocks,
           password: form.password.trim(),
           created_at: new Date().toISOString(),
         };
 
-        if (!createdInDb) {
-          try {
-            await supabase.from('profiles').insert({
-              id: newRecord.id,
-              email: newRecord.email,
-              full_name: newRecord.full_name,
-              role: newRecord.role,
-              assigned_blocks: newRecord.assigned_blocks,
-            });
-          } catch {}
+        if (!createdUserId) {
+          const { error: insertErr } = await supabase.from('profiles').insert({
+            id: newRecord.id,
+            email: newRecord.email,
+            full_name: newRecord.full_name,
+            role: newRecord.role,
+            assigned_blocks: newRecord.assigned_blocks,
+          });
+          if (insertErr) {
+            setFormError(`Không thể lưu tài khoản: ${insertErr.message}`);
+            return;
+          }
         }
 
         const nextProfiles = [newRecord, ...profiles];
         setProfiles(nextProfiles);
         saveLocalProfiles(nextProfiles);
+        addLog(
+          currentUser?.email || 'system',
+          'CREATE',
+          `Tạo tài khoản mới ${newRecord.email} (${newRecord.full_name}) với vai trò ${requestedRole}`
+        );
         setShowModal(false);
         showToast(`Đã tạo tài khoản ${form.full_name} (${form.email}) thành công!`, 'success');
       }
@@ -399,13 +479,22 @@ export default function UserManagementClient() {
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
+    const perms = getAccountPermissions(deleteTarget.role, deleteTarget.id);
+    if (!perms.canDelete) {
+      showToast('Bạn không có quyền xóa tài khoản này.', 'error');
+      setDeleteTarget(null);
+      return;
+    }
+
     setSubmitting(true);
     try {
+      let edgeError: string | null = null;
+      let deletedInEdge = false;
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
+        if (session && session.access_token !== 'mock-access-token-ktx') {
           const supabaseUrl = normalizeSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
-          await fetch(`${supabaseUrl}/functions/v1/delete-user`, {
+          const response = await fetch(`${supabaseUrl}/functions/v1/delete-user`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -413,18 +502,38 @@ export default function UserManagementClient() {
             },
             body: JSON.stringify({ user_id: deleteTarget.id }),
           });
+          const resJson = await response.json().catch(() => ({}));
+          if (response.ok) {
+            deletedInEdge = true;
+          } else if (response.status !== 404 && resJson?.error) {
+            edgeError = resJson.error;
+          }
         }
       } catch {}
 
-      try {
-        await supabase.from('profiles').delete().eq('id', deleteTarget.id);
-      } catch {}
+      if (edgeError) {
+        showToast(edgeError, 'error');
+        return;
+      }
+
+      if (!deletedInEdge) {
+        const { error: delErr } = await supabase.from('profiles').delete().eq('id', deleteTarget.id);
+        if (delErr) {
+          showToast(`Không thể xóa tài khoản: ${delErr.message}`, 'error');
+          return;
+        }
+      }
 
       const nextProfiles = profiles.filter(p => p.id !== deleteTarget.id);
       setProfiles(nextProfiles);
       saveLocalProfiles(nextProfiles);
-      setDeleteTarget(null);
+      addLog(
+        currentUser?.email || 'system',
+        'DELETE',
+        `Xóa tài khoản ${deleteTarget.email} (${deleteTarget.full_name}, vai trò ${deleteTarget.role})`
+      );
       showToast(`Đã xóa tài khoản ${deleteTarget.full_name} thành công.`, 'success');
+      setDeleteTarget(null);
     } catch (err) {
       showToast(`Lỗi kết nối: ${err instanceof Error ? err.message : 'Không xác định'}`, 'error');
     } finally {
@@ -581,22 +690,60 @@ export default function UserManagementClient() {
         </div>
       </div>
 
+      {/* Tier Authority Summary Banner */}
+      <div className={`rounded-2xl border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+        isSuperAdmin ? 'tint-wn border-wn/50' : 'bg-bdg/60 border-bdr2'
+      }`}>
+        <div className="flex items-start gap-3">
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+            isSuperAdmin ? 'bg-amber-500/20 text-wn' : 'bg-pri/20 text-lnk'
+          }`}>
+            {isSuperAdmin ? <Crown size={20} /> : <ShieldCheck size={20} />}
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-foreground">
+              {isSuperAdmin
+                ? 'Cấp 1 — Quản trị tối cao (Super Admin)'
+                : 'Cấp 2 — Quản trị viên vận hành (Admin)'}
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+              {isSuperAdmin
+                ? 'Toàn quyền hệ thống: tạo/sửa/xóa tài khoản Admin và Staff, thực hiện thao tác xóa toàn bộ dữ liệu lớn, và được bảo vệ tuyệt đối trước các cấp thấp hơn.'
+                : 'Toàn quyền vận hành KTX và quản lý tài khoản Staff. Tài khoản Super Admin và các Admin khác được bảo vệ, không thể chỉnh sửa hoặc xóa từ cấp này.'}
+            </p>
+          </div>
+        </div>
+        <span className={`px-3 py-1 rounded-full text-[11px] font-bold border shrink-0 self-start sm:self-center ${
+          isSuperAdmin ? 'tint-wn text-wn border-wn' : 'bg-card text-lnk border-bdr2'
+        }`}>
+          {isSuperAdmin ? 'Quản lý Admin + Staff' : 'Chỉ quản lý Staff'}
+        </span>
+      </div>
+
       {/* Main Card */}
       <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
         {/* Filter Tabs and Search Bar */}
         <div className="px-6 pt-3 pb-2 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3 overflow-x-auto">
             <button
               onClick={() => setActiveTab('all')}
-              className={`pb-2.5 text-xs font-bold border-b-2 transition-colors cursor-pointer ${
+              className={`pb-2.5 text-xs font-bold border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
                 activeTab === 'all' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
               Tất cả ({profiles.length})
             </button>
             <button
+              onClick={() => setActiveTab('super_admin')}
+              className={`pb-2.5 text-xs font-bold border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
+                activeTab === 'super_admin' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Chủ HT ({profiles.filter(p => p.role === 'super_admin').length})
+            </button>
+            <button
               onClick={() => setActiveTab('admin')}
-              className={`pb-2.5 text-xs font-bold border-b-2 transition-colors cursor-pointer ${
+              className={`pb-2.5 text-xs font-bold border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
                 activeTab === 'admin' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
@@ -604,7 +751,7 @@ export default function UserManagementClient() {
             </button>
             <button
               onClick={() => setActiveTab('staff')}
-              className={`pb-2.5 text-xs font-bold border-b-2 transition-colors cursor-pointer ${
+              className={`pb-2.5 text-xs font-bold border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
                 activeTab === 'staff' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
@@ -645,10 +792,10 @@ export default function UserManagementClient() {
                 <tr>
                   <th className="px-4 py-3">Họ và tên</th>
                   <th className="px-4 py-3">Email</th>
-                  <th className="px-4 py-3">Vai trò</th>
+                  <th className="px-4 py-3">Cấp phân quyền</th>
                   <th className="px-4 py-3">KTX + Dãy phụ trách</th>
                   <th className="px-4 py-3">Ngày tạo</th>
-                  <th className="px-4 py-3 w-20">Thao tác</th>
+                  <th className="px-4 py-3 w-28">Thao tác</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -659,56 +806,86 @@ export default function UserManagementClient() {
                     </td>
                   </tr>
                 ) : (
-                  filteredProfiles.map((profile) => (
-                    <tr key={profile.id} className="hover:bg-muted/30 transition-colors">
-                      <td className="px-4 py-3 font-semibold text-foreground whitespace-normal break-words">
-                        {profile.full_name || '—'}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs font-mono">
-                        {profile.email}
-                      </td>
-                      <td className="px-4 py-3">
-                        {profile.role === 'admin' ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-dgrbg text-dgr">
-                            <ShieldCheck size={11} /> Admin
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-bdg text-lnk">
-                            <Shield size={11} /> Staff
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        {profile.role === 'admin' ? (
-                          <span className="text-xs text-muted-foreground italic font-medium">Toàn bộ KTX</span>
-                        ) : (
-                          renderAssignedBlocks(profile.assigned_blocks)
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs">
-                        {profile.created_at ? new Date(profile.created_at).toLocaleDateString('vi-VN') : '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => openEdit(profile)}
-                            title="Sửa tài khoản"
-                            className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground cursor-pointer"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                          <button
-                            onClick={() => setDeleteTarget(profile)}
-                            title="Xóa tài khoản"
-                            disabled={profile.id === currentUser?.id}
-                            className="p-1.5 rounded-lg hover:bg-dgrbg transition-colors text-muted-foreground hover:text-dgr disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                  filteredProfiles.map((profile) => {
+                    const perms = getAccountPermissions(profile.role, profile.id);
+                    const isSelf = profile.id === currentUser?.id;
+
+                    return (
+                      <tr key={profile.id} className="hover:bg-muted/30 transition-colors">
+                        <td className="px-4 py-3 font-semibold text-foreground whitespace-normal break-words">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span>{profile.full_name || '—'}</span>
+                            {isSelf && (
+                              <span className="text-[10px] px-1.5 py-0.2 rounded bg-muted text-muted-foreground font-semibold">
+                                Bạn
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground text-xs font-mono">
+                          {profile.email}
+                        </td>
+                        <td className="px-4 py-3">
+                          {profile.role === 'super_admin' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold tint-wn text-wn border border-wn">
+                              <Crown size={11} /> Chủ HT (Super Admin)
+                            </span>
+                          ) : profile.role === 'admin' ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-dgrbg text-dgr">
+                              <ShieldCheck size={11} /> Admin
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-bdg text-lnk">
+                              <Shield size={11} /> Staff
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {profile.role === 'super_admin' ? (
+                            <span className="text-xs text-wn font-medium">Toàn quyền hệ thống • Toàn bộ KTX</span>
+                          ) : profile.role === 'admin' ? (
+                            <span className="text-xs text-muted-foreground italic font-medium">Toàn bộ KTX (Vận hành)</span>
+                          ) : (
+                            renderAssignedBlocks(profile.assigned_blocks)
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground text-xs">
+                          {profile.created_at ? new Date(profile.created_at).toLocaleDateString('vi-VN') : '—'}
+                        </td>
+                        <td className="px-4 py-3">
+                          {!perms.canEdit && !perms.canDelete ? (
+                            <span
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-muted/60 text-muted-foreground text-[11px] font-medium"
+                              title="Tài khoản được bảo vệ bởi phân cấp quản trị"
+                            >
+                              <Lock size={11} /> Được bảo vệ
+                            </span>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              {perms.canEdit && (
+                                <button
+                                  onClick={() => openEdit(profile)}
+                                  title="Sửa tài khoản"
+                                  className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground cursor-pointer"
+                                >
+                                  <Pencil size={14} />
+                                </button>
+                              )}
+                              {perms.canDelete && (
+                                <button
+                                  onClick={() => setDeleteTarget(profile)}
+                                  title="Xóa tài khoản"
+                                  className="p-1.5 rounded-lg hover:bg-dgrbg transition-colors text-muted-foreground hover:text-dgr cursor-pointer"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -726,22 +903,28 @@ export default function UserManagementClient() {
             <div>
               <h2 className="text-sm font-bold text-foreground">Trạng thái nâng cấp Database (SQL Migrations)</h2>
               <p className="text-xs text-muted-foreground">
-                Kiểm tra 2 bản vá SQL trong thư mục <code className="px-1 py-0.5 rounded bg-muted">supabase/migrations/</code> đã được chạy trên Supabase hay chưa
+                Kiểm tra 3 bản vá SQL trong thư mục <code className="px-1 py-0.5 rounded bg-muted">supabase/migrations/</code> đã được chạy trên Supabase hay chưa
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={checkDatabaseMigrations}
-            disabled={checkingMigrations}
-            className="btn-secondary text-xs flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
-          >
-            <RefreshCw size={13} className={checkingMigrations ? 'animate-spin' : ''} />
-            <span>{checkingMigrations ? 'Đang kiểm tra...' : 'Kiểm tra kết nối Migration'}</span>
-          </button>
+          {canRunMigrations ? (
+            <button
+              type="button"
+              onClick={checkDatabaseMigrations}
+              disabled={checkingMigrations}
+              className="btn-secondary text-xs flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+            >
+              <RefreshCw size={13} className={checkingMigrations ? 'animate-spin' : ''} />
+              <span>{checkingMigrations ? 'Đang kiểm tra...' : 'Kiểm tra kết nối Migration'}</span>
+            </button>
+          ) : (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-muted text-muted-foreground text-[11px] font-medium self-start sm:self-auto">
+              <Lock size={12} /> Dành riêng cho Super Admin kiểm tra
+            </span>
+          )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {[
             {
               file: 'supabase/migrations/20261116000000_create_worker_entry_log.sql',
@@ -752,6 +935,11 @@ export default function UserManagementClient() {
               file: 'supabase/migrations/20261116010000_harden_rls_policies.sql',
               title: 'Siết RLS & hàm tra cứu QR (lookup_worker_qr)',
               status: migrationStatus.rlsLookup,
+            },
+            {
+              file: 'supabase/migrations/20261117000000_add_super_admin_rbac.sql',
+              title: 'Phân quyền 3 cấp (Super Admin > Admin > Staff)',
+              status: migrationStatus.superAdminRbac,
             },
           ].map(item => (
             <div key={item.file} className="p-3.5 rounded-xl border border-border bg-muted/20 flex flex-col gap-2">
@@ -794,7 +982,9 @@ export default function UserManagementClient() {
         {migrationStatus.checkedAt && (
           <p className="text-[11px] text-muted-foreground">
             Lần kiểm tra gần nhất: <span className="font-tabular">{migrationStatus.checkedAt}</span>
-            {(migrationStatus.entryLog === 'missing' || migrationStatus.rlsLookup === 'missing') &&
+            {(migrationStatus.entryLog === 'missing' ||
+              migrationStatus.rlsLookup === 'missing' ||
+              migrationStatus.superAdminRbac === 'missing') &&
               ' — Mở Supabase Dashboard → SQL Editor và chạy các file được đánh dấu "Chưa chạy SQL" để bật đầy đủ tính năng.'}
           </p>
         )}
@@ -862,15 +1052,31 @@ export default function UserManagementClient() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-muted-foreground mb-1">Vai trò</label>
-                <select
-                  className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer"
-                  value={form.role}
-                  onChange={e => setForm(f => ({ ...f, role: e.target.value as UserRole }))}
-                >
-                  <option value="staff">Staff (Bảo vệ / Quản lý dãy)</option>
-                  <option value="admin">Admin (Toàn quyền quản trị)</option>
-                </select>
+                <label className="block text-xs font-semibold text-muted-foreground mb-1">Vai trò phân quyền</label>
+                {editTarget?.role === 'super_admin' ? (
+                  <div className="w-full border border-wn/60 tint-wn rounded-lg px-3 py-2 text-sm font-bold text-wn flex items-center gap-2">
+                    <Crown size={14} />
+                    <span>Quản trị tối cao (Super Admin — Bất khả xâm phạm)</span>
+                  </div>
+                ) : !canManageAdmins ? (
+                  <div className="space-y-1">
+                    <div className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-muted/40 text-foreground font-medium">
+                      Staff (Bảo vệ / Chuyên viên phụ trách dãy)
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Chỉ Quản trị tối cao (Super Admin) mới có quyền tạo hoặc thay đổi vai trò Admin.
+                    </p>
+                  </div>
+                ) : (
+                  <select
+                    className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer"
+                    value={form.role}
+                    onChange={e => setForm(f => ({ ...f, role: e.target.value as UserRole }))}
+                  >
+                    <option value="staff">Staff (Chuyên viên / Quản lý dãy)</option>
+                    <option value="admin">Admin (Quản lý vận hành toàn KTX — dưới quyền Super Admin)</option>
+                  </select>
+                )}
               </div>
 
               {/* Dynamic Assigned Blocks Section — grouped by all dynamic KTXs */}

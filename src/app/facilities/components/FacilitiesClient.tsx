@@ -805,7 +805,7 @@ function AddRoomModal({ activeKtx, ktxOptions, existingRows, onSave, onClose, sa
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function FacilitiesClient() {
-  const { isAdmin, canWriteBlock, currentUser } = useAuth();
+  const { isAdmin, canDeleteAll, canWriteBlock, currentUser } = useAuth();
   const [rows, setRows] = useState<FacilityRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeKtx, setActiveKtx] = useState<string>('');
@@ -1427,10 +1427,10 @@ export default function FacilitiesClient() {
     });
   }, [sortedRows, selectedIds, canWriteFacility, checkRoomsOccupancy]);
 
-  // Request deletion of all rooms in active view/tab
+  // Request deletion of all rooms in active view/tab (Super Admin only)
   const handleRequestDeleteAll = useCallback(async () => {
-    if (!isAdmin) {
-      toast.error('Chỉ Quản trị viên (Admin) mới có quyền xóa toàn bộ danh mục.');
+    if (!canDeleteAll) {
+      toast.error('Chỉ Quản trị tối cao (Super Admin) mới có quyền xóa toàn bộ danh mục.');
       return;
     }
     if (sortedRows.length === 0) return;
@@ -1444,7 +1444,7 @@ export default function FacilitiesClient() {
       totalWorkers: result.totalWorkers,
       safeToDelete: result.safeToDelete,
     });
-  }, [isAdmin, sortedRows, checkRoomsOccupancy]);
+  }, [canDeleteAll, sortedRows, checkRoomsOccupancy]);
 
   // Confirm and execute bulk deletion
   const handleConfirmBulkDelete = useCallback(async () => {
@@ -1597,7 +1597,7 @@ export default function FacilitiesClient() {
             <Download size={15} />
             Xuất Excel
           </button>
-          {isAdmin && (
+          {canDeleteAll && (
             <button
               onClick={handleRequestDeleteAll}
               disabled={loading || sortedRows.length === 0 || deleting}
@@ -1839,16 +1839,18 @@ export default function FacilitiesClient() {
                     <span>Chọn tất cả</span>
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={handleRequestDeleteAll}
-                  disabled={!isAdmin || sortedRows.length === 0}
-                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs border border-rose-500/30 text-rose-400 hover:bg-rose-500/10 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  title={isAdmin ? 'Xóa toàn bộ danh mục phòng hiển thị' : 'Chỉ Admin mới có quyền xóa toàn bộ'}
-                >
-                  <Trash2 size={13} />
-                  <span>Xóa hết ({sortedRows.length})</span>
-                </button>
+                {canDeleteAll && (
+                  <button
+                    type="button"
+                    onClick={handleRequestDeleteAll}
+                    disabled={sortedRows.length === 0}
+                    className="flex items-center gap-1.5 px-2.5 py-1 text-xs border border-rose-500/30 text-rose-400 hover:bg-rose-500/10 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Chỉ Quản trị tối cao (Super Admin) có quyền xóa toàn bộ danh mục"
+                  >
+                    <Trash2 size={13} />
+                    <span>Xóa hết ({sortedRows.length})</span>
+                  </button>
+                )}
               </>
             )}
           </div>
