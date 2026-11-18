@@ -302,7 +302,7 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
                   type="button"
                   disabled={busy || !selBed}
                   onClick={confirmTransfer}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-pri hover:opacity-90 text-tx text-sm font-extrabold disabled:opacity-50 transition-colors"
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-pri hover:opacity-90 text-white text-sm font-extrabold disabled:opacity-50 transition-colors"
                 >
                   {busy ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />} ✓ Xác nhận chuyển giường
                 </button>

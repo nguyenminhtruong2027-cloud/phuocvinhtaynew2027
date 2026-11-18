@@ -394,7 +394,7 @@ export default function RoomDrawer({
                 disabled={savingGender || !canEditRoomGender}
                 className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed ${
                   selectedGender === 'male'
-                    ? 'bg-pri text-tx border-pri2 shadow-md shadow-sh ring-1 ring-pri2'
+                    ? 'bg-pri text-white border-pri2 shadow-md shadow-sh ring-1 ring-pri2'
                     : 'bg-act/80 text-mu border-bdr hover:bg-act hover:text-tx'
                 }`}
               >
@@ -408,7 +408,7 @@ export default function RoomDrawer({
                 disabled={savingGender || !canEditRoomGender}
                 className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed ${
                   selectedGender === 'female'
-                    ? 'bg-pri text-tx border-bdr2 shadow-md shadow-pink-600/30 ring-1 ring-pink-400'
+                    ? 'bg-pri text-white border-bdr2 shadow-md shadow-pink-600/30 ring-1 ring-pink-400'
                     : 'bg-act/80 text-mu border-bdr hover:bg-act hover:text-tx'
                 }`}
               >
@@ -467,7 +467,7 @@ export default function RoomDrawer({
               <button
                 onClick={handleSaveRoomNote}
                 disabled={savingNote || loadingNote}
-                className="flex-shrink-0 px-3.5 py-1.5 rounded-lg bg-wn hover:opacity-90 text-[#0B0F17] text-xs font-semibold transition-colors disabled:opacity-50 shadow-md"
+                className="flex-shrink-0 px-3.5 py-1.5 rounded-lg bg-wn hover:opacity-90 text-wn-fg text-xs font-semibold transition-colors disabled:opacity-50 shadow-md"
               >
                 {savingNote ? 'Đang lưu...' : 'Lưu ghi chú'}
               </button>

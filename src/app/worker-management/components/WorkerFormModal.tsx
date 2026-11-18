@@ -229,7 +229,7 @@ function CCCDOCRScanner({
               </div>
               <button
                 onClick={handleCapture}
-                className="w-full py-2.5 bg-wn hover:opacity-90 text-[#0B0F17] rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2"
+                className="w-full py-2.5 bg-wn hover:opacity-90 text-wn-fg rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2"
               >
                 <Camera size={15} />
                 Chụp ảnh CCCD
@@ -317,7 +317,7 @@ function CCCDOCRScanner({
                 </button>
                 <button
                   onClick={handleConfirm}
-                  className="flex-1 py-2 bg-ok2 hover:opacity-90 text-[#0B0F17] rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-1.5"
+                  className="flex-1 py-2 bg-ok2 hover:opacity-90 text-ok2-fg rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-1.5"
                 >
                   <Check size={13} />
                   Xác nhận đúng

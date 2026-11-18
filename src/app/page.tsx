@@ -336,7 +336,7 @@ function RoomTooltip({
 }) {
   return (
     <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 bg-act border border-bdr text-tx rounded-xl shadow-2xl p-3 text-xs">
-      <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-gray-800">
+      <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-bdr">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="font-bold text-tx">Phòng {room}</span>
           {genderInfo && (
@@ -378,7 +378,7 @@ function RoomTooltip({
           })}
         </ul>
       )}
-      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-bdr" />
     </div>
   );
 }
@@ -483,7 +483,7 @@ function HeatmapRoomCell({
                 onClick={e => e.stopPropagation()}
                 className="absolute right-0 top-full mt-1 z-50 w-36 rounded-xl bg-act border border-bdr shadow-2xl p-1 space-y-1 backdrop-blur-md"
               >
-                <div className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-mu border-b border-gray-800 pb-0.5 mb-0.5">
+                <div className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-mu border-b border-bdr pb-0.5 mb-0.5">
                   Đổi công năng {roomLabel}
                 </div>
                 <button
@@ -582,7 +582,7 @@ function BlockTitle({
           {buildingWorkerCount}/{totalCap} · {Math.round(occupancyPct * 100)}% đầy
         </span>
       </div>
-      <div className="w-full h-1.5 sm:h-2 bg-gray-700/80 rounded-full overflow-hidden">
+      <div className="w-full h-1.5 sm:h-2 bg-bdr rounded-full overflow-hidden">
         <div className={`h-full rounded-full transition-all duration-300 ${barColor}`} style={{ width: `${Math.min(occupancyPct * 100, 100)}%` }} />
       </div>
     </div>
@@ -1038,35 +1038,32 @@ export default function OccupancyDashboardPage() {
   return (
     <AppLayout>
       <div className="min-h-screen bg-page text-tx transition-colors duration-200">
-        <div className="px-2.5 sm:px-6 lg:px-8 xl:px-10 py-3.5 sm:py-7 max-w-screen-2xl mx-auto space-y-4 sm:space-y-6 w-full overflow-hidden">
+        <div className="px-2.5 sm:px-6 lg:px-8 xl:px-10 py-3 sm:py-5 max-w-screen-2xl mx-auto space-y-4 sm:space-y-5 w-full overflow-hidden">
 
-          {/* ── 1. Header & Long Global Search Bar on Top Right ── */}
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 pb-3 sm:pb-4 border-b border-bdr w-full">
+          {/* ── 1. Compact Header & Global Search Bar ── */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 sm:gap-3 pb-3 border-b border-bdr w-full">
             {/* Title Section */}
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 p-0.5 shadow-lg shadow-blue-500/20 shrink-0">
-                <div className="w-full h-full bg-act rounded-[14px] flex items-center justify-center">
-                  <Building size={20} className="text-lnk sm:w-[22px] sm:h-[22px]" />
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 p-0.5 shadow-md shadow-blue-500/20 shrink-0">
+                <div className="w-full h-full bg-act rounded-[10px] flex items-center justify-center">
+                  <Building size={18} className="text-lnk" />
                 </div>
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h1 className="text-lg sm:text-2xl font-extrabold text-tx tracking-tight whitespace-nowrap">
+                  <h1 className="text-base sm:text-xl font-extrabold text-tx tracking-tight whitespace-nowrap">
                     KÝ TÚC XÁ PHƯỚC VĨNH TÂY
                   </h1>
-                  <span className="inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-0.5 rounded-full text-[11px] sm:text-xs font-bold bg-okbg text-ok border border-ok-30 whitespace-nowrap">
-                    <span className="w-1.5 sm:w-2 h-1.5 sm:h-2 rounded-full bg-ok2 animate-pulse" />
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-okbg text-ok border border-ok-30 whitespace-nowrap">
+                    <span className="w-1.5 h-1.5 rounded-full bg-ok2 animate-pulse" />
                     Thời Gian Thực
                   </span>
                 </div>
-                <p className="text-xs sm:text-sm text-mu mt-0.5 truncate">
-                  Trung tâm dữ liệu và quản trị vận hành ký túc xá
-                </p>
               </div>
             </div>
 
             {/* Long Search Bar in Header */}
-            <div className="flex-1 max-w-xl lg:mx-4">
+            <div className="flex-1 max-w-xl lg:mx-3">
               <GlobalSearchBar
                 onSelectWorker={(id) => {
                   const w = workers.find(x => x.id === id);
@@ -1077,14 +1074,8 @@ export default function OccupancyDashboardPage() {
               />
             </div>
 
-            {/* Status & KTX Selection Filter */}
-            <div className="flex items-center gap-3 flex-wrap">
-              <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-act text-mu text-xs font-semibold border border-bdr">
-                <Wifi size={13} className="text-ok animate-pulse" />
-                Supabase Connected
-              </span>
-
-              {/* KTX Selector Dropdown */}
+            {/* KTX Selection Filter */}
+            <div className="flex items-center gap-2.5 flex-wrap">
               {!isEmpty && allKTX.length > 0 && (
                 <div className="relative">
                   <select
@@ -1112,7 +1103,7 @@ export default function OccupancyDashboardPage() {
               <UserPlus size={16} />
               <span>Xếp phòng nhanh</span>
               {missingData > 0 && (
-                <span className="bg-white/20 text-tx text-xs font-bold rounded-full px-2 py-0.5 leading-none">
+                <span className="bg-white/20 text-white text-xs font-bold rounded-full px-2 py-0.5 leading-none">
                   {missingData}
                 </span>
               )}
@@ -1205,7 +1196,7 @@ export default function OccupancyDashboardPage() {
                     <span className="text-mu font-medium">Tiến độ lấp đầy:</span>
                     <span className="text-ok font-bold font-tabular">{kpiFillRate}% công suất</span>
                   </div>
-                  <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                  <div className="w-full h-1.5 bg-bdr rounded-full overflow-hidden">
                     <div
                       className={`h-full rounded-full transition-all duration-500 ${
                         kpiFillRate > 100 ? 'bg-dgr' : kpiFillRate >= 90 ? 'bg-wn' : 'bg-ok2'
@@ -1397,7 +1388,7 @@ export default function OccupancyDashboardPage() {
                       </div>
 
                       {/* Visual mini ratio bar for male rooms vs female rooms */}
-                      <div className="w-full h-1.5 bg-gray-700/80 rounded-full overflow-hidden flex mt-2">
+                      <div className="w-full h-1.5 bg-bdr rounded-full overflow-hidden flex mt-2">
                         {stat.totalRooms > 0 ? (
                           <>
                             <div
@@ -1419,7 +1410,7 @@ export default function OccupancyDashboardPage() {
                             )}
                           </>
                         ) : (
-                          <div className="h-full w-full bg-gray-650/40 text-center" title="Chưa có dữ liệu phòng" />
+                          <div className="h-full w-full bg-bdr/60 text-center" title="Chưa có dữ liệu phòng" />
                         )}
                       </div>
                     </div>
@@ -1541,7 +1532,7 @@ export default function OccupancyDashboardPage() {
                     onClick={() => setRoomFilterMode('empty')}
                     className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
                       roomFilterMode === 'empty'
-                        ? 'bg-gray-600 text-white shadow-sm'
+                        ? 'bg-mu text-white shadow-sm'
                         : 'text-mu hover:text-tx'
                     }`}
                   >
@@ -1606,7 +1597,7 @@ export default function OccupancyDashboardPage() {
                   { label: 'Còn trống', dot: 'bg-ok2', badge: 'bg-okbg border-bdr2 text-ok' },
                   { label: 'Đầy 100%', dot: 'bg-wn', badge: 'tint-wn border-wn text-wn' },
                   { label: 'Quá tải (>10)', dot: 'bg-dgr', badge: 'tint-dgr border-dgr text-dgr' },
-                  { label: 'Trống (0)', dot: 'bg-gray-400', badge: 'bg-act border-bdr text-mu' },
+                  { label: 'Trống (0)', dot: 'bg-mu', badge: 'bg-act border-bdr text-mu' },
                 ].map(leg => (
                   <div key={leg.label} className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg border text-[11px] font-medium ${leg.badge}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${leg.dot}`} />
@@ -1638,11 +1629,21 @@ export default function OccupancyDashboardPage() {
             )}
 
             {loading && (
-              <div className="flex items-center justify-center py-16">
-                <div className="flex flex-col items-center gap-3">
-                  <div className="w-8 h-8 border-2 border-pri2 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-sm text-mu">Đang đồng bộ dữ liệu phòng từ Supabase...</p>
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 py-2">
+                {[1, 2, 3].map(i => (
+                  <div key={i} className="rounded-2xl bg-act border border-bdr p-4 space-y-3">
+                    <div className="flex justify-between items-center">
+                      <div className="h-4 w-24 rounded-md skeleton-pulse" />
+                      <div className="h-3 w-16 rounded-md skeleton-pulse" />
+                    </div>
+                    <div className="h-1.5 w-full rounded-full skeleton-pulse" />
+                    <div className="grid grid-cols-3 gap-2">
+                      {[1, 2, 3, 4, 5, 6].map(c => (
+                        <div key={c} className="h-12 rounded-lg skeleton-pulse" />
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
 
@@ -1701,7 +1702,7 @@ export default function OccupancyDashboardPage() {
                   return (
                     <div key={ktx} className="p-3.5 sm:p-4 rounded-xl bg-act/50 border border-bdr overflow-x-auto w-full scrollbar-thin">
                       {/* KTX Title + Dynamic Daily Duty Personnel Info */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3.5 pb-2.5 border-b border-gray-800">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3.5 pb-2.5 border-b border-bdr">
                         <div className="flex items-center gap-2.5 flex-wrap">
                           <span className={`text-xs font-bold px-3 py-1 rounded-lg border ${
                             ktx === 'KTX 1'
@@ -1804,7 +1805,7 @@ export default function OccupancyDashboardPage() {
                           }
 
                           return (
-                            <div key={building} className="rounded-2xl bg-act border border-gray-800/90 p-3 sm:p-4 flex flex-col justify-start shadow-md hover:border-bdr/80 transition-all h-auto self-start">
+                            <div key={building} className="rounded-2xl bg-act border border-bdr2 p-3 sm:p-4 flex flex-col justify-start shadow-md hover:border-bdr3 transition-all h-auto self-start">
                               <BlockTitle
                                 ktx={ktx}
                                 building={building}

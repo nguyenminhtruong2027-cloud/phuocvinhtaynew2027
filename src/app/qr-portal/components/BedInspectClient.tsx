@@ -538,7 +538,7 @@ export default function BedInspectClient() {
                           type="button"
                           disabled={busy}
                           onClick={confirmPresence}
-                          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-ok2 hover:bg-ok2 text-tx text-sm font-extrabold transition-colors disabled:opacity-50"
+                          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-ok2 hover:opacity-90 text-ok2-fg text-sm font-extrabold transition-colors disabled:opacity-50"
                         >
                           {busy ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />} ✓ Xác nhận có mặt
                         </button>
@@ -546,7 +546,7 @@ export default function BedInspectClient() {
                           type="button"
                           disabled={busy}
                           onClick={() => setShowTransfer(true)}
-                          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-pri hover:opacity-90 text-tx text-sm font-extrabold transition-colors disabled:opacity-50"
+                          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-pri hover:opacity-90 text-white text-sm font-extrabold transition-colors disabled:opacity-50"
                         >
                           {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowRightLeft size={15} />} ⇄ Chuyển / Đổi Giường
                         </button>
@@ -554,7 +554,7 @@ export default function BedInspectClient() {
                           type="button"
                           disabled={busy}
                           onClick={() => setBedStatus('maintenance')}
-                          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-wn hover:bg-wn text-[#0B0F17] text-sm font-extrabold transition-colors disabled:opacity-50"
+                          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-wn hover:opacity-90 text-wn-fg text-sm font-extrabold transition-colors disabled:opacity-50"
                         >
                           {busy ? <Loader2 size={15} className="animate-spin" /> : <Wrench size={15} />} 🔧 Báo hỏng / Bảo trì
                         </button>
@@ -562,7 +562,7 @@ export default function BedInspectClient() {
                           type="button"
                           disabled={busy}
                           onClick={requestCheckout}
-                          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-dgr hover:bg-dgr text-tx text-sm font-extrabold transition-colors disabled:opacity-50"
+                          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-dgr hover:opacity-90 text-white text-sm font-extrabold transition-colors disabled:opacity-50"
                         >
                           {busy ? <Loader2 size={15} className="animate-spin" /> : <DoorOpen size={15} />} 🚪 Check-out
                         </button>
@@ -573,7 +573,7 @@ export default function BedInspectClient() {
                         type="button"
                         disabled={busy}
                         onClick={() => setBedStatus('empty')}
-                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-ok2 hover:bg-ok2 text-tx text-sm font-extrabold disabled:opacity-50"
+                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-ok2 hover:opacity-90 text-ok2-fg text-sm font-extrabold disabled:opacity-50"
                       >
                         {busy ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />} ✓ Hoàn tất bảo trì
                       </button>
@@ -584,7 +584,7 @@ export default function BedInspectClient() {
                             type="button"
                             disabled={busy}
                             onClick={() => { setShowAssign(true); setAssignSearch(''); }}
-                            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-pri hover:bg-pri2 text-tx text-sm font-extrabold transition-colors disabled:opacity-50"
+                            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-pri hover:bg-pri2 text-white text-sm font-extrabold transition-colors disabled:opacity-50"
                           >
                             {busy ? <Loader2 size={15} className="animate-spin" /> : <UserCheck size={15} />} ＋ Gán Nhanh Công Nhân
                           </button>
@@ -592,7 +592,7 @@ export default function BedInspectClient() {
                             type="button"
                             disabled={busy}
                             onClick={() => setBedStatus('maintenance')}
-                            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-wn hover:bg-wn text-[#0B0F17] text-sm font-extrabold transition-colors disabled:opacity-50"
+                            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-wn hover:opacity-90 text-wn-fg text-sm font-extrabold transition-colors disabled:opacity-50"
                           >
                             {busy ? <Loader2 size={15} className="animate-spin" /> : <Wrench size={15} />} 🔧 Báo hỏng / Bảo trì
                           </button>

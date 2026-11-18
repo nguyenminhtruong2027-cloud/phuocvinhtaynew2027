@@ -675,38 +675,53 @@ export default function ReportDashboard() {
 
   if (workersLoading) {
     return (
-      <div className="min-h-screen bg-page text-mu p-12 flex flex-col items-center justify-center gap-3">
-        <div className="w-9 h-9 border-2 border-ok2 border-t-transparent rounded-full animate-spin" />
-        <p className="text-sm font-medium animate-pulse">Đang đồng bộ dữ liệu biến động từ Supabase...</p>
+      <div className="min-h-screen bg-page text-tx">
+        <div className="px-3 sm:px-6 lg:px-8 xl:px-10 py-4 sm:py-5 max-w-screen-2xl mx-auto space-y-5">
+          <div className="flex items-center justify-between pb-3 border-b border-bdr">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl skeleton-pulse" />
+              <div className="h-6 w-48 rounded-lg skeleton-pulse" />
+            </div>
+            <div className="flex gap-2">
+              <div className="h-9 w-36 rounded-xl skeleton-pulse" />
+              <div className="h-9 w-28 rounded-xl skeleton-pulse" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map(i => (
+              <div key={i} className="h-24 rounded-2xl border border-bdr bg-surf p-4 space-y-2">
+                <div className="h-3 w-24 rounded skeleton-pulse" />
+                <div className="h-7 w-16 rounded skeleton-pulse" />
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="h-72 rounded-2xl border border-bdr bg-surf p-4 skeleton-pulse" />
+            <div className="h-72 rounded-2xl border border-bdr bg-surf p-4 skeleton-pulse" />
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-page text-tx">
-      <div className="px-3 sm:px-6 lg:px-8 xl:px-10 py-5 sm:py-7 max-w-screen-2xl mx-auto space-y-6">
+      <div className="px-3 sm:px-6 lg:px-8 xl:px-10 py-4 sm:py-5 max-w-screen-2xl mx-auto space-y-5">
 
-        {/* ── Global Header with Unified Subtitle ── */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-bdr">
-          <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 p-0.5 shadow-lg shadow-emerald-500/20 flex-shrink-0">
-              <div className="w-full h-full bg-act rounded-[14px] flex items-center justify-center">
-                <BarChart2 size={22} className="text-ok" />
-              </div>
+        {/* ── Compact Module Header ── */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-bdr">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-bdg border border-bdr2 flex items-center justify-center flex-shrink-0">
+              <BarChart2 size={18} className="text-pri2" />
             </div>
-            <div>
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <h1 className="text-xl sm:text-2xl font-extrabold text-tx tracking-tight">
-                  KÝ TÚC XÁ PHƯỚC VĨNH TÂY
-                </h1>
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-okbg text-ok border border-bdr2">
-                  <span className="w-2 h-2 rounded-full bg-ok2 animate-pulse" />
-                  Báo Cáo Biến Động
-                </span>
-              </div>
-              <p className="text-xs sm:text-sm text-mu mt-0.5">
-                Trung tâm dữ liệu và quản trị vận hành ký túc xá
-              </p>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h1 className="text-lg sm:text-xl font-extrabold text-tx tracking-tight">
+                Báo Cáo & Biến Động
+              </h1>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-okbg text-ok border border-bdr2">
+                <span className="w-1.5 h-1.5 rounded-full bg-ok2 animate-pulse" />
+                Thời gian thực
+              </span>
             </div>
           </div>
 
@@ -716,7 +731,7 @@ export default function ReportDashboard() {
               <button
                 onClick={handleExportOverview}
                 disabled={filtered.length === 0}
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-ok2 hover:opacity-90 text-xs font-bold text-white transition-all shadow-md disabled:opacity-50"
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-pri hover:bg-pri2 text-xs font-bold text-white transition-all shadow-md disabled:opacity-50"
                 title="Xuất Excel gồm 2 sheet: Tổng hợp theo KTX và Chi tiết công nhân theo bộ lọc"
               >
                 <Download size={13} />
@@ -727,7 +742,7 @@ export default function ReportDashboard() {
               <button
                 onClick={handleExportFluctuation}
                 disabled={flLoading || filteredDailyData.length === 0}
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-ok2 hover:opacity-90 text-xs font-bold text-white transition-all shadow-md disabled:opacity-50"
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-pri hover:bg-pri2 text-xs font-bold text-white transition-all shadow-md disabled:opacity-50"
                 title="Xuất Excel gồm 2 sheet: Tổng hợp theo ngày và Chi tiết từng công nhân vào/ra"
               >
                 <Download size={13} />
@@ -744,9 +759,9 @@ export default function ReportDashboard() {
                 }
               }}
               disabled={flLoading || workersRefreshing}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-act border border-bdr hover:bg-gray-700 text-xs font-semibold text-tx transition-colors disabled:opacity-60"
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-act border border-bdr hover:bg-surf text-xs font-semibold text-tx transition-colors disabled:opacity-60"
             >
-              <RefreshCw size={13} className={flLoading || workersRefreshing ? 'animate-spin text-ok' : 'text-mu'} />
+              <RefreshCw size={13} className={flLoading || workersRefreshing ? 'animate-spin text-pri2' : 'text-mu'} />
               <span>Làm mới số liệu</span>
             </button>
           </div>
@@ -789,7 +804,7 @@ export default function ReportDashboard() {
                   <select
                     value={filters.gender}
                     onChange={e => set('gender', e.target.value)}
-                    className="w-full bg-act border border-bdr rounded-xl px-3 py-2 text-xs font-semibold text-tx focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                    className="w-full bg-act border border-bdr rounded-xl px-3 py-2 text-xs font-semibold text-tx focus:outline-none focus:ring-2 focus:ring-pri2/50"
                   >
                     <option value="all">Tất cả</option>
                     <option value="male">Nam</option>
@@ -802,7 +817,7 @@ export default function ReportDashboard() {
                   <select
                     value={filters.unit}
                     onChange={e => set('unit', e.target.value)}
-                    className="w-full bg-act border border-bdr rounded-xl px-3 py-2 text-xs font-semibold text-tx focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                    className="w-full bg-act border border-bdr rounded-xl px-3 py-2 text-xs font-semibold text-tx focus:outline-none focus:ring-2 focus:ring-pri2/50"
                   >
                     <option value="all">Tất cả</option>
                     <option value="xd">XD</option>
@@ -817,7 +832,7 @@ export default function ReportDashboard() {
                   <select
                     value={filters.tamTru}
                     onChange={e => set('tamTru', e.target.value)}
-                    className="w-full bg-act border border-bdr rounded-xl px-3 py-2 text-xs font-semibold text-tx focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                    className="w-full bg-act border border-bdr rounded-xl px-3 py-2 text-xs font-semibold text-tx focus:outline-none focus:ring-2 focus:ring-pri2/50"
                   >
                     <option value="all">Tất cả</option>
                     <option value="registered">Đã ĐK tạm trú</option>
@@ -831,7 +846,7 @@ export default function ReportDashboard() {
                   <select
                     value={filters.ktx}
                     onChange={e => { setFilters(prev => ({ ...prev, ktx: e.target.value as KtxFilter, building: '', room: '' })); }}
-                    className="w-full bg-act border border-bdr rounded-xl px-3 py-2 text-xs font-semibold text-tx focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                    className="w-full bg-act border border-bdr rounded-xl px-3 py-2 text-xs font-semibold text-tx focus:outline-none focus:ring-2 focus:ring-pri2/50"
                   >
                     <option value="all">Tất cả KTX</option>
                     {activeKtxList.map(k => (
@@ -845,7 +860,7 @@ export default function ReportDashboard() {
                   <select
                     value={filters.building}
                     onChange={e => { setFilters(prev => ({ ...prev, building: e.target.value, room: '' })); }}
-                    className="w-full bg-act border border-bdr rounded-xl px-3 py-2 text-xs font-semibold text-tx focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                    className="w-full bg-act border border-bdr rounded-xl px-3 py-2 text-xs font-semibold text-tx focus:outline-none focus:ring-2 focus:ring-pri2/50"
                   >
                     <option value="">Tất cả dãy</option>
                     {buildingList.map(b => <option key={b} value={b}>{b}</option>)}
@@ -857,7 +872,7 @@ export default function ReportDashboard() {
                   <select
                     value={filters.room}
                     onChange={e => set('room', e.target.value)}
-                    className="w-full bg-act border border-bdr rounded-xl px-3 py-2 text-xs font-semibold text-tx focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                    className="w-full bg-act border border-bdr rounded-xl px-3 py-2 text-xs font-semibold text-tx focus:outline-none focus:ring-2 focus:ring-pri2/50"
                   >
                     <option value="">Tất cả phòng</option>
                     {roomList.map(r => <option key={r} value={r}>Phòng {r}</option>)}
@@ -1130,7 +1145,7 @@ export default function ReportDashboard() {
                     onClick={() => applyQuickRange(1)}
                     className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
                       flFilter.dateFrom === getVNDateString() && flFilter.dateTo === getVNDateString()
-                        ? 'bg-ok2 text-tx border-ok2'
+                        ? 'bg-pri text-white border-pri2'
                         : 'bg-act text-mu hover:text-tx border-bdr'
                     }`}
                   >
@@ -1140,7 +1155,7 @@ export default function ReportDashboard() {
                     onClick={() => applyQuickRange(7)}
                     className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
                       flFilter.dateFrom === getDefaultVNDateRange(7).from && flFilter.dateTo === getDefaultVNDateRange(7).to
-                        ? 'bg-ok2 text-tx border-ok2'
+                        ? 'bg-pri text-white border-pri2'
                         : 'bg-act text-mu hover:text-tx border-bdr'
                     }`}
                   >
@@ -1150,7 +1165,7 @@ export default function ReportDashboard() {
                     onClick={() => applyQuickRange(30)}
                     className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
                       flFilter.dateFrom === getDefaultVNDateRange(30).from && flFilter.dateTo === getDefaultVNDateRange(30).to
-                        ? 'bg-ok2 text-tx border-ok2'
+                        ? 'bg-pri text-white border-pri2'
                         : 'bg-act text-mu hover:text-tx border-bdr'
                     }`}
                   >
@@ -1175,7 +1190,7 @@ export default function ReportDashboard() {
                     type="date"
                     value={flFilter.dateFrom}
                     onChange={e => setFlFilter(prev => ({ ...prev, dateFrom: e.target.value }))}
-                    className="bg-act border border-bdr text-gray-100 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                    className="bg-act border border-bdr text-tx rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50"
                   />
                 </div>
 
@@ -1186,7 +1201,7 @@ export default function ReportDashboard() {
                     type="date"
                     value={flFilter.dateTo}
                     onChange={e => setFlFilter(prev => ({ ...prev, dateTo: e.target.value }))}
-                    className="bg-act border border-bdr text-gray-100 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                    className="bg-act border border-bdr text-tx rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50"
                   />
                 </div>
 
@@ -1196,7 +1211,7 @@ export default function ReportDashboard() {
                   <select
                     value={flFilter.ktx}
                     onChange={e => setFlFilter(prev => ({ ...prev, ktx: e.target.value, day: '' }))}
-                    className="bg-act border border-bdr text-gray-100 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                    className="bg-act border border-bdr text-tx rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50"
                   >
                     <option value="">Tất cả KTX</option>
                     {flKtxOptions.map(k => (
@@ -1211,7 +1226,7 @@ export default function ReportDashboard() {
                   <select
                     value={flFilter.day}
                     onChange={e => setFlFilter(prev => ({ ...prev, day: e.target.value }))}
-                    className="bg-act border border-bdr text-gray-100 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                    className="bg-act border border-bdr text-tx rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50"
                   >
                     <option value="">Tất cả dãy</option>
                     {flBuildings.map(b => <option key={b} value={b}>{b}</option>)}
@@ -1224,7 +1239,7 @@ export default function ReportDashboard() {
                   <select
                     value={flFilter.type}
                     onChange={e => setFlFilter(prev => ({ ...prev, type: e.target.value as FluctuationType }))}
-                    className="bg-act border border-bdr text-gray-100 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+                    className="bg-act border border-bdr text-tx rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50"
                   >
                     <option value="all">Tất cả loại</option>
                     <option value="tang">Thực tế tăng</option>
@@ -1239,7 +1254,7 @@ export default function ReportDashboard() {
                   <button
                     onClick={() => fetchFluctuation()}
                     disabled={flLoading}
-                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-tx text-xs font-bold rounded-xl transition-all shadow-md shadow-emerald-500/20 disabled:opacity-60"
+                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-pri hover:bg-pri2 text-white text-xs font-bold rounded-xl transition-all shadow-md disabled:opacity-60"
                   >
                     <RefreshCw size={13} className={flLoading ? 'animate-spin' : ''} />
                     <span>{flLoading ? 'Đang tải...' : 'Cập nhật'}</span>
@@ -1256,7 +1271,7 @@ export default function ReportDashboard() {
                       onClick={() => setFlFilter(prev => ({ ...prev, cutoffMode: 'realtime' }))}
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                         flFilter.cutoffMode === 'realtime'
-                          ? 'bg-ok2 text-tx shadow-sm'
+                          ? 'bg-pri text-white shadow-sm'
                           : 'text-mu hover:text-tx'
                       }`}
                     >
@@ -1266,7 +1281,7 @@ export default function ReportDashboard() {
                       onClick={() => setFlFilter(prev => ({ ...prev, cutoffMode: '14h' }))}
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                         flFilter.cutoffMode === '14h'
-                          ? 'bg-wn text-tx shadow-sm'
+                          ? 'bg-wn text-wn-fg shadow-sm'
                           : 'text-mu hover:text-tx'
                       }`}
                     >

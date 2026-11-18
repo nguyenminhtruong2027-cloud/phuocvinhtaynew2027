@@ -566,7 +566,7 @@ function DetailModal({
                             onClick={() => setEditForm(prev => ({ ...prev, giuong: b }))}
                             className={`px-2 py-0.5 rounded text-[11px] font-mono font-semibold border transition-colors cursor-pointer ${
                               selected
-                                ? 'bg-wn text-[#0B0F17] border-wn'
+                                ? 'bg-wn text-wn-fg border-wn'
                                 : 'bg-surf text-tx border-bdr hover:border-wn'
                             }`}
                           >
@@ -661,7 +661,7 @@ function DetailModal({
                   type="button"
                   onClick={handleApproveSubmit}
                   disabled={isProcessing}
-                  className="flex-1 py-2 px-3 bg-ok2 hover:opacity-90 text-tx rounded text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer text-center"
+                  className="flex-1 py-2 px-3 bg-ok2 hover:opacity-90 text-ok2-fg rounded text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer text-center"
                 >
                   {isProcessing ? <Loader2 size={13} className="animate-spin inline mr-1" /> : <CheckCircle2 size={13} className="inline mr-1" />}
                   Duyệt hồ sơ (Lưu bản chỉnh sửa)
@@ -1558,7 +1558,7 @@ export default function QRPortalClient() {
                               <button
                                 onClick={() => handleApprove(reg)}
                                 disabled={isProcessing}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-ok2 hover:opacity-90 text-tx rounded text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-ok2 hover:opacity-90 text-ok2-fg rounded text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
                                 title="Duyệt hồ sơ ngay"
                               >
                                 {isProcessing ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}

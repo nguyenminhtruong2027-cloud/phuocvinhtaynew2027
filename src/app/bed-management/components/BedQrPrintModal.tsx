@@ -258,7 +258,7 @@ export default function BedQrPrintModal({ open, onClose, lockedBed = null }: Pro
               <button
                 onClick={handlePrintLabels}
                 disabled={printing || labelBeds.length === 0}
-                className="ml-auto flex items-center gap-2 px-4 py-2.5 rounded-xl bg-pri2 hover:bg-pri2 text-[#0B0F17] text-sm font-extrabold transition-colors disabled:opacity-50"
+                className="ml-auto flex items-center gap-2 px-4 py-2.5 rounded-xl bg-pri hover:bg-pri2 text-white text-sm font-extrabold transition-colors disabled:opacity-50"
                 title="In tem QR 5×8 cm"
               >
                 {printing ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />}
@@ -273,7 +273,7 @@ export default function BedQrPrintModal({ open, onClose, lockedBed = null }: Pro
               <button
                 onClick={handlePrintLabels}
                 disabled={printing}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-pri2 hover:bg-pri2 text-[#0B0F17] text-sm font-extrabold transition-colors disabled:opacity-50"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-pri hover:bg-pri2 text-white text-sm font-extrabold transition-colors disabled:opacity-50"
               >
                 {printing ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />}
                 {printing ? 'Đang tạo tem...' : 'In ngay (5×8 cm)'}

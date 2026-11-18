@@ -103,7 +103,7 @@ export default function QRPortalTabsWrapper() {
                   {t.icon}
                   <span>{t.label}</span>
                   {t.badge !== undefined && t.badge > 0 && (
-                    <span className="ml-1 px-1.5 py-0.5 rounded text-[11px] font-bold bg-dgr text-tx">
+                    <span className="ml-1 px-1.5 py-0.5 rounded text-[11px] font-bold bg-dgr text-white">
                       {t.badge}
                     </span>
                   )}

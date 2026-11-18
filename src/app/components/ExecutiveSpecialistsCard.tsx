@@ -84,7 +84,7 @@ function getKtxTheme(ktxName: string) {
     return {
       name: ktxName,
       badgeBg: 'bg-bdg text-wn border-bdr2 shadow-sm font-bold',
-      activeTab: 'bg-wn text-[#0B0F17] shadow-md border-bdr3 font-extrabold',
+      activeTab: 'bg-wn text-wn-fg shadow-md border-bdr3 font-extrabold',
       headerBg: 'bg-act border-bdr2 text-wn',
       sectionBg: 'bg-act border-bdr',
       accentColor: 'text-wn',
@@ -93,14 +93,14 @@ function getKtxTheme(ktxName: string) {
       borderGlow: 'hover:border-wn',
       ringColor: 'ring-wn',
       chipBg: 'tint-wn text-wn border-bdr2',
-      solidBadge: 'bg-wn text-[#0B0F17] shadow-sm font-bold',
+      solidBadge: 'bg-wn text-wn-fg shadow-sm font-bold',
     };
   }
   if (norm.includes('3') || norm === 'KTX 3') {
     return {
       name: ktxName,
       badgeBg: 'bg-okbg text-ok border-bdr2 shadow-sm font-bold',
-      activeTab: 'bg-ok2 text-[#0B0F17] shadow-md border-bdr3 font-extrabold',
+      activeTab: 'bg-ok2 text-ok2-fg shadow-md border-bdr3 font-extrabold',
       headerBg: 'bg-okbg border-bdr2 text-ok',
       sectionBg: 'bg-okbg border-bdr',
       accentColor: 'text-ok',
@@ -109,7 +109,7 @@ function getKtxTheme(ktxName: string) {
       borderGlow: 'hover:border-ok2',
       ringColor: 'ring-ok2',
       chipBg: 'bg-okbg text-ok border-bdr2',
-      solidBadge: 'bg-ok2 text-[#0B0F17] shadow-sm font-bold',
+      solidBadge: 'bg-ok2 text-ok2-fg shadow-sm font-bold',
     };
   }
   return {
@@ -1080,7 +1080,7 @@ export default function ExecutiveSpecialistsCard({
                 </div>
                 <button
                   onClick={() => setShowSqlModal(true)}
-                  className="px-2.5 py-1 rounded-lg bg-wn text-[#0B0F17] hover:opacity-90 font-bold text-xs border border-wn shrink-0 cursor-pointer transition-colors"
+                  className="px-2.5 py-1 rounded-lg bg-wn text-wn-fg hover:opacity-90 font-bold text-xs border border-wn shrink-0 cursor-pointer transition-colors"
                 >
                   Lấy mã SQL
                 </button>
@@ -1253,7 +1253,7 @@ export default function ExecutiveSpecialistsCard({
                   {isAdmin && activeFilter !== 'all' && activeFilter !== 'off_duty' && (
                     <button
                       onClick={() => handleBatchDuty(activeFilter)}
-                      className="mt-3 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-pri hover:bg-pri2 text-tx text-xs font-bold transition-colors cursor-pointer shadow-md shadow-sh"
+                      className="mt-3 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-pri hover:bg-pri2 text-white text-xs font-bold transition-colors cursor-pointer shadow-md shadow-sh"
                     >
                       <UserPlus size={14} />
                       <span>Phân công tất cả trực {activeFilter}</span>
@@ -1367,7 +1367,7 @@ export default function ExecutiveSpecialistsCard({
 
                 <button
                   onClick={() => setShowModal(false)}
-                  className="flex-1 sm:flex-initial inline-flex items-center justify-center px-4 py-1.5 rounded-xl bg-pri hover:bg-pri2 text-tx text-xs font-bold shadow-md shadow-sh transition-colors cursor-pointer"
+                  className="flex-1 sm:flex-initial inline-flex items-center justify-center px-4 py-1.5 rounded-xl bg-pri hover:bg-pri2 text-white text-xs font-bold shadow-md shadow-sh transition-colors cursor-pointer"
                 >
                   Đóng
                 </button>
@@ -1400,7 +1400,7 @@ export default function ExecutiveSpecialistsCard({
 
             <div className="p-4 sm:p-5 space-y-3 overflow-y-auto">
               <div className="relative">
-                <pre className="p-3 bg-gray-950 border border-bdr rounded-xl text-[11px] sm:text-xs text-ok font-mono overflow-x-auto whitespace-pre leading-relaxed max-h-[50vh]">
+                <pre className="p-3 bg-page border border-bdr rounded-xl text-[11px] sm:text-xs text-ok font-mono overflow-x-auto whitespace-pre leading-relaxed max-h-[50vh]">
                   {SQL_SNIPPET}
                 </pre>
                 <button
@@ -1423,7 +1423,7 @@ export default function ExecutiveSpecialistsCard({
             <div className="px-5 py-3 border-t border-bdr bg-act/90 flex justify-end gap-2">
               <button
                 onClick={handleCopySql}
-                className="px-4 py-1.5 rounded-xl bg-wn hover:opacity-90 text-[#0B0F17] text-xs font-bold transition-colors cursor-pointer"
+                className="px-4 py-1.5 rounded-xl bg-wn hover:opacity-90 text-wn-fg text-xs font-bold transition-colors cursor-pointer"
               >
                 {copiedSql ? 'Đã sao chép!' : 'Sao chép mã SQL'}
               </button>

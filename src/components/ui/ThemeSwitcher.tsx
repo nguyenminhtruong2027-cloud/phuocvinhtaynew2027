@@ -1,62 +1,66 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { Moon, Sun } from 'lucide-react';
 
-const THEMES: { id: string; name: string; swatch: string }[] = [
-  { id: 'midnight', name: 'Midnight', swatch: '#3B66F0' },
-  { id: 'emerald', name: 'Emerald', swatch: '#34D399' },
-  { id: 'violet', name: 'Violet', swatch: '#A78BFA' },
-  { id: 'ocean', name: 'Ocean', swatch: '#38BDF8' },
-  { id: 'light', name: 'Light Corporate', swatch: '#F4F6FB' },
-  { id: 'sunrise', name: 'Sunrise Light', swatch: '#EA580C' },
-];
+type ThemeMode = 'midnight' | 'light';
+
+interface ThemeSwitcherProps {
+  compact?: boolean;
+  showLabel?: boolean;
+}
 
 /**
- * ThemeSwitcher — 6 swatch chọn theme (lưu localStorage 'ktx-theme').
- * Chỉ trình bày: đọc/ghi data-theme trên <html>, không đụng logic nghiệp vụ.
+ * ThemeSwitcher — Nút chuyển nhanh Tối (Midnight) / Sáng (Light), lưu localStorage 'ktx-theme'.
  */
-export default function ThemeSwitcher() {
-  const [theme, setTheme] = useState<string>('midnight');
+export default function ThemeSwitcher({ compact = false, showLabel = true }: ThemeSwitcherProps) {
+  const [theme, setTheme] = useState<ThemeMode>('midnight');
 
   useEffect(() => {
     const current = document.documentElement.getAttribute('data-theme');
-    if (current) setTheme(current);
+    setTheme(current === 'light' ? 'light' : 'midnight');
   }, []);
 
-  const apply = (t: string) => {
+  const toggle = () => {
+    const next: ThemeMode = theme === 'light' ? 'midnight' : 'light';
     try {
-      localStorage.setItem('ktx-theme', t);
+      localStorage.setItem('ktx-theme', next);
     } catch {}
-    document.documentElement.setAttribute('data-theme', t);
-    setTheme(t);
+    document.documentElement.setAttribute('data-theme', next);
+    setTheme(next);
   };
 
+  const isLight = theme === 'light';
+  const label = isLight ? 'Chế độ Tối' : 'Chế độ Sáng';
+
+  if (compact) {
+    return (
+      <button
+        type="button"
+        onClick={toggle}
+        title={label}
+        aria-label={label}
+        className="p-2 rounded-xl text-nav hover:text-tx hover:bg-act transition-colors duration-100"
+      >
+        {isLight ? <Moon size={17} /> : <Sun size={17} />}
+      </button>
+    );
+  }
+
   return (
-    <div
-      className="flex items-center gap-1.5 rounded-xl border border-bdr bg-surf px-2 py-1.5 shadow-card"
-      role="group"
-      aria-label="Chọn theme giao diện"
+    <button
+      type="button"
+      onClick={toggle}
+      title={label}
+      aria-label={label}
+      className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-nav hover:text-tx hover:bg-act transition-colors duration-100"
     >
-      {THEMES.map(t => {
-        const active = theme === t.id;
-        return (
-          <button
-            key={t.id}
-            type="button"
-            title={t.name}
-            aria-label={`Theme ${t.name}`}
-            aria-pressed={active}
-            onClick={() => apply(t.id)}
-            className="h-5 w-5 rounded-full border transition-transform duration-200 hover:scale-110"
-            style={{
-              backgroundColor: t.swatch,
-              borderColor: 'var(--bdr3)',
-              boxShadow: active ? '0 0 0 2px var(--pri2)' : 'none',
-              opacity: active ? 1 : 0.75,
-            }}
-          />
-        );
-      })}
-    </div>
+      {isLight ? (
+        <Moon size={16} className="text-ic flex-shrink-0" />
+      ) : (
+        <Sun size={16} className="text-ic flex-shrink-0" />
+      )}
+      {showLabel && <span className="truncate">{label}</span>}
+    </button>
   );
 }

@@ -847,7 +847,7 @@ export default function AttendancePortalClient() {
 
       {/* New check-in flash notification */}
       {newCheckInFlash && (
-        <div className="flex items-center gap-3 px-4 py-3 bg-ok2 text-tx rounded-xl shadow-lg animate-pulse">
+        <div className="flex items-center gap-3 px-4 py-3 bg-ok2 text-ok2-fg rounded-xl shadow-lg animate-pulse">
           <BellRing size={18} className="flex-shrink-0" />
           <span className="text-sm font-semibold">✓ Có công nhân vừa điểm danh thành công!</span>
         </div>
@@ -999,7 +999,7 @@ export default function AttendancePortalClient() {
                 </div>
               ) : (
                 <button onClick={handleOpenSession} disabled={openingSession || !selectedDate}
-                  className="flex items-center gap-2 px-4 py-2 bg-ok2 text-tx rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-60 transition-colors">
+                  className="flex items-center gap-2 px-4 py-2 bg-ok2 text-ok2-fg rounded-lg text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-colors">
                   {openingSession ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
                   Mở phiên điểm danh
                 </button>
@@ -1029,7 +1029,7 @@ export default function AttendancePortalClient() {
                       </span>
                       {s.is_active ? (
                         <button onClick={e => { e.stopPropagation(); setActiveSession(s); handleCloseSession(); }} disabled={closingSession}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-dgr text-tx rounded-lg text-xs font-medium hover:bg-dgr disabled:opacity-60 transition-colors">
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-dgr text-white rounded-lg text-xs font-medium hover:opacity-90 disabled:opacity-60 transition-colors">
                           {closingSession && activeSession?.id === s.id ? <Loader2 size={12} className="animate-spin" /> : <Square size={12} />}
                           Đóng phiên
                         </button>
@@ -1161,11 +1161,11 @@ export default function AttendancePortalClient() {
                   </div>
                   {/* Feature 3: Export checked-in button */}
                   <button onClick={handleExportCheckedIn} disabled={filteredRecords.length === 0}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-ok2 text-tx rounded-lg text-xs font-medium hover:opacity-90 disabled:opacity-50 transition-colors">
+                    className="flex items-center gap-2 px-3 py-1.5 bg-ok2 text-ok2-fg rounded-lg text-xs font-semibold hover:opacity-90 disabled:opacity-50 transition-colors">
                     <Download size={13} /> Xuất đã ĐD ({filteredRecords.length})
                   </button>
                   <button onClick={handleExportAbsent} disabled={filteredAbsent.length === 0}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-wn text-tx rounded-lg text-xs font-medium hover:opacity-90 disabled:opacity-50 transition-colors">
+                    className="flex items-center gap-2 px-3 py-1.5 bg-wn text-wn-fg rounded-lg text-xs font-semibold hover:opacity-90 disabled:opacity-50 transition-colors">
                     <Download size={13} /> Xuất vắng ({filteredAbsent.length})
                   </button>
                 </div>
@@ -1283,7 +1283,7 @@ export default function AttendancePortalClient() {
                                         );
                                       })()}
                                       <button onClick={() => saveLocation(rec.id)} disabled={savingLocation}
-                                        className="flex items-center gap-1 px-2 py-1 bg-ok2 text-tx rounded text-xs font-medium hover:opacity-90 disabled:opacity-50">
+                                        className="flex items-center gap-1 px-2 py-1 bg-ok2 text-ok2-fg rounded text-xs font-semibold hover:opacity-90 disabled:opacity-50">
                                         {savingLocation ? <Loader2 size={10} className="animate-spin" /> : <Save size={10} />} Lưu
                                       </button>
                                       <button onClick={() => setEditingLocationId(null)}
@@ -1454,7 +1454,7 @@ export default function AttendancePortalClient() {
                                     onClick={() => handleProxyCheckIn(w)}
                                     disabled={proxyCheckingIn === w.id}
                                     title="Điểm danh hộ"
-                                    className="flex items-center gap-1 px-2 py-1.5 bg-ok2 text-tx rounded-lg text-xs font-semibold hover:opacity-90 disabled:opacity-50 transition-colors">
+                                    className="flex items-center gap-1 px-2 py-1.5 bg-ok2 text-ok2-fg rounded-lg text-xs font-semibold hover:opacity-90 disabled:opacity-50 transition-colors">
                                     {proxyCheckingIn === w.id ? <Loader2 size={11} className="animate-spin" /> : <UserPlus size={11} />}
                                     Điểm danh hộ
                                   </button>
@@ -1506,13 +1506,13 @@ export default function AttendancePortalClient() {
               </select>
             </div>
             <button onClick={computeAbsenceAlerts} disabled={alertsLoading}
-              className="flex items-center gap-2 px-4 py-2 bg-wn text-tx rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-60 transition-colors">
+              className="flex items-center gap-2 px-4 py-2 bg-wn text-wn-fg rounded-lg text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-colors">
               {alertsLoading ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
               Quét lại
             </button>
             {absenceAlerts.length > 0 && (
               <button onClick={handleExportAlerts}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-700 text-tx rounded-lg text-sm font-medium hover:bg-act transition-colors ml-auto">
+                className="flex items-center gap-2 px-4 py-2 bg-act border border-bdr text-tx rounded-lg text-sm font-medium hover:bg-surf transition-colors ml-auto">
                 <Download size={15} /> Xuất Excel ({absenceAlerts.length})
               </button>
             )}
@@ -1596,7 +1596,7 @@ export default function AttendancePortalClient() {
                 Hủy
               </button>
               <button onClick={handleDeleteSession} disabled={deletingSession}
-                className="flex-1 py-2.5 bg-dgr text-tx rounded-xl text-sm font-medium hover:bg-dgr disabled:opacity-60 transition-colors flex items-center justify-center gap-2">
+                className="flex-1 py-2.5 bg-dgr text-white rounded-xl text-sm font-medium hover:opacity-90 disabled:opacity-60 transition-colors flex items-center justify-center gap-2">
                 {deletingSession ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
                 Xóa toàn bộ
               </button>

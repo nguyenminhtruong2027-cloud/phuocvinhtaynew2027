@@ -207,6 +207,7 @@ export default function Sidebar() {
               <RefreshCw size={16} className={`text-ic flex-shrink-0 ${refreshing ? 'animate-spin text-pri2' : ''}`} />
               {!collapsed && <span className="truncate">{refreshing ? 'Đang đồng bộ...' : 'Đồng bộ dữ liệu'}</span>}
             </button>
+            <ThemeSwitcher showLabel={!collapsed} />
           </div>
         </nav>
 
@@ -277,8 +278,8 @@ export default function Sidebar() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <ThemeSwitcher />
+        <div className="flex items-center gap-1.5">
+          <ThemeSwitcher compact />
           <button
             onClick={refreshWorkers}
             disabled={refreshing}

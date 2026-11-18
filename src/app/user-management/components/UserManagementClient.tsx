@@ -1374,7 +1374,7 @@ export default function UserManagementClient() {
               <button
                 onClick={handleDelete}
                 disabled={submitting}
-                className="px-4 py-2 rounded-xl bg-dgr hover:opacity-90 text-tx font-semibold text-sm transition-colors cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-dgr hover:opacity-90 text-white font-semibold text-sm transition-colors cursor-pointer"
               >
                 {submitting ? 'Đang xóa...' : 'Xóa tài khoản'}
               </button>

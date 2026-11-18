@@ -2009,40 +2009,47 @@ export function WorkerManagementClient() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-page text-mu p-12 flex flex-col items-center justify-center gap-3">
-        <div className="w-9 h-9 border-2 border-pri2 border-t-transparent rounded-full animate-spin" />
-        <p className="text-sm font-medium animate-pulse">Đang tải dữ liệu từ Supabase...</p>
+      <div className="min-h-screen bg-page text-tx">
+        <div className="px-3 sm:px-6 lg:px-8 xl:px-10 py-4 sm:py-5 max-w-screen-2xl mx-auto space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-bdr">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl skeleton-pulse" />
+              <div className="h-6 w-48 rounded-lg skeleton-pulse" />
+            </div>
+            <div className="flex gap-2">
+              <div className="h-9 w-28 rounded-xl skeleton-pulse" />
+              <div className="h-9 w-36 rounded-xl skeleton-pulse" />
+            </div>
+          </div>
+          <div className="h-14 rounded-2xl border border-bdr bg-surf p-3 flex gap-3">
+            {[1, 2, 3, 4].map(i => <div key={i} className="h-8 flex-1 rounded-lg skeleton-pulse" />)}
+          </div>
+          <div className="rounded-2xl border border-bdr bg-surf p-4 space-y-3">
+            {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
+              <div key={i} className="h-10 w-full rounded-lg skeleton-pulse" />
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-page text-tx">
-      <div className="px-3 sm:px-6 lg:px-8 xl:px-10 py-5 sm:py-7 max-w-screen-2xl mx-auto space-y-5">
-        {/* ── Header with Global Subtitle ── */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-bdr">
-          <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-bdg border border-bdr2 p-0.5 shadow-lg flex-shrink-0">
-              <div className="w-full h-full bg-page rounded-[14px] flex items-center justify-center">
-                <Users size={22} className="text-pri2" />
-              </div>
+      <div className="px-3 sm:px-6 lg:px-8 xl:px-10 py-4 sm:py-5 max-w-screen-2xl mx-auto space-y-4">
+        {/* ── Compact Module Header ── */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-bdr">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-bdg border border-bdr2 flex items-center justify-center flex-shrink-0">
+              <Users size={18} className="text-pri2" />
             </div>
-            <div>
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <h1 className="text-xl sm:text-2xl font-extrabold text-tx tracking-tight">
-                  KÝ TÚC XÁ PHƯỚC VĨNH TÂY
-                </h1>
-                <span className="badge">
-                  <span className="w-2 h-2 rounded-full bg-pri2 animate-pulse" />
-                  Quản Lý Công Nhân
-                </span>
-                <span className="text-xs text-lnk font-bold px-3 py-0.5 rounded-full bg-bdg border border-bdr2 font-tabular">
-                  {workers.length.toLocaleString('vi-VN')}
-                </span>
-              </div>
-              <p className="text-xs sm:text-sm text-mu mt-0.5">
-                Trung tâm dữ liệu và quản trị vận hành ký túc xá
-              </p>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h1 className="text-lg sm:text-xl font-extrabold text-tx tracking-tight">
+                Quản Lý Công Nhân
+              </h1>
+              <span className="text-xs text-lnk font-bold px-2.5 py-0.5 rounded-full bg-bdg border border-bdr2 font-tabular">
+                {workers.length.toLocaleString('vi-VN')} hồ sơ
+              </span>
             </div>
           </div>
 
@@ -2155,12 +2162,12 @@ export function WorkerManagementClient() {
 
       {/* Pagination */}
       <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-400">
+        <div className="flex items-center gap-2 text-xs sm:text-sm text-mu">
           <span>Hiển thị</span>
-          <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }} className="bg-gray-800 border border-gray-700 text-white rounded-lg px-2 py-1 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-blue-500">
+          <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }} className="bg-surf border border-bdr text-tx rounded-lg px-2 py-1 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-pri2">
             {[20, 50, 100, 200].map(n => <option key={n} value={n}>{n}</option>)}
           </select>
-          <span>bản ghi (Tổng: <strong className="text-white font-tabular">{filtered.length.toLocaleString('vi-VN')}</strong>)</span>
+          <span>bản ghi (Tổng: <strong className="text-tx font-tabular">{filtered.length.toLocaleString('vi-VN')}</strong>)</span>
         </div>
         <div className="flex items-center gap-1">
           <button onClick={() => setPage(1)} disabled={page === 1} className="btn-ghost px-2 py-1 text-xs disabled:opacity-40">«</button>

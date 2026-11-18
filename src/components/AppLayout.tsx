@@ -2,7 +2,6 @@
 import React, { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Sidebar from './Sidebar';
-import ThemeSwitcher from '@/components/ui/ThemeSwitcher';
 import { useAuth } from '@/context/AuthContext';
 
 const PUBLIC_PATHS = ['/sign-up-login', '/login', '/register', '/checkout', '/attendance'];
@@ -53,10 +52,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen bg-page" suppressHydrationWarning>
       <Sidebar />
       <div className="flex-1 min-w-0 flex flex-col">
-        {/* Sticky header nội bộ: chỉ chứa ThemeSwitcher (Bước 2) */}
-        <header className="hidden lg:flex sticky top-0 z-30 h-12 items-center justify-end gap-2 px-4 bg-side border-b border-bdr backdrop-blur-sm">
-          <ThemeSwitcher />
-        </header>
         <main className="flex-1 min-w-0 overflow-x-hidden pt-14 lg:pt-0" suppressHydrationWarning>
           {children}
         </main>

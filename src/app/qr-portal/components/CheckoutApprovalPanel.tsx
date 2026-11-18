@@ -191,7 +191,7 @@ function CheckoutDetailModal({
               <button
                 onClick={() => onApprove(req)}
                 disabled={isProcessing}
-                className="flex-1 py-2 px-3 bg-ok2 hover:opacity-90 text-tx rounded text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer text-center"
+                className="flex-1 py-2 px-3 bg-ok2 hover:opacity-90 text-ok2-fg rounded text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer text-center"
               >
                 {isProcessing ? <Loader2 size={13} className="animate-spin inline mr-1" /> : <CheckCircle2 size={13} className="inline mr-1" />}
                 Duyệt dọn ra & Giải phóng phòng
@@ -1019,7 +1019,7 @@ export default function CheckoutApprovalPanel({
                                 type="button"
                                 onClick={() => handleApprove(req)}
                                 disabled={isProcessing}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-ok2 hover:opacity-90 text-tx rounded text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-ok2 hover:opacity-90 text-ok2-fg rounded text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
                                 title="Phê duyệt dọn ra & Giải phóng phòng"
                               >
                                 {isProcessing ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}

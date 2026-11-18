@@ -164,9 +164,9 @@ export default function AttendancePage() {
   // ─── Loading ──────────────────────────────────────────────────────────────
   if (sessionLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-100 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-page flex items-center justify-center p-4">
         <div className="flex flex-col items-center gap-4">
-          <Loader2 size={40} className="animate-spin text-ok" />
+          <Loader2 size={40} className="animate-spin text-pri2" />
           <p className="text-base text-mu font-medium">Đang tải...</p>
         </div>
       </div>
@@ -176,13 +176,13 @@ export default function AttendancePage() {
   // ─── No session ───────────────────────────────────────────────────────────
   if (!sessionDate || !session) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-5">
-        <div className="bg-surf rounded-3xl shadow-xl p-8 w-full max-w-sm text-center space-y-5">
+      <div className="min-h-screen bg-page flex items-center justify-center p-5">
+        <div className="bg-surf border border-bdr rounded-3xl shadow-xl p-8 w-full max-w-sm text-center space-y-5">
           <div className="w-20 h-20 tint-wn rounded-full flex items-center justify-center mx-auto">
             <AlertCircle size={40} className="text-wn" />
           </div>
           <h2 className="text-xl font-bold text-tx">Chưa có phiên điểm danh</h2>
-          <p className="text-base text-ic leading-relaxed">
+          <p className="text-base text-mu leading-relaxed">
             Phiên điểm danh ngày <strong>{sessionDate}</strong>
             {zoneLabel !== 'Toàn KTX' && <> ({zoneLabel})</>} chưa được mở.
           </p>
@@ -195,13 +195,13 @@ export default function AttendancePage() {
   // ─── Session closed ───────────────────────────────────────────────────────
   if (!session.is_active || pageState === 'session_closed') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-5">
-        <div className="bg-surf rounded-3xl shadow-xl p-8 w-full max-w-sm text-center space-y-5">
+      <div className="min-h-screen bg-page flex items-center justify-center p-5">
+        <div className="bg-surf border border-bdr rounded-3xl shadow-xl p-8 w-full max-w-sm text-center space-y-5">
           <div className="w-20 h-20 bg-act rounded-full flex items-center justify-center mx-auto">
             <QrCode size={40} className="text-mu" />
           </div>
           <h2 className="text-xl font-bold text-tx">Phiên điểm danh đã đóng</h2>
-          <p className="text-base text-ic leading-relaxed">
+          <p className="text-base text-mu leading-relaxed">
             Phiên ngày <strong>{session.session_date}</strong> ({zoneLabel}) đã kết thúc.
           </p>
           <p className="text-sm text-mu">Liên hệ ban quản lý nếu cần hỗ trợ.</p>
@@ -213,8 +213,8 @@ export default function AttendancePage() {
   // ─── Error ────────────────────────────────────────────────────────────────
   if (pageState === 'error') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-red-50 to-rose-50 flex items-center justify-center p-5">
-        <div className="bg-surf rounded-3xl shadow-xl p-8 w-full max-w-sm text-center space-y-5">
+      <div className="min-h-screen bg-page flex items-center justify-center p-5">
+        <div className="bg-surf border border-bdr rounded-3xl shadow-xl p-8 w-full max-w-sm text-center space-y-5">
           <div className="w-20 h-20 bg-dgrbg rounded-full flex items-center justify-center mx-auto">
             <AlertCircle size={40} className="text-dgr" />
           </div>
@@ -222,7 +222,7 @@ export default function AttendancePage() {
           <p className="text-base text-mu">{errorMsg || 'Vui lòng thử lại.'}</p>
           <button
             onClick={() => setPageState('form')}
-            className="w-full py-4 bg-dgr text-tx rounded-2xl text-lg font-semibold hover:bg-red-700 active:scale-95 transition-all"
+            className="w-full py-4 bg-dgr text-white rounded-2xl text-lg font-semibold hover:opacity-90 active:scale-95 transition-all"
           >
             Thử lại
           </button>
@@ -234,41 +234,41 @@ export default function AttendancePage() {
   // ─── Success ──────────────────────────────────────────────────────────────
   if (pageState === 'success' && workerInfo) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center p-5">
-        <div className="bg-surf rounded-3xl shadow-2xl p-8 w-full max-w-sm text-center space-y-6">
+      <div className="min-h-screen bg-page flex items-center justify-center p-5">
+        <div className="bg-surf border border-bdr rounded-3xl shadow-2xl p-8 w-full max-w-sm text-center space-y-6">
           <div className="w-24 h-24 bg-okbg rounded-full flex items-center justify-center mx-auto">
             <CheckCircle2 size={52} className="text-ok" />
           </div>
           <div>
             <h2 className="text-3xl font-bold text-tx">Điểm danh thành công!</h2>
-            <p className="text-base text-ic mt-1">Ngày {session.session_date}</p>
+            <p className="text-base text-mu mt-1">Ngày {session.session_date}</p>
           </div>
           <div className="bg-okbg border border-bdr2 rounded-2xl p-5 text-left space-y-4">
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 bg-okbg rounded-full flex items-center justify-center flex-shrink-0">
+              <div className="w-10 h-10 bg-surf rounded-full flex items-center justify-center flex-shrink-0">
                 <User size={18} className="text-ok" />
               </div>
               <div>
-                <p className="text-xs text-ic font-medium uppercase tracking-wide">Họ và tên</p>
+                <p className="text-xs text-mu font-medium uppercase tracking-wide">Họ và tên</p>
                 <p className="text-lg font-bold text-tx mt-0.5">{workerInfo.ho_va_ten}</p>
               </div>
             </div>
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 bg-okbg rounded-full flex items-center justify-center flex-shrink-0">
+              <div className="w-10 h-10 bg-surf rounded-full flex items-center justify-center flex-shrink-0">
                 <Hash size={18} className="text-ok" />
               </div>
               <div>
-                <p className="text-xs text-ic font-medium uppercase tracking-wide">Mã nhân viên</p>
+                <p className="text-xs text-mu font-medium uppercase tracking-wide">Mã nhân viên</p>
                 <p className="text-lg font-bold text-tx font-mono mt-0.5">{maNv}</p>
               </div>
             </div>
             {(workerInfo.ktx || workerInfo.day || workerInfo.phong_so) && (
               <div className="flex items-start gap-3 pt-3 border-t border-bdr2">
-                <div className="w-10 h-10 bg-okbg rounded-full flex items-center justify-center flex-shrink-0">
+                <div className="w-10 h-10 bg-surf rounded-full flex items-center justify-center flex-shrink-0">
                   <MapPin size={18} className="text-ok" />
                 </div>
                 <div>
-                  <p className="text-xs text-ic font-medium uppercase tracking-wide">Thông tin phòng</p>
+                  <p className="text-xs text-mu font-medium uppercase tracking-wide">Thông tin phòng</p>
                   <p className="text-base font-semibold text-tx mt-0.5">
                     {[workerInfo.ktx, workerInfo.day ? `Dãy ${workerInfo.day}` : '', workerInfo.phong_so ? `Phòng ${workerInfo.phong_so}` : ''].filter(Boolean).join(' — ')}
                   </p>
@@ -276,12 +276,12 @@ export default function AttendancePage() {
               </div>
             )}
           </div>
-          <div className="bg-ok2 text-tx rounded-2xl px-5 py-4">
+          <div className="bg-ok2 text-ok2-fg rounded-2xl px-5 py-4">
             <p className="text-lg font-bold">✓ Đã ghi nhận lúc {checkedInTime}</p>
           </div>
           <button
             onClick={() => { setPageState('form'); setMaNv(''); setHoVaTen(''); }}
-            className="w-full py-4 border-2 border-ok2 text-ok rounded-2xl text-base font-semibold hover:bg-okbg active:scale-95 transition-all"
+            className="w-full py-4 border-2 border-pri2 text-lnk rounded-2xl text-base font-semibold hover:bg-act active:scale-95 transition-all"
           >
             Điểm danh người khác
           </button>
@@ -293,8 +293,8 @@ export default function AttendancePage() {
   // ─── Already checked in ───────────────────────────────────────────────────
   if (pageState === 'already_checked_in' && workerInfo) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-100 flex items-center justify-center p-5">
-        <div className="bg-surf rounded-3xl shadow-xl p-8 w-full max-w-sm text-center space-y-5">
+      <div className="min-h-screen bg-page flex items-center justify-center p-5">
+        <div className="bg-surf border border-bdr rounded-3xl shadow-xl p-8 w-full max-w-sm text-center space-y-5">
           <div className="w-20 h-20 tint-wn rounded-full flex items-center justify-center mx-auto">
             <AlertCircle size={40} className="text-wn" />
           </div>
@@ -331,23 +331,23 @@ export default function AttendancePage() {
 
   // ─── Form ─────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-100 flex items-center justify-center p-4">
-      <div className="bg-surf rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+    <div className="min-h-screen bg-page flex items-center justify-center p-4">
+      <div className="bg-surf border border-bdr rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
         {/* Header */}
-        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-8 text-center text-tx">
-          <div className="w-20 h-20 bg-surf/20 rounded-full flex items-center justify-center mx-auto mb-4">
-            <QrCode size={40} className="text-tx" />
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-8 text-center text-white">
+          <div className="w-20 h-20 bg-white/15 rounded-full flex items-center justify-center mx-auto mb-4">
+            <QrCode size={40} className="text-white" />
           </div>
           <h1 className="text-2xl font-bold">Điểm Danh</h1>
-          <p className="text-emerald-100 mt-1 text-base">Ngày {sessionDate}</p>
+          <p className="text-blue-100 mt-1 text-base">Ngày {sessionDate}</p>
           {(zoneKtx || zoneDay || zonePhong) && (
-            <div className="inline-flex items-center gap-1.5 mt-2 px-3 py-1.5 bg-surf/20 rounded-full text-sm font-medium">
+            <div className="inline-flex items-center gap-1.5 mt-2 px-3 py-1.5 bg-white/15 rounded-full text-sm font-medium">
               <MapPin size={13} />
               {zoneLabel}
             </div>
           )}
-          <div className="inline-flex items-center gap-2 mt-3 px-4 py-2 bg-surf/20 rounded-full text-sm font-semibold">
-            <div className="w-2.5 h-2.5 bg-surf rounded-full animate-pulse" />
+          <div className="inline-flex items-center gap-2 mt-3 px-4 py-2 bg-white/15 rounded-full text-sm font-semibold">
+            <div className="w-2.5 h-2.5 bg-emerald-300 rounded-full animate-pulse" />
             Phiên đang mở
           </div>
         </div>
@@ -366,7 +366,7 @@ export default function AttendancePage() {
                 placeholder="Nhập họ và tên đầy đủ"
                 required
                 autoComplete="name"
-                className="w-full px-4 py-4 border-2 border-bdr rounded-2xl text-base focus:outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition-all placeholder:text-mu"
+                className="w-full px-4 py-4 bg-act border-2 border-bdr text-tx rounded-2xl text-base focus:outline-none focus:border-pri2 focus:ring-4 focus:ring-pri2/20 transition-all placeholder:text-mu"
               />
             </div>
             <div>
@@ -381,13 +381,13 @@ export default function AttendancePage() {
                 required
                 autoComplete="off"
                 inputMode="text"
-                className="w-full px-4 py-4 border-2 border-bdr rounded-2xl text-base font-mono focus:outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition-all placeholder:text-mu"
+                className="w-full px-4 py-4 bg-act border-2 border-bdr text-tx rounded-2xl text-base font-mono focus:outline-none focus:border-pri2 focus:ring-4 focus:ring-pri2/20 transition-all placeholder:text-mu"
               />
             </div>
             <button
               type="submit"
               disabled={pageState === 'submitting' || !hoVaTen.trim() || !maNv.trim()}
-              className="w-full py-5 bg-ok2 text-tx rounded-2xl text-lg font-bold hover:bg-emerald-700 disabled:opacity-50 active:scale-95 transition-all flex items-center justify-center gap-3 shadow-lg shadow-emerald-200 mt-2"
+              className="w-full py-5 bg-pri hover:bg-pri2 text-white rounded-2xl text-lg font-bold disabled:opacity-50 active:scale-95 transition-all flex items-center justify-center gap-3 shadow-lg mt-2"
             >
               {pageState === 'submitting' ? (
                 <><Loader2 size={22} className="animate-spin" /> Đang xử lý...</>

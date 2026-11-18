@@ -291,7 +291,7 @@ function CCCDOCRScanner({ onConfirm, onClose }: {
                 <button
                   type="button"
                   onClick={() => onConfirm(editData)}
-                  className="flex-1 py-2 bg-ok2 hover:opacity-90 text-[#0B0F17] rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-1.5"
+                  className="flex-1 py-2 bg-ok2 hover:opacity-90 text-ok2-fg rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-1.5"
                   suppressHydrationWarning
                 >
                   <Check size={13} />Xác nhận đúng

@@ -31,7 +31,7 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 // Áp data-theme trước khi render để không bị nháy sai màu (no-flash).
-const THEME_NO_FLASH_SCRIPT = `(function(){try{var t=localStorage.getItem('ktx-theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'midnight';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','midnight');}})();`;
+const THEME_NO_FLASH_SCRIPT = `(function(){try{var raw=localStorage.getItem('ktx-theme');var t=(raw==='light'||raw==='midnight')?raw:(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'midnight');if(raw&&raw!==t){localStorage.setItem('ktx-theme',t);}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','midnight');}})();`;
 
 export default function RootLayout({
   children,

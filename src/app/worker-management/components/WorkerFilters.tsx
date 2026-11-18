@@ -193,10 +193,10 @@ function ToTruongCombobox({
                   onMouseEnter={() => setHighlightedIndex(itemIndex)}
                   className={`px-3 py-2 cursor-pointer flex items-center justify-between transition-colors ${
                     isSelected
-                      ? 'bg-blue-600 text-white font-bold'
+                      ? 'bg-pri text-white font-bold'
                       : isHighlighted
-                      ? 'bg-gray-700 text-white'
-                      : 'hover:bg-gray-700/80 text-gray-200'
+                      ? 'bg-act text-tx font-semibold'
+                      : 'hover:bg-act/70 text-tx'
                   }`}
                 >
                   <span className="truncate">{opt}</span>

@@ -809,7 +809,7 @@ export default function BedManagementClient() {
           <button
             onClick={handleExportBeds}
             disabled={loading || bedsFiltered.length === 0}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-ok2 hover:opacity-90 text-white text-sm font-bold transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-ok2 hover:opacity-90 text-ok2-fg text-sm font-bold transition-colors disabled:opacity-50"
             title="Xuất danh sách giường đang lọc ra Excel"
           >
             <Download size={14} /> Xuất Excel
@@ -962,7 +962,22 @@ export default function BedManagementClient() {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-20"><Loader2 size={28} className="animate-spin text-primary" /></div>
+        <div className="space-y-4">
+          {[1, 2].map(r => (
+            <div key={r} className="rounded-2xl border border-bdr bg-surf p-4 space-y-3">
+              <div className="flex justify-between items-center">
+                <div className="h-6 w-24 rounded-lg skeleton-pulse" />
+                <div className="h-4 w-20 rounded-md skeleton-pulse" />
+              </div>
+              <div className="h-1.5 w-full rounded-full skeleton-pulse" />
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                {[1, 2, 3, 4].map(b => (
+                  <div key={b} className="h-16 rounded-xl skeleton-pulse" />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       ) : beds.length === 0 ? (
         <div className="rounded-2xl border border-wn tint-wn p-8 text-center space-y-2">
           <BedDouble size={34} className="mx-auto text-wn" />
@@ -1382,7 +1397,7 @@ export default function BedManagementClient() {
                         type="button"
                         disabled={!drawerBed?.worker_id || busy}
                         onClick={() => setShowTransferModal(true)}
-                        className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-pri hover:opacity-90 text-tx text-sm font-semibold disabled:opacity-50 transition-colors"
+                        className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-pri hover:opacity-90 text-white text-sm font-semibold disabled:opacity-50 transition-colors"
                       >
                         <ArrowRightLeft size={14} /> Chuyển / Đổi giường
                       </button>
@@ -1396,7 +1411,7 @@ export default function BedManagementClient() {
                           type="button"
                           disabled={!drawerBed?.worker_id || busy}
                           onClick={handleCheckoutRequest}
-                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-wn hover:bg-wn text-[#0B0F17] text-sm font-extrabold disabled:opacity-50 transition-colors"
+                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-wn hover:opacity-90 text-wn-fg text-sm font-extrabold disabled:opacity-50 transition-colors"
                         >
                           {busy ? <Loader2 size={14} className="animate-spin" /> : <DoorOpen size={14} />} Gửi yêu cầu check-out để duyệt
                         </button>
@@ -1404,7 +1419,7 @@ export default function BedManagementClient() {
                           type="button"
                           disabled={!drawerBed?.worker_id || busy}
                           onClick={handleHardDelete}
-                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-dgr hover:bg-dgr text-tx text-sm font-extrabold disabled:opacity-50 transition-colors"
+                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-dgr hover:opacity-90 text-white text-sm font-extrabold disabled:opacity-50 transition-colors"
                         >
                           {busy ? <Loader2 size={14} className="animate-spin" /> : <UserX size={14} />} Xóa vĩnh viễn khỏi KTX
                         </button>
@@ -1419,7 +1434,7 @@ export default function BedManagementClient() {
                       type="button"
                       disabled={busy}
                       onClick={() => setBedStatus(drawerBed, 'empty')}
-                      className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-ok2 hover:opacity-90 text-tx text-sm font-semibold disabled:opacity-50 transition-colors"
+                      className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-ok2 hover:opacity-90 text-ok2-fg text-sm font-semibold disabled:opacity-50 transition-colors"
                     >
                       {busy ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Hoàn tất — Bỏ bảo trì
                     </button>
