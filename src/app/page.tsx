@@ -1541,32 +1541,47 @@ export default function OccupancyDashboardPage() {
                   ]}
                 />
 
-                {/* Building Filters */}
+                {/* Building Filters (Animated sliding pills) */}
                 {!isEmpty && allBuildings.length > 0 && (
-                  <div className="flex items-center gap-1.5 flex-wrap">
+                  <div className="inline-flex items-center gap-1 flex-wrap p-1 rounded-xl bg-act/80 border border-bdr2">
                     <button
+                      type="button"
                       onClick={() => setSelectedBuilding(null)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
-                        selectedBuilding === null
-                          ? 'bg-pri text-white border-pri2 shadow-sm'
-                          : 'bg-act text-mu border-bdr hover:text-tx'
+                      className={`relative px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                        selectedBuilding === null ? 'text-white' : 'text-mu hover:text-tx'
                       }`}
                     >
-                      Tất cả dãy
+                      {selectedBuilding === null && (
+                        <motion.span
+                          layoutId="dashboard-building-filter"
+                          transition={{ type: 'spring', stiffness: 430, damping: 32 }}
+                          className="absolute inset-0 rounded-lg bg-pri border border-pri2 shadow-sm"
+                        />
+                      )}
+                      <span className="relative z-10">Tất cả dãy</span>
                     </button>
-                    {allBuildings.map(b => (
-                      <button
-                        key={b}
-                        onClick={() => setSelectedBuilding(b)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
-                          selectedBuilding === b
-                            ? 'bg-pri text-white border-pri2 shadow-sm'
-                            : 'bg-act text-mu border-bdr hover:text-tx'
-                        }`}
-                      >
-                        {b}
-                      </button>
-                    ))}
+                    {allBuildings.map(b => {
+                      const active = selectedBuilding === b;
+                      return (
+                        <button
+                          key={b}
+                          type="button"
+                          onClick={() => setSelectedBuilding(b)}
+                          className={`relative px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                            active ? 'text-white' : 'text-mu hover:text-tx'
+                          }`}
+                        >
+                          {active && (
+                            <motion.span
+                              layoutId="dashboard-building-filter"
+                              transition={{ type: 'spring', stiffness: 430, damping: 32 }}
+                              className="absolute inset-0 rounded-lg bg-pri border border-pri2 shadow-sm"
+                            />
+                          )}
+                          <span className="relative z-10">{b}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1576,13 +1591,13 @@ export default function OccupancyDashboardPage() {
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-4 mb-4 border-b border-bdr">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-semibold text-mu uppercase tracking-wider">Công năng:</span>
-                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-lg bg-bdg text-lnk border border-pri2/35">
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-bdg text-lnk border border-pri2/35">
                   <span>♂ Phòng Nam</span>
                 </span>
-                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-lg tint-pink text-pink-tone border border-pink-tint">
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md tint-pink text-pink-tone border border-pink-tint">
                   <span>♀ Phòng Nữ</span>
                 </span>
-                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-lg tint-wn text-wn border border-wn">
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md tint-wn text-wn border border-wn/40">
                   <span>⚡ Hỗn hợp</span>
                 </span>
                 <span className="text-[11px] text-mu italic hidden sm:inline ml-1">
@@ -1594,12 +1609,12 @@ export default function OccupancyDashboardPage() {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-semibold text-mu uppercase tracking-wider">Công suất:</span>
                 {[
-                  { label: 'Còn trống', dot: 'bg-ok2', badge: 'bg-okbg border-bdr2 text-ok' },
-                  { label: 'Đầy 100%', dot: 'bg-wn', badge: 'tint-wn border-wn text-wn' },
-                  { label: 'Quá tải (>10)', dot: 'bg-dgr', badge: 'tint-dgr border-dgr text-dgr' },
-                  { label: 'Trống (0)', dot: 'bg-mu', badge: 'bg-act border-bdr text-mu' },
+                  { label: 'Còn trống', dot: 'bg-ok2', badge: 'bg-okbg border-ok2/35 text-ok' },
+                  { label: 'Đầy 100%', dot: 'bg-wn', badge: 'tint-wn border-wn/40 text-wn' },
+                  { label: 'Quá tải (>10)', dot: 'bg-dgr', badge: 'tint-dgr border-dgr/40 text-dgr' },
+                  { label: 'Trống (0)', dot: 'bg-mu', badge: 'bg-act border-bdr2 text-mu' },
                 ].map(leg => (
-                  <div key={leg.label} className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg border text-[11px] font-medium ${leg.badge}`}>
+                  <div key={leg.label} className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[11px] font-semibold ${leg.badge}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${leg.dot}`} />
                     <span>{leg.label}</span>
                   </div>
@@ -1865,30 +1880,34 @@ export default function OccupancyDashboardPage() {
         </div>
 
         {/* Room Drawer Modal */}
-        {drawerRoom && (
-          <RoomDrawer
-            ktx={drawerRoom.ktx}
-            building={drawerRoom.building}
-            room={drawerRoom.room}
-            workers={drawerWorkers}
-            adminAssignedUnit={roomUnitMap[`${drawerRoom.ktx}||${drawerRoom.building}||${drawerRoom.room}`]}
-            assignedGender={roomGenderMap[`${drawerRoom.ktx}||${drawerRoom.building}||${drawerRoom.room}`]}
-            onRoomGenderUpdated={(newGender) => {
-              const key = `${drawerRoom.ktx}||${drawerRoom.building}||${drawerRoom.room}`;
-              setRoomGenderMap(prev => {
-                const next = { ...prev };
-                if (newGender === 'auto') {
-                  delete next[key];
-                } else {
-                  next[key] = newGender;
-                }
-                saveRoomGenderMap(next);
-                return next;
-              });
-            }}
-            onClose={() => setDrawerRoom(null)}
-          />
-        )}
+        <AnimatePresence>
+          {drawerRoom && (
+            <RoomDrawer
+              key={`${drawerRoom.ktx}-${drawerRoom.building}-${drawerRoom.room}`}
+              ktx={drawerRoom.ktx}
+              building={drawerRoom.building}
+              room={drawerRoom.room}
+              workers={drawerWorkers}
+              capacity={getRoomCapacity(capacities, drawerRoom.ktx, drawerRoom.building, drawerRoom.room) || DEFAULT_ROOM_CAPACITY}
+              adminAssignedUnit={roomUnitMap[`${drawerRoom.ktx}||${drawerRoom.building}||${drawerRoom.room}`]}
+              assignedGender={roomGenderMap[`${drawerRoom.ktx}||${drawerRoom.building}||${drawerRoom.room}`]}
+              onRoomGenderUpdated={(newGender) => {
+                const key = `${drawerRoom.ktx}||${drawerRoom.building}||${drawerRoom.room}`;
+                setRoomGenderMap(prev => {
+                  const next = { ...prev };
+                  if (newGender === 'auto') {
+                    delete next[key];
+                  } else {
+                    next[key] = newGender;
+                  }
+                  saveRoomGenderMap(next);
+                  return next;
+                });
+              }}
+              onClose={() => setDrawerRoom(null)}
+            />
+          )}
+        </AnimatePresence>
 
         {/* Overloaded Rooms Modal */}
         {showOverloadedModal && (

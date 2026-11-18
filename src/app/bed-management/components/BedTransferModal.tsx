@@ -1,10 +1,13 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { motion } from 'motion/react';
 import { X, Loader2, CheckCircle2, AlertCircle, ArrowRightLeft } from 'lucide-react';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
 import { compareKtxNames } from '@/data/workers';
+import { CraftIconBadge } from '@/components/ui/CraftIcon';
+import { MonoChip } from '@/components/ui/StatusTag';
 
 interface TransferBed {
   id: string;
@@ -219,20 +222,31 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div
-        className="bg-surf border border-bdr rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg flex flex-col max-h-[90vh]"
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 14 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+        className="surface-elevated border border-bdr2 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg flex flex-col max-h-[90vh] overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-bdr">
-          <div>
-            <h3 className="font-extrabold text-tx flex items-center gap-2">
-              <ArrowRightLeft size={16} className="text-lnk" /> ⇄ Chuyển / Đổi Giường
-            </h3>
-            <p className="text-xs text-mu font-tabular mt-0.5 truncate">
-              {maNv || workerName || '—'} · vị trí cũ: {sourceBed ? `${sourceBed.ktx} · ${sourceBed.day} · P${sourceBed.phong_so} · G${sourceBed.giuong}` : '—'}
-            </p>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-bdr bg-act/50">
+          <div className="flex items-center gap-3 min-w-0">
+            <CraftIconBadge icon={ArrowRightLeft} tone="blue" size="sm" interactive={false} />
+            <div className="min-w-0">
+              <h3 className="font-extrabold text-tx tracking-tight">Chuyển / Đổi Giường</h3>
+              <div className="flex items-center gap-1.5 text-xs text-mu font-tabular mt-0.5 flex-wrap">
+                <span className="truncate">{maNv || workerName || '—'}</span>
+                {sourceBed && (
+                  <MonoChip>
+                    {sourceBed.ktx} · {sourceBed.day} · P{sourceBed.phong_so} · G{sourceBed.giuong}
+                  </MonoChip>
+                )}
+              </div>
+            </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-act text-mu hover:text-tx"><X size={16} /></button>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-act text-mu hover:text-tx cursor-pointer">
+            <X size={16} />
+          </button>
         </div>
 
         {loading ? (
@@ -254,7 +268,7 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
                     <select
                       value={selKtx}
                       onChange={e => { setSelKtx(e.target.value); setSelDay(''); setSelRoom(''); setSelBed(''); }}
-                      className="mt-1 w-full bg-surf border border-bdr text-tx rounded-xl px-3 py-2 text-sm font-semibold cursor-pointer"
+                      className="mt-1 w-full bg-surf border border-bdr2 text-tx rounded-xl px-3 py-2 text-sm font-semibold cursor-pointer"
                     >
                       <option value="">-- Chọn KTX --</option>
                       {ktxList.map(k => <option key={k} value={k}>{k}</option>)}
@@ -266,7 +280,7 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
                       value={selDay}
                       onChange={e => { setSelDay(e.target.value); setSelRoom(''); setSelBed(''); }}
                       disabled={!selKtx}
-                      className="mt-1 w-full bg-surf border border-bdr text-tx rounded-xl px-3 py-2 text-sm font-semibold cursor-pointer disabled:opacity-40"
+                      className="mt-1 w-full bg-surf border border-bdr2 text-tx rounded-xl px-3 py-2 text-sm font-semibold cursor-pointer disabled:opacity-40"
                     >
                       <option value="">-- Chọn Dãy --</option>
                       {dayList.map(d => <option key={d} value={d}>{d}</option>)}
@@ -278,7 +292,7 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
                       value={selRoom}
                       onChange={e => { setSelRoom(e.target.value); setSelBed(''); }}
                       disabled={!selDay}
-                      className="mt-1 w-full bg-surf border border-bdr text-tx rounded-xl px-3 py-2 text-sm font-semibold cursor-pointer disabled:opacity-40"
+                      className="mt-1 w-full bg-surf border border-bdr2 text-tx rounded-xl px-3 py-2 text-sm font-semibold cursor-pointer disabled:opacity-40"
                     >
                       <option value="">-- Chọn Phòng --</option>
                       {roomList.map(r => <option key={r} value={r}>Phòng {r}</option>)}
@@ -290,7 +304,7 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
                       value={selBed}
                       onChange={e => setSelBed(e.target.value)}
                       disabled={!selRoom}
-                      className="mt-1 w-full bg-surf border border-bdr text-tx rounded-xl px-3 py-2 text-sm font-semibold cursor-pointer disabled:opacity-40"
+                      className="mt-1 w-full bg-surf border border-bdr2 text-tx rounded-xl px-3 py-2 text-sm font-semibold cursor-pointer disabled:opacity-40"
                     >
                       <option value="">-- Chọn Giường --</option>
                       {bedList.map(b => <option key={b.id} value={b.id}>G{b.giuong}</option>)}
@@ -302,15 +316,16 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
                   type="button"
                   disabled={busy || !selBed}
                   onClick={confirmTransfer}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-pri hover:opacity-90 text-white text-sm font-extrabold disabled:opacity-50 transition-colors"
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl btn-glow-primary text-sm font-extrabold disabled:opacity-50 cursor-pointer"
                 >
-                  {busy ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />} ✓ Xác nhận chuyển giường
+                  {busy ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+                  <span>Xác nhận chuyển giường</span>
                 </button>
               </>
             )}
           </div>
         )}
-      </div>
+      </motion.div>
     </div>
   );
 }

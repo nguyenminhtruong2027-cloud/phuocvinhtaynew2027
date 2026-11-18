@@ -9,6 +9,7 @@ import { UserPlus, Pencil, Trash2, Shield, ShieldCheck, Crown, Lock, RefreshCw, 
 import { useKtxStructure, KtxBlockGroup } from '@/lib/ktxStructure';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { SlidingTabs } from '@/components/ui/MotionPrimitives';
+import { StatusTag } from '@/components/ui/StatusTag';
 
 interface ProfileRecord {
   id: string;
@@ -657,69 +658,53 @@ export default function UserManagementClient() {
     }
   };
 
-  // Helper for dynamic colors on badges
+  // Helper for theme-aware dynamic colors on architectural chips
   const getColorClasses = (color: string) => {
     switch (color) {
       case 'orange':
-        return {
-          border: 'border-orange-500/30 dark:border-orange-500/40',
-          headerBg: 'bg-orange-500/10 dark:bg-orange-950/40',
-          headerText: 'text-orange-700 dark:text-orange-300',
-          badgeText: 'text-orange-800 dark:text-orange-300',
-          badgeBg: 'bg-orange-100 dark:bg-orange-900/40 border-orange-300 dark:border-orange-700',
-          itemChecked: 'bg-orange-500/20 border-orange-500/50 text-orange-700 dark:text-orange-300 font-semibold',
-        };
-      case 'emerald':
-        return {
-          border: 'border-emerald-500/30 dark:border-emerald-500/40',
-          headerBg: 'bg-okbg',
-          headerText: 'text-emerald-700 dark:text-emerald-300',
-          badgeText: 'text-emerald-800 dark:text-emerald-300',
-          badgeBg: 'bg-okbg border-bdr2',
-          itemChecked: 'bg-okbg border-bdr2 text-ok font-semibold',
-        };
-      case 'purple':
-        return {
-          border: 'border-purple-500/30 dark:border-purple-500/40',
-          headerBg: 'bg-purple-500/10 dark:bg-purple-950/40',
-          headerText: 'text-purple-700 dark:text-purple-300',
-          badgeText: 'text-purple-800 dark:text-purple-300',
-          badgeBg: 'bg-purple-100 dark:bg-purple-900/40 border-purple-300 dark:border-purple-700',
-          itemChecked: 'bg-purple-500/20 border-purple-500/50 text-purple-700 dark:text-purple-300 font-semibold',
-        };
-      case 'cyan':
-        return {
-          border: 'border-cyan-500/30 dark:border-cyan-500/40',
-          headerBg: 'bg-cyan-500/10 dark:bg-cyan-950/40',
-          headerText: 'text-cyan-700 dark:text-cyan-300',
-          badgeText: 'text-cyan-800 dark:text-cyan-300',
-          badgeBg: 'bg-cyan-100 dark:bg-cyan-900/40 border-cyan-300 dark:border-cyan-700',
-          itemChecked: 'bg-cyan-500/20 border-cyan-500/50 text-cyan-700 dark:text-cyan-300 font-semibold',
-        };
       case 'amber':
         return {
-          border: 'border-wn dark:border-amber-500/40',
+          border: 'border-wn/40',
           headerBg: 'tint-wn',
           headerText: 'text-wn',
           badgeText: 'text-wn',
-          badgeBg: 'tint-wn border-wn',
-          itemChecked: 'bg-amber-500/20 border-amber-500/50 text-wn font-semibold',
+          badgeBg: 'tint-wn border-wn/35',
+          itemChecked: 'tint-wn border-wn text-wn font-semibold',
+        };
+      case 'emerald':
+      case 'cyan':
+        return {
+          border: 'border-ok2/35',
+          headerBg: 'bg-okbg',
+          headerText: 'text-ok',
+          badgeText: 'text-ok',
+          badgeBg: 'bg-okbg border-ok2/35',
+          itemChecked: 'bg-okbg border-ok2 text-ok font-semibold',
+        };
+      case 'purple':
+        return {
+          border: 'border-pink-tint',
+          headerBg: 'tint-pink',
+          headerText: 'text-pink-tone',
+          badgeText: 'text-pink-tone',
+          badgeBg: 'tint-pink border-pink-tint',
+          itemChecked: 'tint-pink border-pink-tint text-pink-tone font-semibold',
         };
       case 'rose':
         return {
-          border: 'border-rose-500/30 dark:border-rose-500/40',
+          border: 'border-dgr/40',
           headerBg: 'bg-dgrbg',
-          headerText: 'text-rose-700 dark:text-rose-300',
-          badgeText: 'text-rose-800 dark:text-rose-300',
-          badgeBg: 'bg-dgrbg border-dgr',
+          headerText: 'text-dgr',
+          badgeText: 'text-dgr',
+          badgeBg: 'bg-dgrbg border-dgr/40',
           itemChecked: 'bg-dgrbg border-dgr text-dgr font-semibold',
         };
       default: // blue
         return {
-          border: 'border-blue-500/30 dark:border-blue-500/40',
+          border: 'border-pri2/35',
           headerBg: 'bg-bdg',
-          headerText: 'text-blue-700 dark:text-blue-300',
-          badgeText: 'text-blue-800 dark:text-blue-300',
+          headerText: 'text-lnk',
+          badgeText: 'text-lnk',
           badgeBg: 'bg-bdg border-bdr2',
           itemChecked: 'bg-bdg border-bdr2 text-lnk font-semibold',
         };
@@ -828,11 +813,9 @@ export default function UserManagementClient() {
             </p>
           </div>
         </div>
-        <span className={`px-3 py-1 rounded-full text-[11px] font-bold border shrink-0 self-start sm:self-center ${
-          isSuperAdmin ? 'tint-wn text-wn border-wn' : 'bg-act text-lnk border-bdr2'
-        }`}>
+        <StatusTag tone={isSuperAdmin ? 'amber' : 'blue'} size="sm" icon={isSuperAdmin ? Crown : ShieldCheck} className="shrink-0 self-start sm:self-center">
           {isSuperAdmin ? 'Quản lý Admin + Staff' : 'Chỉ quản lý Staff'}
-        </span>
+        </StatusTag>
       </div>
 
       {/* Main Card */}
@@ -881,7 +864,7 @@ export default function UserManagementClient() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="bg-muted/50 text-muted-foreground text-xs uppercase font-semibold border-b border-border">
+              <thead className="bg-act/95 backdrop-blur-md text-mu text-[11px] uppercase tracking-wider font-bold border-b border-bdr2 sticky top-0 z-10">
                 <tr>
                   <th className="px-4 py-3">Họ và tên</th>
                   <th className="px-4 py-3">Email</th>
@@ -920,17 +903,17 @@ export default function UserManagementClient() {
                         </td>
                         <td className="px-4 py-3">
                           {profile.role === 'super_admin' ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold tint-wn text-wn border border-wn">
-                              <Crown size={11} /> Chủ HT (Super Admin)
-                            </span>
+                            <StatusTag tone="amber" icon={Crown}>
+                              Chủ HT (Super Admin)
+                            </StatusTag>
                           ) : profile.role === 'admin' ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-dgrbg text-dgr">
-                              <ShieldCheck size={11} /> Admin
-                            </span>
+                            <StatusTag tone="rose" icon={ShieldCheck}>
+                              Admin
+                            </StatusTag>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-bdg text-lnk">
-                              <Shield size={11} /> Staff
-                            </span>
+                            <StatusTag tone="blue" icon={Shield}>
+                              Staff
+                            </StatusTag>
                           )}
                         </td>
                         <td className="px-4 py-3">

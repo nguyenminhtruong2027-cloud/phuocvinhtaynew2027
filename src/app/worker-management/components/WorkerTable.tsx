@@ -1,7 +1,20 @@
 'use client';
 import React from 'react';
 import { Worker, calcSoNgay, getProfileStatus } from '@/data/workers';
-import { Eye, Pencil, Trash2, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
+import {
+  Eye,
+  Pencil,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+  CheckCircle2,
+  Clock,
+  AlertCircle,
+  Shield,
+  AlertTriangle,
+} from 'lucide-react';
+import { StatusTag, MonoChip } from '@/components/ui/StatusTag';
 
 interface Props {
   workers: Worker[];
@@ -40,10 +53,11 @@ const COLUMNS: { key: keyof Worker; label: string; width?: string }[] = [
 
 function PlatoonBadge({ value }: { value: string }) {
   if (!value) return <span className="text-xs text-mu">—</span>;
+  const tone = value === '113' ? 'teal' : value === '111' ? 'pink' : 'blue';
   return (
-    <span className="badge">
+    <StatusTag tone={tone} icon={Shield}>
       TD {value}
-    </span>
+    </StatusTag>
   );
 }
 
@@ -51,37 +65,41 @@ function MaNVCell({ value }: { value: string }) {
   if (!value) return <span className="text-xs text-mu italic whitespace-nowrap">Chưa có</span>;
   if (value.toLowerCase().startsWith('chờ')) {
     return (
-      <span className="badge tint-wn !text-wn !border-wn font-tabular">
+      <StatusTag tone="amber" icon={Clock} mono>
         {value}
-      </span>
+      </StatusTag>
     );
   }
-  return <span className="text-xs font-tabular font-bold text-tx whitespace-nowrap">{value}</span>;
+  return <MonoChip tone="blue">{value}</MonoChip>;
 }
 
 function CCCDCell({ value }: { value: string | undefined }) {
   if (!value) {
     return (
-      <span className="badge !bg-dgrbg !text-dgr !border-dgr">
+      <StatusTag tone="rose" icon={AlertCircle}>
         Thiếu CCCD
-      </span>
+      </StatusTag>
     );
   }
-  return <span className="text-xs font-tabular text-tx whitespace-nowrap">{value}</span>;
+  return <span className="text-xs font-mono font-tabular text-tx whitespace-nowrap">{value}</span>;
 }
 
 function ProfileStatusTag({ worker }: { worker: Worker }) {
   const status = getProfileStatus(worker);
-  if (status === 'full') return (
-    <span className="badge bg-okbg !text-ok !border-bdr2">
-      <span className="w-1.5 h-1.5 rounded-full bg-ok2 shrink-0" />Đủ hồ sơ
-    </span>
-  );
-  if (status === 'missing_cccd_sdt') return (
-    <span className="badge bg-dgrbg !text-dgr !border-dgr">
-      <span className="w-1.5 h-1.5 rounded-full bg-dgr shrink-0" />Thiếu CCCD/SĐT
-    </span>
-  );
+  if (status === 'full') {
+    return (
+      <StatusTag tone="teal" icon={CheckCircle2}>
+        Đủ hồ sơ
+      </StatusTag>
+    );
+  }
+  if (status === 'missing_cccd_sdt') {
+    return (
+      <StatusTag tone="rose" icon={AlertCircle}>
+        Thiếu CCCD/SĐT
+      </StatusTag>
+    );
+  }
   const missing: string[] = [];
   if (!worker.tieuDoan) missing.push('Tiểu đoàn');
   if (!worker.ktx) missing.push('Khu KTX');
@@ -90,17 +108,19 @@ function ProfileStatusTag({ worker }: { worker: Worker }) {
   if (!worker.ngaySinh) missing.push('Ngày sinh');
   if (!worker.gioiTinh) missing.push('Giới tính');
 
-  const label = missing.length > 0
-    ? `Thiếu: ${missing.slice(0, 2).join(', ')}${missing.length > 2 ? ` +${missing.length - 2}` : ''}`
-    : 'Chưa phân bổ';
+  const label =
+    missing.length > 0
+      ? `Thiếu: ${missing.slice(0, 2).join(', ')}${missing.length > 2 ? ` +${missing.length - 2}` : ''}`
+      : 'Chưa phân bổ';
 
   return (
-    <span
-      className="badge tint-wn !text-wn !border-wn"
+    <StatusTag
+      tone="amber"
+      icon={AlertTriangle}
       title={missing.length > 0 ? `Thiếu thông tin: ${missing.join(', ')}` : 'Chưa phân bổ đầy đủ'}
     >
-      <span className="w-1.5 h-1.5 rounded-full bg-wn shrink-0" />{label}
-    </span>
+      {label}
+    </StatusTag>
   );
 }
 
@@ -108,22 +128,39 @@ function TamTruTag({ worker, onToggle }: { worker: Worker; onToggle?: (w: Worker
   const isRegistered = worker.tamTruStatus === 'registered';
   return (
     <button
-      onClick={e => { e.stopPropagation(); onToggle?.(worker); }}
+      type="button"
+      onClick={e => {
+        e.stopPropagation();
+        onToggle?.(worker);
+      }}
       title={`Click để đổi → ${isRegistered ? 'Chưa đăng ký' : 'Đã đăng ký'}`}
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-all whitespace-nowrap shrink-0 ${
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold border transition-all whitespace-nowrap shrink-0 cursor-pointer active:scale-95 ${
         isRegistered
-          ? 'bg-okbg text-ok border-bdr2 hover:opacity-90'
-          : 'tint-wn text-wn border-wn hover:opacity-90'
+          ? 'bg-okbg text-ok border-ok2/35 hover:opacity-90'
+          : 'tint-wn text-wn border-wn/40 hover:opacity-90'
       }`}
+      style={{ boxShadow: 'inset 0 1px 0 var(--specular)' }}
     >
-      <span className={`w-1.5 h-1.5 rounded-full ${isRegistered ? 'bg-ok2' : 'bg-wn'}`} />
-      {isRegistered ? 'Đã ĐK' : 'Chưa ĐK'}
+      {isRegistered ? <CheckCircle2 size={11} strokeWidth={2.3} /> : <Clock size={11} strokeWidth={2.3} />}
+      <span>{isRegistered ? 'Đã ĐK' : 'Chưa ĐK'}</span>
     </button>
   );
 }
 
 export default function WorkerTable({
-  workers, sortKey, sortDir, onSort, selectedIds, onSelectChange, allIds, onView, onEdit, onDelete, onToggleTamTru, canWriteBlock, rowOffset = 0
+  workers,
+  sortKey,
+  sortDir,
+  onSort,
+  selectedIds,
+  onSelectChange,
+  allIds,
+  onView,
+  onEdit,
+  onDelete,
+  onToggleTamTru,
+  canWriteBlock,
+  rowOffset = 0,
 }: Props) {
   const allSelected = allIds.length > 0 && allIds.every(id => selectedIds.has(id));
   const someSelected = allIds.some(id => selectedIds.has(id)) && !allSelected;
@@ -147,14 +184,14 @@ export default function WorkerTable({
 
   const SortIcon = ({ col }: { col: keyof Worker }) => {
     if (sortKey !== col) return <ArrowUpDown size={12} className="opacity-30" />;
-    return sortDir === 'asc' ? <ArrowUp size={12} className="text-blue-400" /> : <ArrowDown size={12} className="text-blue-400" />;
+    return sortDir === 'asc' ? <ArrowUp size={12} className="text-lnk" /> : <ArrowDown size={12} className="text-lnk" />;
   };
 
   if (workers.length === 0) {
     return (
-      <div className="bg-surf border border-bdr rounded-2xl p-16 flex flex-col items-center justify-center text-center shadow-xl">
-        <div className="w-14 h-14 rounded-2xl bg-act border border-bdr flex items-center justify-center mb-3">
-          <Eye size={24} className="text-ic" />
+      <div className="surface-elevated rounded-2xl p-16 flex flex-col items-center justify-center text-center">
+        <div className="w-14 h-14 rounded-2xl craft-icon-slate flex items-center justify-center mb-3">
+          <Eye size={24} />
         </div>
         <p className="text-base font-bold text-tx">Không tìm thấy công nhân</p>
         <p className="text-xs text-mu mt-1">Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm bên trên</p>
@@ -163,24 +200,28 @@ export default function WorkerTable({
   }
 
   return (
-    <div className="bg-surf border border-bdr rounded-2xl shadow-xl overflow-hidden">
+    <div className="surface-elevated rounded-2xl overflow-hidden">
       <div className="overflow-x-auto scrollbar-thin">
         <table className="w-full border-collapse min-w-[1250px] text-left table-auto">
           <thead>
-            <tr className="bg-act border-b border-bdr sticky top-0 z-20">
-              <th className="px-3 py-3 w-10 text-center bg-act z-20">
+            <tr className="bg-act/95 backdrop-blur-md border-b border-bdr2 sticky top-0 z-20">
+              <th className="px-3 py-3 w-10 text-center bg-act/95 z-20">
                 <input
                   type="checkbox"
                   checked={allSelected}
-                  ref={el => { if (el) el.indeterminate = someSelected; }}
+                  ref={el => {
+                    if (el) el.indeterminate = someSelected;
+                  }}
                   onChange={toggleAll}
-                  className="rounded border-bdr2 bg-surf text-pri focus:ring-pri2"
+                  className="rounded border-bdr2 bg-surf text-pri focus:ring-pri2 cursor-pointer"
                 />
               </th>
               {COLUMNS.map((col, i) => (
                 <th
                   key={`th-${col.key}-${i}`}
-                  className={`px-3 py-3 text-xs font-bold text-mu uppercase tracking-wider whitespace-nowrap cursor-pointer select-none hover:text-tx transition-colors bg-act z-20 ${col.width || ''} ${i === 1 ? 'sticky left-[88px] z-30' : ''}`}
+                  className={`px-3 py-3 text-[11px] font-bold text-mu uppercase tracking-wider whitespace-nowrap cursor-pointer select-none hover:text-tx transition-colors bg-act/95 z-20 ${col.width || ''} ${
+                    i === 1 ? 'sticky left-[88px] z-30' : ''
+                  }`}
                   onClick={() => onSort(col.key)}
                 >
                   <div className="flex items-center gap-1.5 whitespace-nowrap">
@@ -189,8 +230,12 @@ export default function WorkerTable({
                   </div>
                 </th>
               ))}
-              <th className="px-3 py-3 text-xs font-bold text-mu uppercase tracking-wider w-24 whitespace-nowrap bg-act z-20">Tạm trú</th>
-              <th className="px-3 py-3 text-xs font-bold text-mu uppercase tracking-wider w-28 text-right pr-4 whitespace-nowrap bg-act z-20">Thao tác</th>
+              <th className="px-3 py-3 text-[11px] font-bold text-mu uppercase tracking-wider w-24 whitespace-nowrap bg-act/95 z-20">
+                Tạm trú
+              </th>
+              <th className="px-3 py-3 text-[11px] font-bold text-mu uppercase tracking-wider w-28 text-right pr-4 whitespace-nowrap bg-act/95 z-20">
+                Thao tác
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-bdr">
@@ -198,16 +243,19 @@ export default function WorkerTable({
               const isSelected = selectedIds.has(w.id);
               const soNgay = calcSoNgay(w.ngayVaoKTX, w.ngayRaKTX);
               const displayStt = rowOffset + idx + 1;
+              const isFemale =
+                (w.gioiTinh || '').toLowerCase().includes('nữ') || (w.gioiTinh || '').toLowerCase() === 'nu';
+
               return (
                 <tr
                   key={w.id}
                   className={`transition-colors cursor-pointer group ${
                     isSelected
-                      ? 'bg-bdg border-l-2 border-l-pri2'
+                      ? 'bg-bdg/70 border-l-2 border-l-pri2'
                       : idx % 2 === 0
-                      ? 'bg-surf'
-                      : 'bg-act'
-                  } hover:bg-act`}
+                      ? 'bg-surf border-l-2 border-l-transparent hover:border-l-pri2/40'
+                      : 'bg-act/35 border-l-2 border-l-transparent hover:border-l-pri2/40'
+                  } hover:bg-act/75`}
                   onClick={() => onView(w)}
                 >
                   <td className="px-3 py-3 text-center" onClick={e => e.stopPropagation()}>
@@ -215,16 +263,31 @@ export default function WorkerTable({
                       type="checkbox"
                       checked={isSelected}
                       onChange={() => toggleOne(w.id)}
-                      className="rounded border-bdr2 bg-surf text-pri focus:ring-pri2"
+                      className="rounded border-bdr2 bg-surf text-pri focus:ring-pri2 cursor-pointer"
                     />
                   </td>
-                  <td className={`px-3 py-3 whitespace-nowrap sticky left-0 z-10 transition-colors ${isSelected ? 'bg-bdg' : 'bg-surf group-hover:bg-act'}`} onClick={e => e.stopPropagation()}>
-                    <span className="text-xs font-tabular text-mu font-semibold">{displayStt}</span>
+                  <td
+                    className={`px-3 py-3 whitespace-nowrap sticky left-0 z-10 transition-colors ${
+                      isSelected ? 'bg-bdg' : 'bg-surf group-hover:bg-act'
+                    }`}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <span className="text-xs font-mono font-tabular text-mu font-semibold">{displayStt}</span>
                   </td>
-                  <td className={`px-3.5 py-3 whitespace-nowrap min-w-[240px] sticky left-[52px] z-10 transition-colors ${isSelected ? 'bg-bdg' : 'bg-surf group-hover:bg-act'}`}>
+                  <td
+                    className={`px-3.5 py-3 whitespace-nowrap min-w-[240px] sticky left-[52px] z-10 transition-colors ${
+                      isSelected ? 'bg-bdg' : 'bg-surf group-hover:bg-act'
+                    }`}
+                  >
                     <div className="flex flex-col gap-1">
                       <div className="flex items-center gap-2 flex-nowrap whitespace-nowrap">
-                        <div className="w-7 h-7 rounded-lg bg-bdg border border-bdr2 flex items-center justify-center text-lnk text-xs font-bold shrink-0">
+                        <div
+                          className={`w-7 h-7 rounded-lg border flex items-center justify-center text-xs font-bold shrink-0 ${
+                            isFemale
+                              ? 'tint-pink border-pink-tint text-pink-tone'
+                              : 'bg-bdg border-bdr2 text-lnk'
+                          }`}
+                        >
                           {w.hoVaTen.split(' ').pop()?.charAt(0) ?? '?'}
                         </div>
                         <p className="text-sm font-bold text-tx whitespace-nowrap group-hover:text-lnk transition-colors">
@@ -236,27 +299,47 @@ export default function WorkerTable({
                       </div>
                     </div>
                   </td>
-                  <td className="px-3 py-3"><MaNVCell value={w.maNV} /></td>
-                  <td className="px-3 py-3"><PlatoonBadge value={w.tieuDoan} /></td>
-                  <td className="px-3 py-3"><span className="text-xs text-mu font-medium">{w.ktx || '—'}</span></td>
-                  <td className="px-3 py-3"><span className="text-xs font-bold text-tx">{w.day}</span></td>
                   <td className="px-3 py-3">
-                    <span className="badge font-tabular">
-                      {w.phongSo}
-                    </span>
+                    <MaNVCell value={w.maNV} />
                   </td>
-                  <td className="px-3 py-3"><span className="text-xs font-tabular text-mu">{w.giuong || '—'}</span></td>
-                  <td className="px-3 py-3"><span className="text-xs font-tabular text-mu">{w.soDienThoai || '—'}</span></td>
-                  <td className="px-3 py-3"><CCCDCell value={w.cccd} /></td>
-                  <td className="px-3 py-3"><span className="text-xs text-mu truncate max-w-[120px] block">{w.hoKhauTinh || '—'}</span></td>
-                  <td className="px-3 py-3"><span className="text-xs text-mu truncate max-w-[130px] block">{w.toTruong || '—'}</span></td>
-                  <td className="px-3 py-3"><span className="text-xs font-tabular text-mu">{w.ngayVaoKTX || '—'}</span></td>
+                  <td className="px-3 py-3">
+                    <PlatoonBadge value={w.tieuDoan} />
+                  </td>
+                  <td className="px-3 py-3">
+                    <span className="text-xs text-mu font-semibold whitespace-nowrap">{w.ktx || '—'}</span>
+                  </td>
+                  <td className="px-3 py-3">
+                    <span className="text-xs font-bold text-tx whitespace-nowrap">{w.day || '—'}</span>
+                  </td>
+                  <td className="px-3 py-3">
+                    {w.phongSo ? <MonoChip tone="blue">P.{w.phongSo}</MonoChip> : <span className="text-xs text-mu">—</span>}
+                  </td>
+                  <td className="px-3 py-3">
+                    {w.giuong ? <MonoChip>G{w.giuong}</MonoChip> : <span className="text-xs text-mu">—</span>}
+                  </td>
+                  <td className="px-3 py-3">
+                    <span className="text-xs font-mono font-tabular text-mu">{w.soDienThoai || '—'}</span>
+                  </td>
+                  <td className="px-3 py-3">
+                    <CCCDCell value={w.cccd} />
+                  </td>
+                  <td className="px-3 py-3">
+                    <span className="text-xs text-mu truncate max-w-[120px] block">{w.hoKhauTinh || '—'}</span>
+                  </td>
+                  <td className="px-3 py-3">
+                    <span className="text-xs text-mu truncate max-w-[130px] block">{w.toTruong || '—'}</span>
+                  </td>
+                  <td className="px-3 py-3">
+                    <span className="text-xs font-mono font-tabular text-mu">{w.ngayVaoKTX || '—'}</span>
+                  </td>
                   <td className="px-3 py-3">
                     {soNgay !== null ? (
-                      <span className={`text-xs font-tabular font-bold ${soNgay <= 7 ? 'text-ok' : 'text-mu'}`}>
+                      <StatusTag tone={soNgay <= 7 ? 'teal' : 'slate'} mono>
                         {soNgay}n
-                      </span>
-                    ) : <span className="text-ic text-xs">—</span>}
+                      </StatusTag>
+                    ) : (
+                      <span className="text-ic text-xs">—</span>
+                    )}
                   </td>
                   <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
                     <TamTruTag worker={w} onToggle={onToggleTamTru} />
@@ -266,15 +349,15 @@ export default function WorkerTable({
                       <button
                         onClick={() => onView(w)}
                         title="Xem chi tiết"
-                        className="p-1.5 rounded-lg text-lnk hover:text-pri2 hover:bg-bdg transition-colors"
+                        className="p-1.5 rounded-lg text-lnk hover:text-pri2 hover:bg-bdg transition-colors cursor-pointer"
                       >
                         <Eye size={15} />
                       </button>
-                      {(!canWriteBlock || canWriteBlock(w.day, w.ktx)) ? (
+                      {!canWriteBlock || canWriteBlock(w.day, w.ktx) ? (
                         <button
                           onClick={() => onEdit(w)}
                           title="Sửa"
-                          className="p-1.5 rounded-lg text-lnk hover:text-pri2 hover:bg-bdg transition-colors"
+                          className="p-1.5 rounded-lg text-lnk hover:text-pri2 hover:bg-bdg transition-colors cursor-pointer"
                         >
                           <Pencil size={15} />
                         </button>
@@ -283,12 +366,12 @@ export default function WorkerTable({
                           <Pencil size={15} />
                         </button>
                       )}
-                      {onDelete && (
-                        (!canWriteBlock || canWriteBlock(w.day, w.ktx)) ? (
+                      {onDelete &&
+                        (!canWriteBlock || canWriteBlock(w.day, w.ktx) ? (
                           <button
                             onClick={() => onDelete(w)}
                             title="Xóa"
-                            className="p-1.5 rounded-lg text-dgr hover:opacity-80 hover:bg-dgrbg transition-colors"
+                            className="p-1.5 rounded-lg text-dgr hover:opacity-80 hover:bg-dgrbg transition-colors cursor-pointer"
                           >
                             <Trash2 size={15} />
                           </button>
@@ -296,8 +379,7 @@ export default function WorkerTable({
                           <button disabled title="Không có quyền xóa" className="p-1.5 rounded-lg text-ic cursor-not-allowed">
                             <Trash2 size={15} />
                           </button>
-                        )
-                      )}
+                        ))}
                     </div>
                   </td>
                 </tr>

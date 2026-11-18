@@ -5,12 +5,13 @@ import { usePathname, useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   LayoutDashboard, Users, ChevronLeft, ChevronRight, LogOut, BarChart2,
-  ClipboardList, UserCog, RefreshCw, Building2, QrCode, Menu, X, BedDouble, ShieldCheck
+  ClipboardList, UserCog, RefreshCw, Building2, QrCode, Menu, X, BedDouble, ShieldCheck, Search
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useWorkers } from '@/context/WorkerContext';
 import ThemeSwitcher from '@/components/ui/ThemeSwitcher';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
+import { openCommandPalette } from '@/components/ui/CommandPalette';
 
 interface NavItem {
   id: string;
@@ -174,7 +175,7 @@ export default function Sidebar() {
           </span>
         )}
         {!collapsed && badge !== undefined && badge > 0 && (
-          <span className="relative z-10 text-[11px] bg-bdg text-lnk border border-bdr2 rounded-full px-2 py-0.5 font-tabular font-bold">
+          <span className="relative z-10 text-[11px] bg-bdg text-lnk border border-bdr2 rounded-md px-1.5 py-0.5 font-mono font-tabular font-bold">
             {badge}
           </span>
         )}
@@ -206,7 +207,28 @@ export default function Sidebar() {
         </div>
 
         {/* Navigation List */}
-        <nav className="flex-1 px-2.5 pt-4 pb-8 flex flex-col gap-1 overflow-y-auto scrollbar-thin">
+        <nav className="flex-1 px-2.5 pt-3.5 pb-8 flex flex-col gap-1 overflow-y-auto scrollbar-thin">
+          {/* Quick Command Palette Trigger (Ctrl+K) */}
+          <button
+            type="button"
+            onClick={openCommandPalette}
+            title="Tìm kiếm nhanh (Ctrl + K)"
+            className={`mb-2.5 w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-surf/80 hover:bg-act border border-bdr2 text-xs text-mu hover:text-tx transition-colors cursor-pointer ${
+              collapsed ? 'justify-center px-2' : ''
+            }`}
+            style={{ boxShadow: 'inset 0 1px 0 var(--specular)' }}
+          >
+            <Search size={14} className="text-lnk shrink-0" />
+            {!collapsed && (
+              <>
+                <span className="flex-1 text-left truncate font-medium">Tìm nhanh...</span>
+                <kbd className="px-1.5 py-0.5 rounded bg-act border border-bdr2 font-mono text-[10px] font-semibold text-ic">
+                  ⌘K
+                </kbd>
+              </>
+            )}
+          </button>
+
           {!collapsed && (
             <p className="px-3 pt-1 pb-1.5 text-[10px] font-bold text-ic uppercase tracking-widest">
               CHỨC NĂNG CHÍNH
@@ -313,6 +335,15 @@ export default function Sidebar() {
         </div>
 
         <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={openCommandPalette}
+            className="p-2 rounded-xl text-nav hover:text-tx hover:bg-act transition-colors duration-100"
+            title="Tìm nhanh (Ctrl + K)"
+            aria-label="Tìm nhanh"
+          >
+            <Search size={17} />
+          </button>
           <ThemeSwitcher compact />
           <button
             onClick={refreshWorkers}

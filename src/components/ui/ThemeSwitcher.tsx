@@ -18,8 +18,13 @@ export default function ThemeSwitcher({ compact = false, showLabel = true }: The
   const [theme, setTheme] = useState<ThemeMode>('midnight');
 
   useEffect(() => {
-    const current = document.documentElement.getAttribute('data-theme');
-    setTheme(current === 'light' ? 'light' : 'midnight');
+    const sync = () => {
+      const current = document.documentElement.getAttribute('data-theme');
+      setTheme(current === 'light' ? 'light' : 'midnight');
+    };
+    sync();
+    window.addEventListener('ktx:theme-changed', sync);
+    return () => window.removeEventListener('ktx:theme-changed', sync);
   }, []);
 
   const toggle = () => {
@@ -29,6 +34,7 @@ export default function ThemeSwitcher({ compact = false, showLabel = true }: The
     } catch {}
     document.documentElement.setAttribute('data-theme', next);
     setTheme(next);
+    window.dispatchEvent(new CustomEvent('ktx:theme-changed'));
   };
 
   const isLight = theme === 'light';

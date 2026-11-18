@@ -6,6 +6,7 @@ import Sidebar from './Sidebar';
 import { useAuth } from '@/context/AuthContext';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { PageReveal } from '@/components/ui/MotionPrimitives';
+import CommandPalette from '@/components/ui/CommandPalette';
 
 const PUBLIC_PATHS = ['/sign-up-login', '/login', '/register', '/checkout', '/attendance'];
 
@@ -64,6 +65,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </PageReveal>
         </main>
       </div>
+      <CommandPalette />
     </div>
   );
 }

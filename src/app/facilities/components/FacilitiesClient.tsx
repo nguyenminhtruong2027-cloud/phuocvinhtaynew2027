@@ -10,6 +10,7 @@ import {
   AlertCircle, CheckCircle2, Download, Trash2, Filter, Snowflake, AlertTriangle, CheckSquare, Square, Lock, Building2,
 } from 'lucide-react';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
+import { SlidingTabs } from '@/components/ui/MotionPrimitives';
 import * as XLSX from 'xlsx';
 import { exportToExcel } from '@/lib/exportExcel';
 import {
@@ -1715,21 +1716,23 @@ export default function FacilitiesClient() {
 
       {/* Dynamic KTX Sub-tabs — auto-generated from DB */}
       {loading ? (
-        <div className="flex gap-1 bg-muted rounded-lg p-1 w-fit">
-          {[1, 2].map(i => <div key={i} className="w-20 h-8 bg-muted-foreground/20 rounded-md animate-pulse" />)}
+        <div className="flex gap-1 bg-act rounded-xl p-1 w-fit border border-bdr">
+          {[1, 2].map(i => <div key={i} className="w-20 h-8 bg-surf/60 rounded-lg animate-pulse" />)}
         </div>
       ) : allKtxTabs.length > 0 ? (
-        <div className="flex gap-1 bg-muted rounded-lg p-1 w-fit flex-wrap">
-          {allKtxTabs.map(ktx => (
-            <button
-              key={ktx}
-              onClick={() => { setActiveKtx(ktx); setEditingId(null); setEditingRow(null); setFilterDay(''); setSearchPhong(''); setSelectedIds(new Set()); }}
-              className={`px-5 py-2 rounded-md text-sm font-semibold transition-all ${activeKtx === ktx ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              {ktx}
-            </button>
-          ))}
-        </div>
+        <SlidingTabs<string>
+          layoutId="facilities-ktx-tabs"
+          value={activeKtx}
+          onChange={ktx => {
+            setActiveKtx(ktx);
+            setEditingId(null);
+            setEditingRow(null);
+            setFilterDay('');
+            setSearchPhong('');
+            setSelectedIds(new Set());
+          }}
+          tabs={allKtxTabs.map(ktx => ({ id: ktx, label: ktx, icon: Building2 }))}
+        />
       ) : null}
 
       {/* Filters scoped to active KTX tab */}
@@ -1847,15 +1850,15 @@ export default function FacilitiesClient() {
       )}
 
       {/* Table */}
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between flex-wrap gap-2">
+      <div className="surface-elevated rounded-2xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-bdr flex items-center justify-between flex-wrap gap-2 bg-act/30">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-foreground">
+            <span className="text-sm font-bold text-tx">
               {activeKtx} — {sortedRows.length} phòng/khu vực
-              {hasActiveFilters && <span className="ml-2 text-xs tint-wn text-wn border border-wn px-1.5 py-0.5 rounded-full">đang lọc</span>}
+              {hasActiveFilters && <span className="ml-2 text-xs tint-wn text-wn border border-wn/40 px-2 py-0.5 rounded-md font-semibold">đang lọc</span>}
             </span>
             {selectedIds.size > 0 && (
-              <span className="text-xs bg-primary/20 text-primary font-medium px-2 py-0.5 rounded-full">
+              <span className="text-xs bg-bdg text-lnk border border-pri2/35 font-semibold px-2 py-0.5 rounded-md">
                 Đã chọn {selectedIds.size}
               </span>
             )}
@@ -1910,7 +1913,7 @@ export default function FacilitiesClient() {
         ) : (
           <div className="overflow-x-auto scrollbar-thin">
             <table className="w-full min-w-[1000px]">
-              <thead className="bg-muted/50 border-b border-border">
+              <thead className="bg-act/95 backdrop-blur-md border-b border-bdr2 sticky top-0 z-10">
                 <tr>
                   <th className="px-3 py-2.5 w-10 text-center">
                     <input

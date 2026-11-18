@@ -1,7 +1,23 @@
 'use client';
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { motion } from 'motion/react';
 import { Worker, calcSoNgay, getProfileStatus } from '@/data/workers';
-import { X, Users, Phone, CreditCard, MapPin, Calendar, FileText, VenusAndMars, CheckCircle2, Printer } from 'lucide-react';
+import {
+  X,
+  Users,
+  Phone,
+  CreditCard,
+  MapPin,
+  Calendar,
+  FileText,
+  VenusAndMars,
+  CheckCircle2,
+  Printer,
+  DoorOpen,
+  Shield,
+  AlertCircle,
+  Clock,
+} from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
 import { printHtmlViaIframe, escapeHtml } from '@/lib/printHtml';
@@ -11,8 +27,9 @@ import {
   syncRoomGenderToSupabase,
   loadSavedRoomGenderMap,
   saveRoomGenderMap,
-  RoomGenderType,
 } from '@/lib/roomGender';
+import { CraftIconBadge } from '@/components/ui/CraftIcon';
+import { StatusTag, MonoChip } from '@/components/ui/StatusTag';
 
 interface Props {
   ktx: string;
@@ -20,6 +37,7 @@ interface Props {
   buildingRaw?: string;
   room: string;
   workers: Worker[];
+  capacity?: number;
   adminAssignedUnit?: string;
   roomNote?: string | null;
   assignedGender?: 'male' | 'female' | 'auto';
@@ -42,11 +60,11 @@ export default function RoomDrawer({
   buildingRaw,
   room,
   workers,
+  capacity,
   adminAssignedUnit,
   roomNote,
   assignedGender: propAssignedGender,
   onClose,
-  onUnitUpdated,
   onRoomNoteUpdated,
   onRoomGenderUpdated,
 }: Props) {
@@ -129,7 +147,9 @@ export default function RoomDrawer({
   }, [ktx, room, buildingRaw, building, roomNote, resolveEffectiveDayNha]);
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [onClose]);
@@ -145,7 +165,6 @@ export default function RoomDrawer({
     setSelectedGender(gender);
     setSavingGender(true);
 
-    // Save to localStorage immediately
     const map = loadSavedRoomGenderMap();
     if (gender === 'auto') {
       delete map[roomStorageKey];
@@ -153,11 +172,8 @@ export default function RoomDrawer({
       map[roomStorageKey] = gender;
     }
     saveRoomGenderMap(map);
-
-    // Notify parent
     onRoomGenderUpdated?.(gender);
 
-    // Sync to Supabase
     const effectiveDayNha = resolveEffectiveDayNha();
     await syncRoomGenderToSupabase(ktx, effectiveDayNha, room, gender);
     setSavingGender(false);
@@ -177,7 +193,6 @@ export default function RoomDrawer({
       const trimmed = noteInput.trim();
       const effectiveDayNha = resolveEffectiveDayNha();
 
-      // Step 1: Try UPDATE first
       const { data: updateData, error: updateError } = await supabase
         .from('room_units')
         .update({ room_note: trimmed || null, updated_at: new Date().toISOString() })
@@ -190,31 +205,26 @@ export default function RoomDrawer({
         throw new Error(`Lỗi cập nhật ghi chú: ${updateError.message}`);
       }
 
-      // Step 2: If no row was updated, insert a new row
       if (!updateData || updateData.length === 0) {
-        const { error: insertError } = await supabase
-          .from('room_units')
-          .insert({
-            ktx,
-            day_nha: effectiveDayNha,
-            phong_so: room,
-            unit: adminAssignedUnit ?? '',
-            room_note: trimmed || null,
-          });
+        const { error: insertError } = await supabase.from('room_units').insert({
+          ktx,
+          day_nha: effectiveDayNha,
+          phong_so: room,
+          unit: adminAssignedUnit ?? '',
+          room_note: trimmed || null,
+        });
 
         if (insertError) {
-          await supabase
-            .from('room_units')
-            .upsert(
-              {
-                ktx,
-                day_nha: effectiveDayNha,
-                phong_so: room,
-                unit: adminAssignedUnit ?? '',
-                room_note: trimmed || null,
-              },
-              { onConflict: 'ktx,day_nha,phong_so' }
-            );
+          await supabase.from('room_units').upsert(
+            {
+              ktx,
+              day_nha: effectiveDayNha,
+              phong_so: room,
+              unit: adminAssignedUnit ?? '',
+              room_note: trimmed || null,
+            },
+            { onConflict: 'ktx,day_nha,phong_so' }
+          );
         }
       }
 
@@ -234,7 +244,8 @@ export default function RoomDrawer({
     const dayLabel = resolveEffectiveDayNha() || building;
     const rowsHtml = workers
       .map((w, idx) => {
-        const gender = (w.gioiTinh || '').toLowerCase().includes('nữ') || (w.gioiTinh || '').toLowerCase() === 'nu' ? 'Nữ' : 'Nam';
+        const gender =
+          (w.gioiTinh || '').toLowerCase().includes('nữ') || (w.gioiTinh || '').toLowerCase() === 'nu' ? 'Nữ' : 'Nam';
         return `<tr>
           <td style="text-align:center">${idx + 1}</td>
           <td style="font-weight:600">${escapeHtml(w.hoVaTen || '')}</td>
@@ -306,67 +317,116 @@ export default function RoomDrawer({
     printHtmlViaIframe(htmlDoc);
   }, [room, resolveEffectiveDayNha, building, workers, ktx, genderInfo]);
 
+  const effectiveCap = capacity && capacity > 0 ? capacity : 0;
+  const occPct = effectiveCap > 0 ? Math.min(100, Math.round((workers.length / effectiveCap) * 100)) : 0;
+  const isOver = effectiveCap > 0 && workers.length > effectiveCap;
+  const isFull = effectiveCap > 0 && workers.length === effectiveCap;
+
   return (
     <>
       {/* Toast */}
       {genderToast && (
-        <div className="fixed top-5 right-5 z-[100] flex items-center gap-2 px-4 py-2.5 bg-surf border border-bdr2 text-tx rounded-xl shadow-2xl animate-fade-in backdrop-blur-md text-xs font-bold">
+        <div className="fixed top-5 right-5 z-[100] flex items-center gap-2 px-4 py-2.5 bg-surf border border-bdr2 text-tx rounded-xl shadow-2xl backdrop-blur-md text-xs font-bold">
           <CheckCircle2 size={16} className="text-ok shrink-0" />
           <span>{genderToast}</span>
         </div>
       )}
 
-      {/* Backdrop */}
-      <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      {/* Animated Backdrop */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.18 }}
+        className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
 
-      {/* Drawer / Bottom Sheet on Mobile */}
-      <div className="fixed inset-x-0 bottom-0 max-h-[85vh] sm:max-h-full sm:top-0 sm:right-0 sm:left-auto sm:inset-x-auto sm:h-full z-50 w-full sm:max-w-md bg-surf border-t sm:border-t-0 sm:border-l border-bdr text-tx shadow-2xl flex flex-col rounded-t-2xl sm:rounded-none overflow-hidden animate-slide-in-right">
+      {/* Animated Drawer / Bottom Sheet */}
+      <motion.div
+        initial={{ x: '100%', opacity: 0.9 }}
+        animate={{ x: 0, opacity: 1 }}
+        exit={{ x: '100%', opacity: 0.9 }}
+        transition={{ type: 'spring', stiffness: 390, damping: 36 }}
+        className="fixed inset-x-0 bottom-0 max-h-[88vh] sm:max-h-full sm:top-0 sm:right-0 sm:left-auto sm:inset-x-auto sm:h-full z-50 w-full sm:max-w-md bg-surf border-t sm:border-t-0 sm:border-l border-bdr2 text-tx shadow-2xl flex flex-col rounded-t-2xl sm:rounded-none overflow-hidden"
+      >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-bdr bg-act/60">
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-base font-bold text-tx flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-pri2" />
-                {building} — {room?.trim().startsWith('Phòng') || room?.trim().startsWith('P.') ? room.trim() : `Phòng ${room}`}
-              </h2>
-              {/* Gender badge */}
-              <span
-                className={`px-2 py-0.5 rounded-full text-[11px] font-bold border inline-flex items-center gap-1 ${
-                  genderInfo.gender === 'female'
-                    ? 'bg-bdg text-pri2 border-bdr2'
-                    : genderInfo.gender === 'male'
-                    ? 'bg-bdg text-lnk border-bdr2'
-                    : 'bg-act text-mu border-bdr'
-                }`}
-              >
-                <span>{genderInfo.gender === 'female' ? '♀' : genderInfo.gender === 'male' ? '♂' : '•'}</span>
-                <span>{genderInfo.label}</span>
-              </span>
+        <div className="px-5 py-4 border-b border-bdr bg-act/55 space-y-2.5">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-start gap-3 min-w-0">
+              <CraftIconBadge
+                icon={DoorOpen}
+                tone={genderInfo.gender === 'female' ? 'pink' : 'blue'}
+                size="sm"
+                interactive={false}
+              />
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base font-extrabold text-tx tracking-tight">
+                    {building} —{' '}
+                    {room?.trim().startsWith('Phòng') || room?.trim().startsWith('P.') ? room.trim() : `Phòng ${room}`}
+                  </h2>
+                  <StatusTag
+                    tone={genderInfo.gender === 'female' ? 'pink' : genderInfo.gender === 'male' ? 'blue' : 'slate'}
+                  >
+                    {genderInfo.gender === 'female' ? '♀' : genderInfo.gender === 'male' ? '♂' : '•'} {genderInfo.label}
+                  </StatusTag>
+                </div>
+                <p className="text-xs text-mu mt-0.5 font-tabular">
+                  {workers.length} công nhân ({genderInfo.maleCount} Nam · {genderInfo.femaleCount} Nữ)
+                  {effectiveCap > 0 && ` · Định mức ${effectiveCap} giường`}
+                </p>
+              </div>
             </div>
-            <p className="text-xs text-mu mt-0.5 font-tabular">
-              {workers.length} công nhân đang lưu trú ({genderInfo.maleCount} Nam · {genderInfo.femaleCount} Nữ)
-            </p>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            {workers.length > 0 && (
+
+            <div className="flex items-center gap-1 shrink-0">
+              {workers.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handlePrintRoster}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-surf hover:bg-act border border-bdr2 text-xs font-semibold text-tx transition-colors cursor-pointer"
+                  title="In danh sách nhân khẩu phòng (A4)"
+                >
+                  <Printer size={14} className="text-lnk" />
+                  <span className="hidden sm:inline">In</span>
+                </button>
+              )}
               <button
-                type="button"
-                onClick={handlePrintRoster}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-act hover:bg-act/80 border border-bdr text-xs font-semibold text-tx transition-colors"
-                title="In danh sách nhân khẩu phòng (A4)"
+                onClick={onClose}
+                className="p-2 rounded-xl text-mu hover:text-tx hover:bg-act transition-colors cursor-pointer"
               >
-                <Printer size={14} className="text-lnk" />
-                <span className="hidden sm:inline">In danh sách</span>
+                <X size={18} />
               </button>
-            )}
-            <button onClick={onClose} className="p-2 rounded-xl text-mu hover:text-tx hover:bg-act transition-colors">
-              <X size={18} />
-            </button>
+            </div>
           </div>
+
+          {/* Live Occupancy Progress Bar */}
+          {effectiveCap > 0 && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-[11px] font-semibold">
+                <span className="text-mu">Mức lấp đầy phòng</span>
+                <span
+                  className={`font-mono font-tabular ${
+                    isOver ? 'text-dgr' : isFull ? 'text-wn' : 'text-ok'
+                  }`}
+                >
+                  {workers.length}/{effectiveCap} ({occPct}%)
+                </span>
+              </div>
+              <div className="h-1.5 w-full rounded-full bg-surf border border-bdr overflow-hidden">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${occPct}%` }}
+                  transition={{ duration: 0.45, ease: 'easeOut' }}
+                  className={`h-full rounded-full ${isOver ? 'bg-dgr' : isFull ? 'bg-wn' : 'bg-ok2'}`}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── Room Gender Classification Admin Control ── */}
-        <div className="px-5 py-3.5 border-b border-bdr bg-act/70">
+        <div className="px-5 py-3.5 border-b border-bdr bg-act/60">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <VenusAndMars size={14} className="text-lnk" />
@@ -374,28 +434,21 @@ export default function RoomDrawer({
                 Phân Loại Công Năng Phòng
               </span>
             </div>
-            {genderInfo.isCustom ? (
-              <span className="text-[10px] font-semibold text-ok bg-okbg px-2 py-0.5 rounded border border-bdr2">
-                Admin đã gán
-              </span>
-            ) : (
-              <span className="text-[10px] font-medium text-mu bg-act px-2 py-0.5 rounded">
-                Tự động theo nhân sự
-              </span>
-            )}
+            <StatusTag tone={genderInfo.isCustom ? 'teal' : 'slate'}>
+              {genderInfo.isCustom ? 'Admin đã gán' : 'Tự động theo nhân sự'}
+            </StatusTag>
           </div>
 
-          {/* Direct gender classification buttons */}
           <div className="space-y-2">
             <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
                 onClick={() => handleSelectGender('male')}
                 disabled={savingGender || !canEditRoomGender}
-                className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed ${
+                className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${
                   selectedGender === 'male'
-                    ? 'bg-pri text-white border-pri2 shadow-md shadow-sh ring-1 ring-pri2'
-                    : 'bg-act/80 text-mu border-bdr hover:bg-act hover:text-tx'
+                    ? 'bg-pri text-white border-pri2 shadow-md'
+                    : 'bg-surf text-mu border-bdr hover:bg-act hover:text-tx'
                 }`}
               >
                 <span className="text-sm">♂</span>
@@ -406,10 +459,10 @@ export default function RoomDrawer({
                 type="button"
                 onClick={() => handleSelectGender('female')}
                 disabled={savingGender || !canEditRoomGender}
-                className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed ${
+                className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${
                   selectedGender === 'female'
-                    ? 'bg-pri text-white border-bdr2 shadow-md shadow-pink-600/30 ring-1 ring-pink-400'
-                    : 'bg-act/80 text-mu border-bdr hover:bg-act hover:text-tx'
+                    ? 'tint-pink text-pink-tone border-pink-tint shadow-md'
+                    : 'bg-surf text-mu border-bdr hover:bg-act hover:text-tx'
                 }`}
               >
                 <span className="text-sm">♀</span>
@@ -420,10 +473,10 @@ export default function RoomDrawer({
                 type="button"
                 onClick={() => handleSelectGender('auto')}
                 disabled={savingGender || !canEditRoomGender}
-                className={`py-2 px-2 rounded-xl text-xs font-medium border transition-all flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed ${
+                className={`py-2 px-2 rounded-xl text-xs font-semibold border transition-all flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${
                   selectedGender === 'auto'
-                    ? 'bg-okbg text-ok border-bdr2 shadow-sm'
-                    : 'bg-act/80 text-mu border-bdr hover:bg-act hover:text-mu'
+                    ? 'bg-okbg text-ok border-ok2/40 shadow-sm'
+                    : 'bg-surf text-mu border-bdr hover:bg-act hover:text-tx'
                 }`}
               >
                 <span>⚡</span>
@@ -444,7 +497,7 @@ export default function RoomDrawer({
           <div className="px-5 py-3 border-b border-bdr tint-wn">
             <div className="flex items-center gap-2 mb-2">
               <FileText size={13} className="text-wn flex-shrink-0" />
-              <span className="text-xs font-semibold text-wn">Ghi chú phòng</span>
+              <span className="text-xs font-bold text-wn">Ghi chú phòng</span>
               {loadingNote && <span className="text-[10px] text-wn/70 ml-auto">Đang tải...</span>}
             </div>
             <textarea
@@ -452,7 +505,7 @@ export default function RoomDrawer({
               onChange={e => setNoteInput(e.target.value)}
               placeholder="Điền thông tin: loại đơn vị, ghi chú đặc biệt..."
               rows={2}
-              className="w-full text-xs border border-bdr rounded-xl px-3 py-2 bg-act/80 text-tx placeholder-mu focus:outline-none focus:ring-1 focus:ring-amber-400 disabled:opacity-50 resize-none"
+              className="w-full text-xs border border-bdr2 rounded-xl px-3 py-2 bg-surf text-tx placeholder-mu focus:outline-none focus:ring-1 focus:ring-wn disabled:opacity-50 resize-none"
               disabled={savingNote || loadingNote}
             />
             <div className="flex items-center justify-between mt-2">
@@ -460,14 +513,14 @@ export default function RoomDrawer({
                 {noteError && <p className="text-xs text-dgr">{noteError}</p>}
                 {noteSuccess && (
                   <p className="text-xs text-ok font-semibold flex items-center gap-1">
-                    <span>✓</span> Đã lưu ghi chú thành công!
+                    <CheckCircle2 size={12} /> Đã lưu ghi chú thành công!
                   </p>
                 )}
               </div>
               <button
                 onClick={handleSaveRoomNote}
                 disabled={savingNote || loadingNote}
-                className="flex-shrink-0 px-3.5 py-1.5 rounded-lg bg-wn hover:opacity-90 text-wn-fg text-xs font-semibold transition-colors disabled:opacity-50 shadow-md"
+                className="flex-shrink-0 px-3.5 py-1.5 rounded-lg bg-wn hover:opacity-90 text-wn-fg text-xs font-bold transition-colors disabled:opacity-50 shadow-sm cursor-pointer"
               >
                 {savingNote ? 'Đang lưu...' : 'Lưu ghi chú'}
               </button>
@@ -476,85 +529,101 @@ export default function RoomDrawer({
         )}
 
         {/* Legend */}
-        <div className="flex items-center gap-4 px-5 py-2.5 border-b border-bdr/60 bg-act/40 text-xs text-mu">
-          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-ok2" />Đủ hồ sơ</span>
-          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-dgr" />Thiếu CCCD/SĐT</span>
-          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-wn" />Chưa phân phòng</span>
+        <div className="flex items-center gap-3 px-5 py-2.5 border-b border-bdr bg-act/35 text-[11px] text-mu flex-wrap">
+          <StatusTag tone="teal" icon={CheckCircle2}>
+            Đủ hồ sơ
+          </StatusTag>
+          <StatusTag tone="rose" icon={AlertCircle}>
+            Thiếu CCCD/SĐT
+          </StatusTag>
+          <StatusTag tone="amber" icon={Clock}>
+            Chưa phân phòng
+          </StatusTag>
         </div>
 
         {/* Worker list */}
         <div className="flex-1 overflow-y-auto scrollbar-thin">
           {workers.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center p-8">
-              <div className="w-14 h-14 rounded-2xl bg-act border border-bdr flex items-center justify-center mb-3">
-                <Users size={28} className="text-ic" />
+              <div className="w-14 h-14 rounded-2xl craft-icon-slate flex items-center justify-center mb-3">
+                <Users size={26} />
               </div>
               <p className="text-sm font-bold text-tx">Phòng trống</p>
               <p className="text-xs text-mu mt-1">Chưa có công nhân nào được xếp vào phòng này</p>
             </div>
           ) : (
-            <div className="divide-y divide-gray-700/50">
+            <div className="divide-y divide-bdr">
               {workers.map((w, idx) => {
                 const soNgay = calcSoNgay(w.ngayVaoKTX, w.ngayRaKTX);
-                const isFemaleWorker = (w.gioiTinh || '').toLowerCase().includes('nữ') || (w.gioiTinh || '').toLowerCase() === 'nu';
+                const isFemaleWorker =
+                  (w.gioiTinh || '').toLowerCase().includes('nữ') || (w.gioiTinh || '').toLowerCase() === 'nu';
                 return (
-                  <div key={w.id} className="px-5 py-3 hover:bg-act/70 transition-colors">
+                  <div key={w.id} className="px-5 py-3 hover:bg-act/60 transition-colors">
                     <div className="flex items-start gap-3">
                       <div className="flex items-center gap-2 flex-shrink-0 mt-0.5">
-                        <span className="text-xs text-ic w-5 text-right font-tabular">{idx + 1}</span>
+                        <span className="text-xs text-ic w-5 text-right font-mono font-tabular">{idx + 1}</span>
                         <StatusDot worker={w} />
-                        <div className={`w-8 h-8 rounded-lg border flex items-center justify-center text-xs font-bold ${
-                          isFemaleWorker
-                            ? 'bg-bdg border-bdr2 text-pri2'
-                            : 'bg-bdg border-bdr2 text-lnk'
-                        }`}>
+                        <div
+                          className={`w-8 h-8 rounded-lg border flex items-center justify-center text-xs font-bold ${
+                            isFemaleWorker
+                              ? 'tint-pink border-pink-tint text-pink-tone'
+                              : 'bg-bdg border-bdr2 text-lnk'
+                          }`}
+                        >
                           {w.hoVaTen.split(' ').pop()?.charAt(0) ?? '?'}
                         </div>
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="text-sm font-bold text-tx whitespace-normal break-words leading-tight">{w.hoVaTen}</p>
-                            <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${
-                              isFemaleWorker
-                                ? 'bg-bdg text-pri2 border-bdr2'
-                                : 'bg-bdg text-lnk border-bdr2'
-                            }`}>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className="text-sm font-bold text-tx whitespace-normal break-words leading-tight">
+                              {w.hoVaTen}
+                            </p>
+                            <StatusTag tone={isFemaleWorker ? 'pink' : 'blue'}>
                               {isFemaleWorker ? 'Nữ' : 'Nam'}
-                            </span>
+                            </StatusTag>
                           </div>
                           {w.tieuDoan && (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-bdg text-lnk border border-bdr2 whitespace-nowrap shrink-0">
+                            <StatusTag tone="blue" icon={Shield}>
                               TD {w.tieuDoan}
-                            </span>
+                            </StatusTag>
                           )}
                         </div>
-                        <p className="text-xs text-mu font-tabular whitespace-nowrap truncate mt-0.5">{w.maNV ? `#${w.maNV}` : 'Chưa có mã NV'}</p>
+                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                          {w.maNV ? (
+                            <MonoChip>#{w.maNV}</MonoChip>
+                          ) : (
+                            <span className="text-xs text-mu italic">Chưa có mã NV</span>
+                          )}
+                          {w.giuong && <MonoChip tone="blue">Giường {w.giuong}</MonoChip>}
+                        </div>
                         <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
                           {w.soDienThoai && (
-                            <span className="flex items-center gap-1 text-mu font-tabular whitespace-nowrap">
-                              <Phone size={11} className="text-mu shrink-0" />{w.soDienThoai}
+                            <span className="flex items-center gap-1 text-mu font-mono font-tabular whitespace-nowrap">
+                              <Phone size={11} className="text-ic shrink-0" />
+                              {w.soDienThoai}
                             </span>
                           )}
                           {w.cccd && (
-                            <span className="flex items-center gap-1 text-mu font-tabular whitespace-nowrap">
-                              <CreditCard size={11} className="shrink-0" />{w.cccd.slice(0,3)}****{w.cccd.slice(-3)}
+                            <span className="flex items-center gap-1 text-mu font-mono font-tabular whitespace-nowrap">
+                              <CreditCard size={11} className="text-ic shrink-0" />
+                              {w.cccd.slice(0, 3)}****{w.cccd.slice(-3)}
                             </span>
                           )}
                           {w.hoKhauTinh && (
                             <span className="flex items-center gap-1 text-mu whitespace-nowrap">
-                              <MapPin size={11} className="shrink-0" />{w.hoKhauTinh}
+                              <MapPin size={11} className="text-ic shrink-0" />
+                              {w.hoKhauTinh}
                             </span>
                           )}
                           {soNgay !== null && (
                             <span className="flex items-center gap-1 text-ok font-semibold font-tabular whitespace-nowrap">
-                              <Calendar size={11} className="text-ok shrink-0" />{soNgay} ngày
+                              <Calendar size={11} className="text-ok shrink-0" />
+                              {soNgay} ngày
                             </span>
                           )}
                         </div>
-                        {w.toTruong && (
-                          <p className="text-xs text-mu mt-1">Tổ trưởng: {w.toTruong}</p>
-                        )}
+                        {w.toTruong && <p className="text-xs text-mu mt-1">Tổ trưởng: {w.toTruong}</p>}
                       </div>
                     </div>
                   </div>
@@ -563,7 +632,7 @@ export default function RoomDrawer({
             </div>
           )}
         </div>
-      </div>
+      </motion.div>
     </>
   );
 }

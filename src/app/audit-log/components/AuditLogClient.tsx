@@ -3,10 +3,12 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useAudit, AuditAction, AuditEntry } from '@/context/AuditContext';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
-import { Filter, Clock, User, Activity, Calendar, X, Download } from 'lucide-react';
+import { Filter, Clock, User, Activity, Calendar, X, Download, ClipboardList, Shield } from 'lucide-react';
 import { exportToExcel } from '@/lib/exportExcel';
 import { getVNDateString } from '@/lib/vnDate';
 import { toast } from 'sonner';
+import { CraftIconBadge } from '@/components/ui/CraftIcon';
+import { StatusTag } from '@/components/ui/StatusTag';
 
 const ACTION_COLORS: Record<AuditAction, string> = {
   'Thêm': 'bg-okbg text-ok border-bdr2',
@@ -267,32 +269,34 @@ export default function AuditLogClient() {
 
   return (
     <div className="px-3 sm:px-6 lg:px-8 xl:px-10 py-4 sm:py-6 max-w-screen-2xl mx-auto">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 sm:mb-6">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-foreground">Nhật Ký Hệ Thống</h1>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-            {searchingServer ? 'Đang truy vấn lịch sử...' : `${filtered.length} bản ghi${hasActiveFilter ? ' (tra cứu toàn bộ lịch sử)' : ' gần nhất'} · Tất cả tài khoản Admin`}
-          </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 sm:mb-6 pb-3.5 border-b border-bdr">
+        <div className="flex items-center gap-3">
+          <CraftIconBadge icon={ClipboardList} badgeIcon={Shield} tone="blue" size="md" />
+          <div>
+            <h1 className="text-xl sm:text-2xl font-extrabold text-tx tracking-tight">Nhật Ký Hệ Thống</h1>
+            <p className="text-xs sm:text-sm text-mu mt-0.5">
+              {searchingServer ? 'Đang truy vấn lịch sử...' : `${filtered.length} bản ghi${hasActiveFilter ? ' (tra cứu toàn bộ lịch sử)' : ' gần nhất'} · Tất cả tài khoản Admin`}
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
             onClick={handleExportLogs}
             disabled={filtered.length === 0}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-bdr3 bg-transparent text-tx text-xs font-semibold hover:bg-act transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-bdr2 bg-surf text-tx text-xs font-semibold hover:bg-act transition-colors disabled:opacity-50 shadow-sm cursor-pointer"
           >
             <Download size={14} />
             <span>Xuất Excel</span>
           </button>
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-dgrbg border border-dgr w-fit">
-            <span className="w-2 h-2 rounded-full bg-dgr" />
-            <span className="text-xs font-semibold text-dgr">Admin Only</span>
-          </div>
+          <StatusTag tone="rose" dot size="sm">
+            Admin Only
+          </StatusTag>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="bg-card border border-border rounded-xl p-3 sm:p-4 mb-4 space-y-3">
+      <div className="surface-elevated rounded-2xl p-3 sm:p-4 mb-4 space-y-3">
         <div className="flex flex-col sm:flex-row flex-wrap gap-2.5 sm:gap-3">
           {/* Account filter */}
           <div className="relative w-full sm:min-w-[180px] sm:flex-1">
@@ -368,19 +372,19 @@ export default function AuditLogClient() {
       </div>
 
       {/* Table */}
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <div className="surface-elevated rounded-2xl overflow-hidden">
         <div className="overflow-x-auto scrollbar-thin">
           <table className="w-full text-sm min-w-[700px]">
-            <thead className="bg-muted/50 border-b border-border">
+            <thead className="bg-act/95 backdrop-blur-md border-b border-bdr2 sticky top-0 z-10">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground whitespace-nowrap">
+                <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-mu whitespace-nowrap">
                   <div className="flex items-center gap-1"><Clock size={12} />Thời gian (UTC+7)</div>
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground whitespace-nowrap">
+                <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-mu whitespace-nowrap">
                   <div className="flex items-center gap-1"><User size={12} />Tài khoản thực hiện</div>
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground whitespace-nowrap">Hành động</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Chi tiết</th>
+                <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-mu whitespace-nowrap">Hành động</th>
+                <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-mu">Chi tiết</th>
               </tr>
             </thead>
             <tbody>

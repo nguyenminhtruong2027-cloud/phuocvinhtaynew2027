@@ -443,7 +443,7 @@ function CCCDQRScanner({ onScanned, onClose, onSwitchOCR }: {
           {status === 'error' && <p className="text-xs text-red-500 text-center">{errorMsg || 'Không thể truy cập camera. Vui lòng nhập tay.'}</p>}
           <button
             onClick={onSwitchOCR}
-            className="w-full py-2 border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
+            className="w-full py-2 border border-wn/40 tint-wn hover:opacity-90 text-wn rounded-xl text-xs font-semibold transition-opacity flex items-center justify-center gap-1.5"
           >
             <Camera size={12} />
             Mã QR bị hỏng? Chuyển sang chụp mặt trước (OCR)

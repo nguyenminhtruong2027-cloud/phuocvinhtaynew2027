@@ -677,16 +677,16 @@ function ExcelImportModal({
               <div className="rounded-xl border border-border bg-muted/20 p-3.5 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-100 text-green-700 text-xs font-bold border border-green-200">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-okbg text-ok text-xs font-bold border border-ok2/35">
                       ✓ Đọc {total} dòng · Mới hợp lệ: {dupStats.newCount}
                     </span>
                     {dupStats.sysDupCount > 0 && (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-bold border border-amber-300">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md tint-wn text-wn text-xs font-bold border border-wn/40">
                         <AlertTriangle size={12} /> Trùng hệ thống: {dupStats.sysDupCount}
                       </span>
                     )}
                     {dupStats.fileDupCount > 0 && (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-orange-100 text-orange-800 text-xs font-bold border border-orange-300">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md tint-wn text-wn text-xs font-bold border border-wn/40">
                         <AlertCircle size={12} /> Trùng trong file: {dupStats.fileDupCount}
                       </span>
                     )}
@@ -694,7 +694,7 @@ function ExcelImportModal({
                       <button
                         type="button"
                         onClick={() => setShowOverloadDetails(v => !v)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold border border-red-300 hover:bg-red-200 transition-colors"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md tint-dgr text-dgr text-xs font-bold border border-dgr/40 hover:opacity-90 transition-opacity"
                       >
                         <AlertTriangle size={12} />
                         <span>Cảnh báo quá tải: {capacityCheck.overloadedList.length} phòng</span>
@@ -780,18 +780,18 @@ function ExcelImportModal({
                           <td className="px-2 py-1.5 whitespace-nowrap">
                             <div className="flex items-center gap-1">
                               {analysis?.status === 'new' ? (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-700 border border-green-200">Mới</span>
+                                <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-okbg text-ok border border-ok2/35">Mới</span>
                               ) : analysis?.status === 'dup_system' ? (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300" title={analysis.reason}>
+                                <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold tint-wn text-wn border border-wn/40" title={analysis.reason}>
                                   {analysis.reason}
                                 </span>
                               ) : (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800 border border-orange-300" title={analysis?.reason}>
+                                <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold tint-wn text-wn border border-wn/40" title={analysis?.reason}>
                                   Trùng file
                                 </span>
                               )}
                               {isOverloadedRoom && !willSkip && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 border border-red-200" title="Phòng sẽ quá tải">
+                                <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold tint-dgr text-dgr border border-dgr/40" title="Phòng sẽ quá tải">
                                   Quá tải
                                 </span>
                               )}
@@ -1112,36 +1112,36 @@ function TamTruExportModal({ workers, onClose }: { workers: Worker[]; onClose: (
 // Delete All Confirm Modal
 function DeleteAllConfirmModal({ onConfirm, onClose, loading }: { onConfirm: () => void; onClose: () => void; loading?: boolean }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <div className="bg-card rounded-xl shadow-modal w-full max-w-md border border-red-200">
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-red-100 bg-red-50 rounded-t-xl">
-          <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
-            <AlertCircle size={20} className="text-red-600" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm">
+      <div className="surface-elevated rounded-2xl shadow-2xl w-full max-w-md border border-dgr/40 overflow-hidden">
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-dgr/25 tint-dgr">
+          <div className="flex-shrink-0 w-10 h-10 rounded-xl craft-icon-rose flex items-center justify-center">
+            <AlertCircle size={20} />
           </div>
           <div>
-            <h2 className="text-base font-bold text-red-700">CẢNH BÁO: Xóa toàn bộ dữ liệu</h2>
-            <p className="text-xs text-red-500">Hành động này không thể hoàn tác</p>
+            <h2 className="text-base font-extrabold text-dgr">CẢNH BÁO: Xóa toàn bộ dữ liệu</h2>
+            <p className="text-xs text-mu">Hành động này không thể hoàn tác</p>
           </div>
         </div>
         <div className="p-5 space-y-3">
-          <p className="text-sm text-foreground font-medium">
-            Bạn có chắc chắn muốn xóa <span className="text-red-600 font-bold">TOÀN BỘ</span> danh sách công nhân hiện tại không?
+          <p className="text-sm text-tx font-medium">
+            Bạn có chắc chắn muốn xóa <span className="text-dgr font-bold">TOÀN BỘ</span> danh sách công nhân hiện tại không?
           </p>
-          <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-            <p className="text-xs text-red-700 font-semibold">⚠ Hành động này không thể hoàn tác!</p>
-            <ul className="mt-1 text-xs text-red-600 space-y-0.5 list-disc list-inside">
+          <div className="tint-dgr border border-dgr/35 rounded-xl p-3">
+            <p className="text-xs text-dgr font-bold">Hành động này không thể hoàn tác!</p>
+            <ul className="mt-1 text-xs text-mu space-y-0.5 list-disc list-inside">
               <li>Toàn bộ dữ liệu công nhân sẽ bị xóa vĩnh viễn</li>
               <li>Dữ liệu trên Supabase sẽ bị xóa hoàn toàn</li>
               <li>Bạn sẽ cần Import lại từ file Excel mới</li>
             </ul>
           </div>
         </div>
-        <div className="px-5 py-3 border-t border-border flex justify-end gap-2">
+        <div className="px-5 py-3 border-t border-bdr flex justify-end gap-2">
           <button onClick={onClose} disabled={loading} className="btn-secondary text-sm">Hủy bỏ</button>
           <button
             onClick={onConfirm}
             disabled={loading}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-semibold transition-colors disabled:opacity-60"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-dgr hover:opacity-90 text-white text-sm font-semibold transition-opacity disabled:opacity-60 cursor-pointer"
           >
             <Trash2 size={14} />
             {loading ? 'Đang xóa...' : 'Đồng ý xóa'}
@@ -1216,17 +1216,17 @@ function BulkDeleteByFilterModal({
     : `${selKtx || '—'} · ${selDay || '—'} · P.${selPhong || '—'}`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <div className="bg-card rounded-xl shadow-modal w-full max-w-lg border border-red-200">
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-red-100 bg-red-50 rounded-t-xl">
-          <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
-            <Trash2 size={20} className="text-red-600" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm">
+      <div className="surface-elevated rounded-2xl shadow-2xl w-full max-w-lg border border-dgr/40 overflow-hidden">
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-dgr/25 tint-dgr">
+          <div className="flex-shrink-0 w-10 h-10 rounded-xl craft-icon-rose flex items-center justify-center">
+            <Trash2 size={20} />
           </div>
           <div>
-            <h2 className="text-base font-bold text-red-700">Xóa hàng loạt theo bộ lọc</h2>
-            <p className="text-xs text-red-500">Chỉ Admin mới có quyền thực hiện</p>
+            <h2 className="text-base font-extrabold text-dgr">Xóa hàng loạt theo bộ lọc</h2>
+            <p className="text-xs text-mu">Chỉ Admin mới có quyền thực hiện</p>
           </div>
-          <button onClick={onClose} className="ml-auto p-2 rounded-lg hover:bg-red-100"><X size={16} /></button>
+          <button onClick={onClose} className="ml-auto p-2 rounded-lg text-mu hover:text-tx hover:bg-act"><X size={16} /></button>
         </div>
 
         <div className="p-5 space-y-4">
@@ -1640,12 +1640,13 @@ export function WorkerManagementClient() {
     }
   }, [addLog, currentUser]);
 
-  // Handle URL filter params from dashboard / operational alerts
+  // Handle URL filter params from dashboard / operational alerts / Command Palette
   useEffect(() => {
     const filterParam = searchParams?.get('filter');
     const ktxParam = searchParams?.get('ktx');
     const tamTruParam = searchParams?.get('tamTru');
-    if (filterParam || ktxParam || tamTruParam) {
+    const searchParam = searchParams?.get('search');
+    if (filterParam || ktxParam || tamTruParam || searchParam !== null) {
       setFilters(prev => ({
         ...prev,
         ...(filterParam === 'missing_room' || filterParam === 'no_room'
@@ -1657,7 +1658,9 @@ export function WorkerManagementClient() {
         ...(tamTruParam === 'registered' || tamTruParam === 'unregistered'
           ? { tamTruStatus: tamTruParam }
           : {}),
+        ...(searchParam ? { search: searchParam } : {}),
       }));
+      setPage(1);
     }
   }, [searchParams]);
 
@@ -2046,7 +2049,7 @@ export function WorkerManagementClient() {
               <h1 className="text-lg sm:text-xl font-extrabold text-tx tracking-tight">
                 Quản Lý Công Nhân
               </h1>
-              <span className="text-xs text-lnk font-bold px-2.5 py-0.5 rounded-full bg-bdg border border-bdr2 font-tabular">
+              <span className="text-xs text-lnk font-bold px-2.5 py-0.5 rounded-md bg-bdg border border-bdr2 font-mono font-tabular">
                 {workers.length.toLocaleString('vi-VN')} hồ sơ
               </span>
             </div>

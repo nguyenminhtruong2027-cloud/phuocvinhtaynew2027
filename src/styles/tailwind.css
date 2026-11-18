@@ -360,34 +360,75 @@
   }
 
   .badge-platoon-8 {
-    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold
-           bg-blue-100 text-blue-700 border border-blue-200;
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.5rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: color-mix(in srgb, var(--pri2) 15%, var(--surf));
+    color: var(--lnk);
+    border: 1px solid color-mix(in srgb, var(--pri2) 34%, var(--bdr2));
+    box-shadow: inset 0 1px 0 var(--specular);
   }
 
   .badge-platoon-111 {
-    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold
-           bg-purple-100 text-purple-700 border border-purple-200;
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.5rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: color-mix(in srgb, #A855F7 15%, var(--surf));
+    color: color-mix(in srgb, #C084FC 82%, var(--tx));
+    border: 1px solid color-mix(in srgb, #A855F7 36%, var(--bdr2));
+    box-shadow: inset 0 1px 0 var(--specular);
   }
 
   .badge-platoon-113 {
-    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold
-           bg-emerald-100 text-emerald-700 border border-emerald-200;
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.5rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: var(--okbg);
+    color: var(--ok);
+    border: 1px solid color-mix(in srgb, var(--ok2) 36%, var(--bdr2));
+    box-shadow: inset 0 1px 0 var(--specular);
   }
 
   .badge-pending {
-    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold
-           bg-amber-100 text-amber-700 border border-amber-200;
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.5rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: color-mix(in srgb, var(--wn) 14%, var(--surf));
+    color: var(--wn);
+    border: 1px solid color-mix(in srgb, var(--wn) 38%, var(--bdr2));
+    box-shadow: inset 0 1px 0 var(--specular);
   }
 
   .badge-missing {
-    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold
-           bg-dgrbg text-dgr border border-dgr;
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.5rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: var(--dgrbg);
+    color: var(--dgr);
+    border: 1px solid color-mix(in srgb, var(--dgr) 40%, var(--bdr2));
+    box-shadow: inset 0 1px 0 var(--specular);
   }
 
-  /* Badge trạng thái dùng chung (nền --bdg, viền mảnh) */
+  /* Badge trạng thái dùng chung (kiến trúc bo 6px, viền mảnh theme-aware) */
   .badge {
-    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold
            bg-bdg text-lnk border border-bdr2 whitespace-nowrap;
+    box-shadow: inset 0 1px 0 var(--specular);
   }
 
   .nav-item {
