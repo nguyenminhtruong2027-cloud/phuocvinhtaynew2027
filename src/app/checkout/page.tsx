@@ -158,23 +158,38 @@ export default function CheckoutPage() {
 
     async function loadRoomResidents() {
       try {
-        const { data, error: fetchErr } = await supabase
-          .from('workers')
-          .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, don_vi, ngay_ra_ktx')
-          .eq('ktx', ktx)
-          .eq('day', day)
-          .eq('phong_so', phong);
+        let rows: any[] = [];
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('lookup_room_residents', {
+          p_ktx: ktx,
+          p_day: day,
+          p_phong: phong,
+        });
 
         if (!active) return;
-        if (fetchErr) {
-          console.warn('Error loading residents:', fetchErr.message);
-          setResidents([]);
-          return;
+
+        if (!rpcErr && Array.isArray(rpcData)) {
+          rows = rpcData;
+        } else {
+          // Backwards-compatible fallback if RPC migration has not been executed yet
+          const { data, error: fetchErr } = await supabase
+            .from('workers')
+            .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, don_vi, ngay_ra_ktx')
+            .eq('ktx', ktx)
+            .eq('day', day)
+            .eq('phong_so', phong);
+
+          if (!active) return;
+          if (fetchErr) {
+            console.warn('Error loading residents:', fetchErr.message);
+            setResidents([]);
+            return;
+          }
+          rows = data || [];
         }
 
         // Prioritize active residents who have not checked out
-        const activeList = (data || []).filter((r: any) => !r.ngay_ra_ktx);
-        const listToUse = activeList.length > 0 ? activeList : (data || []);
+        const activeList = rows.filter((r: any) => !r.ngay_ra_ktx);
+        const listToUse = activeList.length > 0 ? activeList : rows;
 
         // Sort by bed number first (1, 2, 3...), then by name
         const sorted = (listToUse as RoomResident[]).sort((a, b) => {
@@ -296,10 +311,10 @@ export default function CheckoutPage() {
 
       setForm(prev => ({
         ...prev,
-        ho_va_ten: resident.ho_va_ten || prev.ho_va_ten,
-        ma_nv_or_cccd: codeValue || prev.ma_nv_or_cccd,
-        so_dien_thoai: phoneValue || prev.so_dien_thoai,
-        giuong: bedValue || prev.giuong,
+        ho_va_ten: resident.ho_va_ten || '',
+        ma_nv_or_cccd: codeValue || '',
+        so_dien_thoai: phoneValue || '',
+        giuong: bedValue || '',
       }));
     }
   };

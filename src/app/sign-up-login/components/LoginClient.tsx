@@ -72,7 +72,7 @@ export default function LoginClient() {
 
           <div className="grid grid-cols-2 gap-3" suppressHydrationWarning>
             {[
-              { label: 'Phân quyền vai trò', value: 'Admin / Staff' },
+              { label: 'Phân quyền vai trò', value: '3 Cấp RBAC' },
               { label: 'Đồng bộ thời gian thực', value: 'Supabase' },
               { label: 'Quản lý phòng', value: 'Sơ đồ trực quan' },
               { label: 'Bảo mật', value: 'Auth Guard' },

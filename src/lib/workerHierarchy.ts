@@ -214,14 +214,27 @@ export async function fetchRoomBedAvailability(
 
   const supabase = createClient();
   try {
-    const { data, error } = await supabase
-      .from('beds')
-      .select('phong_so, giuong, status')
-      .eq('ktx', k)
-      .eq('day', d);
+    let bedRows: any[] | null = null;
+    const { data: rpcBeds, error: rpcErr } = await supabase.rpc('lookup_room_bed_availability', {
+      p_ktx: k,
+      p_day: d,
+    });
 
-    if (!error && Array.isArray(data)) {
-      const roomBeds = data
+    if (!rpcErr && Array.isArray(rpcBeds)) {
+      bedRows = rpcBeds;
+    } else {
+      const { data, error } = await supabase
+        .from('beds')
+        .select('phong_so, giuong, status')
+        .eq('ktx', k)
+        .eq('day', d);
+      if (!error && Array.isArray(data)) {
+        bedRows = data;
+      }
+    }
+
+    if (Array.isArray(bedRows)) {
+      const roomBeds = bedRows
         .filter((b: any) => normalizeRoomLabel(String(b?.phong_so ?? '')) === normRoom)
         .map((b: any) => ({
           giuong: normalizeBedLabel(String(b?.giuong ?? '')) || String(b?.giuong ?? '').trim(),

@@ -102,8 +102,9 @@ export default function UserManagementClient() {
     entryLog: 'unknown' | 'applied' | 'missing';
     rlsLookup: 'unknown' | 'applied' | 'missing';
     superAdminRbac: 'unknown' | 'applied' | 'missing';
+    packageASecurity: 'unknown' | 'applied' | 'missing';
     checkedAt?: string;
-  }>({ entryLog: 'unknown', rlsLookup: 'unknown', superAdminRbac: 'unknown' });
+  }>({ entryLog: 'unknown', rlsLookup: 'unknown', superAdminRbac: 'unknown', packageASecurity: 'unknown' });
   const [copiedMigrationPath, setCopiedMigrationPath] = useState<string | null>(null);
 
   const checkDatabaseMigrations = useCallback(async () => {
@@ -111,6 +112,7 @@ export default function UserManagementClient() {
     let entryLog: 'applied' | 'missing' = 'missing';
     let rlsLookup: 'applied' | 'missing' = 'missing';
     let superAdminRbac: 'applied' | 'missing' = 'missing';
+    let packageASecurity: 'applied' | 'missing' = 'missing';
 
     try {
       const { error: entryErr } = await supabase.from('worker_entry_log').select('id').limit(1);
@@ -147,10 +149,22 @@ export default function UserManagementClient() {
       superAdminRbac = 'missing';
     }
 
+    try {
+      const { data: pkgAReady, error: pkgAErr } = await supabase.rpc('check_package_a_security_ready');
+      if (!pkgAErr && pkgAReady === true) {
+        packageASecurity = 'applied';
+      } else {
+        packageASecurity = 'missing';
+      }
+    } catch {
+      packageASecurity = 'missing';
+    }
+
     setMigrationStatus({
       entryLog,
       rlsLookup,
       superAdminRbac,
+      packageASecurity,
       checkedAt: new Date().toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
     });
     setCheckingMigrations(false);
@@ -921,7 +935,7 @@ export default function UserManagementClient() {
             <div>
               <h2 className="text-sm font-bold text-foreground">Trạng thái nâng cấp Database (SQL Migrations)</h2>
               <p className="text-xs text-muted-foreground">
-                Kiểm tra 3 bản vá SQL trong thư mục <code className="px-1 py-0.5 rounded bg-muted">supabase/migrations/</code> đã được chạy trên Supabase hay chưa
+                Kiểm tra 4 bản vá SQL trong thư mục <code className="px-1 py-0.5 rounded bg-muted">supabase/migrations/</code> đã được chạy trên Supabase hay chưa
               </p>
             </div>
           </div>
@@ -942,7 +956,7 @@ export default function UserManagementClient() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
           {[
             {
               file: 'supabase/migrations/20261116000000_create_worker_entry_log.sql',
@@ -958,6 +972,11 @@ export default function UserManagementClient() {
               file: 'supabase/migrations/20261117000000_add_super_admin_rbac.sql',
               title: 'Phân quyền 3 cấp (Super Admin > Admin > Staff)',
               status: migrationStatus.superAdminRbac,
+            },
+            {
+              file: 'supabase/migrations/20261118000000_package_a_security_hardening.sql',
+              title: 'Bảo mật Gói A (RLS theo dãy, Audit Append-only & RPC)',
+              status: migrationStatus.packageASecurity,
             },
           ].map(item => (
             <div key={item.file} className="p-3.5 rounded-xl border border-border bg-muted/20 flex flex-col gap-2">
@@ -1002,7 +1021,8 @@ export default function UserManagementClient() {
             Lần kiểm tra gần nhất: <span className="font-tabular">{migrationStatus.checkedAt}</span>
             {(migrationStatus.entryLog === 'missing' ||
               migrationStatus.rlsLookup === 'missing' ||
-              migrationStatus.superAdminRbac === 'missing') &&
+              migrationStatus.superAdminRbac === 'missing' ||
+              migrationStatus.packageASecurity === 'missing') &&
               ' — Mở Supabase Dashboard → SQL Editor và chạy các file được đánh dấu "Chưa chạy SQL" để bật đầy đủ tính năng.'}
           </p>
         )}
