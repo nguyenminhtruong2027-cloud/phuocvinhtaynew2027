@@ -50,7 +50,7 @@ export default function RoomDrawer({
   onRoomNoteUpdated,
   onRoomGenderUpdated,
 }: Props) {
-  const { isAdmin } = useAuth();
+  const { isAdmin, canWriteBlock } = useAuth();
 
   // --- Room Note state ---
   const [noteInput, setNoteInput] = useState(roomNote ?? '');
@@ -134,8 +134,14 @@ export default function RoomDrawer({
     return () => document.removeEventListener('keydown', handler);
   }, [onClose]);
 
+  const canEditRoomGender = useMemo(
+    () => isAdmin || canWriteBlock(resolveEffectiveDayNha(), ktx),
+    [isAdmin, canWriteBlock, resolveEffectiveDayNha, ktx]
+  );
+
   /** Change room gender assignment */
   const handleSelectGender = async (gender: 'male' | 'female' | 'auto') => {
+    if (!canEditRoomGender) return;
     setSelectedGender(gender);
     setSavingGender(true);
 
@@ -385,8 +391,8 @@ export default function RoomDrawer({
               <button
                 type="button"
                 onClick={() => handleSelectGender('male')}
-                disabled={savingGender}
-                className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${
+                disabled={savingGender || !canEditRoomGender}
+                className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed ${
                   selectedGender === 'male'
                     ? 'bg-pri text-tx border-pri2 shadow-md shadow-sh ring-1 ring-pri2'
                     : 'bg-act/80 text-mu border-bdr hover:bg-act hover:text-tx'
@@ -399,8 +405,8 @@ export default function RoomDrawer({
               <button
                 type="button"
                 onClick={() => handleSelectGender('female')}
-                disabled={savingGender}
-                className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${
+                disabled={savingGender || !canEditRoomGender}
+                className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed ${
                   selectedGender === 'female'
                     ? 'bg-pri text-tx border-bdr2 shadow-md shadow-pink-600/30 ring-1 ring-pink-400'
                     : 'bg-act/80 text-mu border-bdr hover:bg-act hover:text-tx'
@@ -413,8 +419,8 @@ export default function RoomDrawer({
               <button
                 type="button"
                 onClick={() => handleSelectGender('auto')}
-                disabled={savingGender}
-                className={`py-2 px-2 rounded-xl text-xs font-medium border transition-all flex items-center justify-center gap-1 ${
+                disabled={savingGender || !canEditRoomGender}
+                className={`py-2 px-2 rounded-xl text-xs font-medium border transition-all flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed ${
                   selectedGender === 'auto'
                     ? 'bg-okbg text-ok border-bdr2 shadow-sm'
                     : 'bg-act/80 text-mu border-bdr hover:bg-act hover:text-mu'

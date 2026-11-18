@@ -36,6 +36,7 @@ export interface FluctuationFilterParams {
   ktx: string;
   day: string;
   cutoffMode: FluctuationCutoffMode;
+  preloadedWorkerRows?: RawWorkerRow[];
 }
 
 export interface FluctuationReportResult {
@@ -195,11 +196,22 @@ export interface RawDeletionLogRow {
   deleted_at?: string | null;
 }
 
+export interface RawEntryLogRow {
+  id: string;
+  worker_id: string;
+  ho_va_ten?: string | null;
+  ma_nv?: string | null;
+  ktx?: string | null;
+  day?: string | null;
+  entered_at?: string | null;
+}
+
 export function aggregateWorkerFluctuation(
   workerRows: RawWorkerRow[],
   deletionLogRows: RawDeletionLogRow[],
   preservedEntries: PreservedWorkerEntry[],
-  filters: FluctuationFilterParams
+  filters: FluctuationFilterParams,
+  entryLogRows: RawEntryLogRow[] = []
 ): FluctuationReportResult {
   const filterKtx = (filters.ktx || '').trim();
   const filterDay = (filters.day || '').trim();
@@ -351,7 +363,13 @@ export function aggregateWorkerFluctuation(
     recordEntry(w.id, w.created_at, w.ho_va_ten, w.ma_nv, w.ktx, w.day);
   }
 
-  // 2. Preserved entries of workers deleted in this browser so "Vào" stays accurate
+  // 2. Authoritative server-side entry log (preserves multi-device "Vào" even after deletions)
+  for (const e of entryLogRows) {
+    collectMeta(e.ktx, e.day);
+    recordEntry(e.worker_id, e.entered_at, e.ho_va_ten, e.ma_nv, e.ktx, e.day);
+  }
+
+  // 3. Browser-local preserved entries fallback (when worker_entry_log migration isn't yet applied)
   for (const p of preservedEntries) {
     collectMeta(p.ktx, p.day);
     recordEntry(p.id, p.created_at, p.ho_va_ten, p.ma_nv, p.ktx, p.day);
@@ -495,12 +513,60 @@ async function fetchDeletionLogsInRange(
   return rows;
 }
 
+async function fetchEntryLogsInRange(
+  dateFrom?: string,
+  dateTo?: string
+): Promise<RawEntryLogRow[]> {
+  try {
+    const supabase = createClient();
+    const todayVN = getVNDateString();
+    const rows: RawEntryLogRow[] = [];
+    let from = 0;
+
+    const effectiveFrom = dateFrom && dateFrom > todayVN ? todayVN : dateFrom;
+    const effectiveTo = dateTo && dateTo < todayVN ? todayVN : dateTo;
+
+    while (true) {
+      let query = supabase
+        .from('worker_entry_log')
+        .select('id, worker_id, ho_va_ten, ma_nv, ktx, day, entered_at')
+        .order('entered_at', { ascending: false })
+        .order('id', { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (effectiveFrom) {
+        query = query.gte('entered_at', vnDateStartToUTCISO(effectiveFrom));
+      }
+      if (effectiveTo) {
+        query = query.lte('entered_at', vnDateEndToUTCISO(effectiveTo));
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        console.warn('[workerFluctuation] worker_entry_log unavailable, using fallback:', error.message);
+        return [];
+      }
+      const batch = (data || []) as RawEntryLogRow[];
+      rows.push(...batch);
+      if (batch.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
+
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchWorkerFluctuationReport(
   filters: FluctuationFilterParams
 ): Promise<FluctuationReportResult> {
-  const [workerRows, deletionLogRows] = await Promise.all([
-    fetchAllWorkerEntries(),
+  const [workerRows, deletionLogRows, entryLogRows] = await Promise.all([
+    filters.preloadedWorkerRows
+      ? Promise.resolve(filters.preloadedWorkerRows)
+      : fetchAllWorkerEntries(),
     fetchDeletionLogsInRange(filters.dateFrom, filters.dateTo),
+    fetchEntryLogsInRange(filters.dateFrom, filters.dateTo),
   ]);
 
   const preservedEntries = loadPreservedWorkerEntries();
@@ -508,6 +574,7 @@ export async function fetchWorkerFluctuationReport(
     workerRows,
     deletionLogRows,
     preservedEntries,
-    filters
+    filters,
+    entryLogRows
   );
 }

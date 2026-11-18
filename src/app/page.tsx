@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import { useWorkers } from '@/context/WorkerContext';
 import { getUniqueKTX, getUniqueBuildings, getUniqueRooms, countUniqueBuildings, aggregateKtxOccupancy, DEFAULT_ROOM_CAPACITY, naturalSortCompare, compareKtxNames } from '@/data/workers';
-import { fetchRoomCapacities, fetchFacilitiesList, FacilityItem, getRoomCapacity, RoomCapacityMap, normalizeRoomLabel, formatRoomDisplay } from '@/lib/facilityCapacity';
+import { buildRoomCapacityMapFromFacilities, fetchFacilitiesList, FacilityItem, getRoomCapacity, RoomCapacityMap, normalizeRoomLabel, formatRoomDisplay } from '@/lib/facilityCapacity';
 import KtxOccupancyBreakdown from './components/KtxOccupancyBreakdown';
 import {
   Users, LayoutGrid, FileSpreadsheet, Wifi,
@@ -636,37 +636,40 @@ export default function OccupancyDashboardPage() {
     };
   }, []);
 
-  // Load room capacities and physical facilities catalog + realtime
+  // Load room capacities and physical facilities catalog + realtime (single query)
   useEffect(() => {
     let active = true;
-    const load = async () => {
+    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+    const load = async (force = false) => {
       try {
-        const [map, facs] = await Promise.all([
-          fetchRoomCapacities(),
-          fetchFacilitiesList(),
-        ]);
+        const facs = await fetchFacilitiesList(force);
         if (active) {
-          setCapacities(map);
           setFacilitiesList(facs);
+          setCapacities(buildRoomCapacityMapFromFacilities(facs));
         }
       } catch (err) {
         console.warn('[Dashboard] load facilities error:', err);
       }
     };
-    load();
+    const scheduleLoad = () => {
+      if (reloadTimer) clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => {
+        if (active) load(true);
+      }, 250);
+    };
+    load(false);
     const supabase = createClient();
     const channel = supabase
       .channel('dashboard_facilities_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, () => {
-        load();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, scheduleLoad)
       .subscribe();
-    const onFacilitiesUpdated = () => { load(); };
+    const onFacilitiesUpdated = () => { scheduleLoad(); };
     if (typeof window !== 'undefined') {
       window.addEventListener('ktx_facilities_updated', onFacilitiesUpdated);
     }
     return () => {
       active = false;
+      if (reloadTimer) clearTimeout(reloadTimer);
       supabase.removeChannel(channel);
       if (typeof window !== 'undefined') {
         window.removeEventListener('ktx_facilities_updated', onFacilitiesUpdated);
@@ -866,48 +869,63 @@ export default function OccupancyDashboardPage() {
 
   const missingData = useMemo(() => filteredWorkers.filter(w => !w.day || !w.phongSo).length, [filteredWorkers]);
 
-  // ── Operational Alerts ────────────────────────────────────────────────────
+  // ── Operational Alerts (normalized room keys matching computeSystemMetrics) ──
   const roomWorkerMap = useMemo(() => {
-    const map = new Map<string, number>();
+    const map = new Map<string, { ktx: string; building: string; room: string; count: number }>();
     filteredWorkers.forEach(w => {
-      if (w.day && w.phongSo) {
-        const key = `${w.ktx}||${w.day}||${w.phongSo}`;
-        map.set(key, (map.get(key) || 0) + 1);
+      const k = (w.ktx || '').trim();
+      const b = (w.day || '').trim();
+      const rawRoom = (w.phongSo || '').trim();
+      if (!b || !rawRoom) return;
+      const normR = normalizeRoomLabel(rawRoom);
+      const normKey = `${k}||${b}||${normR}`;
+      if (hiddenOrFunctionalKeys.has(normKey)) return;
+      const existing = map.get(normKey);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        map.set(normKey, { ktx: k, building: b, room: rawRoom, count: 1 });
       }
     });
     return map;
-  }, [filteredWorkers]);
+  }, [filteredWorkers, hiddenOrFunctionalKeys]);
 
-  const overloadedRooms = useMemo(() => {
-    let count = 0;
-    roomWorkerMap.forEach((v, key) => {
-      const [k, b, r] = key.split('||');
-      const cap = getRoomCapacity(capacities, k, b, r) || DEFAULT_ROOM_CAPACITY;
-      if (v > cap) count++;
-    });
-    return count;
-  }, [roomWorkerMap, capacities]);
+  const overloadedRooms = systemMetrics.overloadedRooms;
 
   const overloadedRoomsList = useMemo(() => {
     const list: { ktx: string; building: string; room: string; count: number; capacity: number; overflow: number }[] = [];
-    roomWorkerMap.forEach((v, key) => {
-      const [k, b, r] = key.split('||');
-      const cap = getRoomCapacity(capacities, k, b, r) || DEFAULT_ROOM_CAPACITY;
-      if (v > cap) {
+    roomWorkerMap.forEach(entry => {
+      const cap = getRoomCapacity(capacities, entry.ktx, entry.building, entry.room) || DEFAULT_ROOM_CAPACITY;
+      if (entry.count > cap) {
         list.push({
-          ktx: k,
-          building: b,
-          room: r,
-          count: v,
+          ktx: entry.ktx,
+          building: entry.building,
+          room: entry.room,
+          count: entry.count,
           capacity: cap,
-          overflow: v - cap,
+          overflow: entry.count - cap,
         });
       }
     });
     return list.sort((a, b) => b.overflow - a.overflow);
   }, [roomWorkerMap, capacities]);
 
+  const preloadedFluctuationRows = useMemo(
+    () =>
+      (workers || []).map(w => ({
+        id: w.id,
+        ho_va_ten: w.hoVaTen,
+        ma_nv: w.maNV,
+        ktx: w.ktx,
+        day: w.day,
+        created_at: w.createdAt || null,
+        deleted_at: w.deletedAt || null,
+      })),
+    [workers]
+  );
+
   useEffect(() => {
+    if (loading) return;
     let active = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -920,6 +938,7 @@ export default function OccupancyDashboardPage() {
           ktx: selectedKTX === 'all' ? '' : selectedKTX,
           day: selectedBuilding || '',
           cutoffMode: 'realtime',
+          preloadedWorkerRows: preloadedFluctuationRows,
         });
         if (active) {
           setTodayStats({
@@ -944,7 +963,6 @@ export default function OccupancyDashboardPage() {
 
     const channel = supabase
       .channel('dashboard_today_fluctuation_v1')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'workers' }, scheduleReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_deletion_log' }, scheduleReload)
       .subscribe();
 
@@ -953,7 +971,7 @@ export default function OccupancyDashboardPage() {
       if (timer) clearTimeout(timer);
       supabase.removeChannel(channel);
     };
-  }, [workers.length, selectedKTX, selectedBuilding]);
+  }, [loading, preloadedFluctuationRows, selectedKTX, selectedBuilding]);
 
   const ktxListForGrid = useMemo(() => {
     if (selectedKTX !== 'all') {

@@ -849,10 +849,10 @@ export default function QRPortalClient() {
       const { data, error } = await supabase
         .from('worker_registrations')
         .select('*')
+        .or('ghi_chu.is.null,ghi_chu.not.like.[CHECKOUT]%')
         .order('created_at', { ascending: false });
       if (!error) {
-        const filtered = (data || []).filter(r => !r.ghi_chu?.startsWith('[CHECKOUT]'));
-        const deduped = Array.from(new Map(filtered.map(r => [r.id, r])).values());
+        const deduped = Array.from(new Map((data || []).map(r => [r.id, r])).values());
         setRegistrations(deduped);
       }
     } catch (e: any) {
@@ -866,13 +866,19 @@ export default function QRPortalClient() {
   useEffect(() => { fetchRegistrations(); }, [fetchRegistrations]);
 
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleReload = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => fetchRegistrations(true), 250);
+    };
     const channel = supabase
       .channel('worker_registrations_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_registrations' }, () => {
-        fetchRegistrations(true);
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_registrations' }, scheduleReload)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      if (timer) clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
   }, [fetchRegistrations, supabase]);
 
   // Phân quyền Staff (Requirement 5)

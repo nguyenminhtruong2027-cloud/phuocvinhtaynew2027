@@ -86,93 +86,106 @@ export interface FacilityItem {
   [key: string]: any;
 }
 
-/** Fetch all physical facilities from the database catalog (paginated) */
-export async function fetchFacilitiesList(): Promise<FacilityItem[]> {
-  const supabase = createClient();
-  const PAGE_SIZE = 1000;
-  const allRows: any[] = [];
-  try {
-    let from = 0;
-    for (let page = 0; page < 30; page++) {
-      const { data, error } = await supabase
-        .from('facilities')
-        .select('*')
-        .order('day', { ascending: true })
-        .order('phong_khu_vuc', { ascending: true })
-        .order('id', { ascending: true })
-        .range(from, from + PAGE_SIZE - 1);
-
-      if (error) {
-        console.warn('[facilityCapacity] fetchFacilitiesList error:', error.message);
-        break;
-      }
-      const chunk = data || [];
-      allRows.push(...chunk);
-      if (chunk.length < PAGE_SIZE) break;
-      from += PAGE_SIZE;
+export function buildRoomCapacityMapFromFacilities(facilities: FacilityItem[]): RoomCapacityMap {
+  const map: RoomCapacityMap = {};
+  for (const row of facilities) {
+    const roomType = row?.room_type || 'accommodation';
+    const isVisible = row?.is_visible !== false;
+    if (roomType === 'functional' || !isVisible) continue;
+    const key = buildRoomKey(row?.ktx ?? '', row?.day ?? '', row?.phong_khu_vuc ?? '');
+    const count = Number(row?.giuong ?? 0);
+    if (Number.isFinite(count) && count > 0) {
+      map[key] = count;
     }
-
-    const byId = new Map<string, FacilityItem>();
-    allRows.forEach((row: any, idx: number) => {
-      const id = String(row?.id ?? `fac-${idx}`);
-      byId.set(id, {
-        ...row,
-        id,
-        room_type: row.room_type || 'accommodation',
-        is_visible: row.is_visible !== false,
-      });
-    });
-    return Array.from(byId.values());
-  } catch (err) {
-    console.warn('[facilityCapacity] fetchFacilitiesList error:', err);
-    return [];
   }
+  return map;
 }
 
-/** Fetch per-room bed capacity from the `facilities` table (column `giuong`). Only accommodation & visible rooms. */
-export async function fetchRoomCapacities(): Promise<RoomCapacityMap> {
-  const supabase = createClient();
-  const map: RoomCapacityMap = {};
-  const PAGE_SIZE = 1000;
+const FACILITIES_CACHE_TTL_MS = 15_000;
+let _cachedFacilities: FacilityItem[] | null = null;
+let _cachedFacilitiesAt = 0;
+let _inflightFacilities: Promise<FacilityItem[]> | null = null;
+let _facilityInvalidationBound = false;
 
-  try {
-    let from = 0;
-    for (let page = 0; page < 30; page++) {
-      const { data, error } = await supabase
-        .from('facilities')
-        .select('id, ktx, day, phong_khu_vuc, giuong, room_type, is_visible')
-        .order('id', { ascending: true })
-        .range(from, from + PAGE_SIZE - 1);
+export function invalidateFacilitiesCache(): void {
+  _cachedFacilities = null;
+  _cachedFacilitiesAt = 0;
+  _inflightFacilities = null;
+}
 
-      if (error) {
-        console.warn('[facilityCapacity] fetch error:', error.message);
-        break;
-      }
+function bindFacilityCacheInvalidation(): void {
+  if (_facilityInvalidationBound || typeof window === 'undefined') return;
+  _facilityInvalidationBound = true;
+  window.addEventListener('ktx_facilities_updated', () => {
+    invalidateFacilitiesCache();
+  });
+}
 
-      const chunk = data ?? [];
-      for (const row of chunk) {
-        // Exclude functional rooms and hidden rooms from capacity calculations
-        const roomType = row?.room_type || 'accommodation';
-        const isVisible = row?.is_visible !== false;
-        if (roomType === 'functional' || !isVisible) {
-          continue;
-        }
-
-        const key = buildRoomKey(row?.ktx ?? '', row?.day ?? '', row?.phong_khu_vuc ?? '');
-        const count = Number(row?.giuong ?? 0);
-        if (Number.isFinite(count) && count > 0) {
-          map[key] = count;
-        }
-      }
-
-      if (chunk.length < PAGE_SIZE) break;
-      from += PAGE_SIZE;
-    }
-  } catch (err) {
-    console.warn('[facilityCapacity] fetch error:', err);
+/** Fetch all physical facilities from the database catalog (paginated, cached & deduplicated) */
+export async function fetchFacilitiesList(forceRefresh = false): Promise<FacilityItem[]> {
+  bindFacilityCacheInvalidation();
+  const now = Date.now();
+  if (!forceRefresh && _cachedFacilities && now - _cachedFacilitiesAt < FACILITIES_CACHE_TTL_MS) {
+    return _cachedFacilities;
+  }
+  if (!forceRefresh && _inflightFacilities) {
+    return _inflightFacilities;
   }
 
-  return map;
+  _inflightFacilities = (async () => {
+    const supabase = createClient();
+    const PAGE_SIZE = 1000;
+    const allRows: any[] = [];
+    try {
+      let from = 0;
+      for (let page = 0; page < 30; page++) {
+        const { data, error } = await supabase
+          .from('facilities')
+          .select('*')
+          .order('day', { ascending: true })
+          .order('phong_khu_vuc', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, from + PAGE_SIZE - 1);
+
+        if (error) {
+          console.warn('[facilityCapacity] fetchFacilitiesList error:', error.message);
+          break;
+        }
+        const chunk = data || [];
+        allRows.push(...chunk);
+        if (chunk.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
+      }
+
+      const byId = new Map<string, FacilityItem>();
+      allRows.forEach((row: any, idx: number) => {
+        const id = String(row?.id ?? `fac-${idx}`);
+        byId.set(id, {
+          ...row,
+          id,
+          room_type: row.room_type || 'accommodation',
+          is_visible: row.is_visible !== false,
+        });
+      });
+      const result = Array.from(byId.values());
+      _cachedFacilities = result;
+      _cachedFacilitiesAt = Date.now();
+      return result;
+    } catch (err) {
+      console.warn('[facilityCapacity] fetchFacilitiesList error:', err);
+      return _cachedFacilities ?? [];
+    } finally {
+      _inflightFacilities = null;
+    }
+  })();
+
+  return _inflightFacilities;
+}
+
+/** Fetch per-room bed capacity from the cached `facilities` catalog. Only accommodation & visible rooms. */
+export async function fetchRoomCapacities(forceRefresh = false): Promise<RoomCapacityMap> {
+  const facilities = await fetchFacilitiesList(forceRefresh);
+  return buildRoomCapacityMapFromFacilities(facilities);
 }
 
 export function getRoomCapacity(

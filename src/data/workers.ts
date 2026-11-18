@@ -25,6 +25,7 @@ export interface Worker {
   avatar?: string;
   tamTruStatus?: 'registered' | 'unregistered';
   createdAt?: string;
+  deletedAt?: string;
 }
 
 /** Fallback room capacity only used when `facilities.giuong` has no entry. */

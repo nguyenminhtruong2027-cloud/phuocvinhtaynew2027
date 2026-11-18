@@ -399,8 +399,11 @@ export default function BedManagementClient() {
   const occupiedIds = useMemo(() => {
     const set = new Set<string>();
     (beds || []).forEach(b => { if (b?.worker_id) set.add(b.worker_id); });
+    (workers || []).forEach(w => {
+      if (w?.id && w?.ktx && w?.day && w?.phongSo && w?.giuong) set.add(w.id);
+    });
     return set;
-  }, [beds]);
+  }, [beds, workers]);
 
   // ─── Mutations ─────────────────────────────────────────────────────────────
   const applyWorkerBed = useCallback(
@@ -505,29 +508,7 @@ export default function BedManagementClient() {
   }, [isAdmin, supabase, loadBeds, loadWorkers, loadCapacities]);
 
   /** Giải phóng giường: xóa vị trí trong `workers` và set `beds` về empty (chống nhiễu trigger nếu beds row bị xóa sự cố). */
-  const freeBedAndWorker = useCallback(
-    async (bed: BedRow, workerId: string) => {
-      try {
-        await supabase
-          .from('workers')
-          .update({ ktx: '', day: '', phong_so: '', giuong: '' })
-          .eq('id', workerId);
-      } catch (err) {
-        console.warn('[bed-management] clear worker location failed:', err);
-      }
-      try {
-        await supabase
-          .from('beds')
-          .update({ status: 'empty', worker_id: null, ma_nv: null, ho_va_ten: null })
-          .eq('id', bed.id);
-      } catch (err) {
-        console.warn('[bed-management] release bed row failed:', err);
-      }
-    },
-    [supabase]
-  );
-
-  /** Lựa chọn 1: gửi yêu cầu check-out sang QR Portal (status=pending) + giải phóng giường. */
+  /** Lựa chọn 1: gửi yêu cầu check-out sang QR Portal (status=pending) — giữ nguyên giường cho đến khi duyệt. */
   const handleCheckoutRequest = useCallback(async () => {
     const bed = drawerBed;
     const wid = bed?.worker_id ?? '';
@@ -541,6 +522,19 @@ export default function BedManagementClient() {
     const workerRef = workerById.get(wid);
     const now = new Date().toISOString();
     try {
+      const { data: existingPending } = await supabase
+        .from('worker_registrations')
+        .select('id')
+        .eq('status', 'pending')
+        .like('ghi_chu', '[CHECKOUT]%')
+        .eq('worker_id', wid)
+        .limit(1);
+
+      if (existingPending && existingPending.length > 0) {
+        toast.info('Công nhân này đã có yêu cầu check-out đang chờ duyệt ở QR Portal.');
+        return;
+      }
+
       const { error } = await supabase.from('worker_registrations').insert({
         type: 'CHECKOUT',
         worker_id: wid,
@@ -557,17 +551,21 @@ export default function BedManagementClient() {
       });
       if (error) throw new Error(error.message);
 
-      await freeBedAndWorker(bed, wid);
-      toast.success('Đã gửi yêu cầu check-out sang QR Portal để duyệt!');
+      const actor = currentUser?.name || currentUser?.email || 'Admin';
+      addLog(
+        actor,
+        'Sửa',
+        `Gửi yêu cầu check-out (chờ duyệt): ${bed.ho_va_ten || workerRef?.hoVaTen || ''} (${bed.ma_nv || workerRef?.maNV || '—'}) tại ${bed.ktx} · ${bed.day} · P${bed.phong_so} · G${bed.giuong}`
+      );
+      toast.success('Đã gửi yêu cầu check-out sang QR Portal — giường sẽ giải phóng sau khi quản lý duyệt.');
       setDrawerBed(null);
-      loadBeds(true);
     } catch (err: any) {
       console.error('[bed-management] checkout request failed:', err);
       setActionError(err?.message || 'Không thể gửi yêu cầu check-out.');
     } finally {
       setBusy(false);
     }
-  }, [drawerBed, canWriteBed, workerById, supabase, freeBedAndWorker, loadBeds]);
+  }, [drawerBed, canWriteBed, workerById, supabase, currentUser, addLog]);
 
   /** Lựa chọn 2: xóa vĩnh viễn công nhân khỏi KTX (worker += log, beds → empty via trigger). */
   const handleHardDelete = useCallback(async () => {

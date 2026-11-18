@@ -13,8 +13,8 @@ import { useWorkers } from '@/context/WorkerContext';
 import { Worker, DEFAULT_ROOM_CAPACITY, getUniqueBuildings, getUniqueRooms } from '@/data/workers';
 import { computeSystemMetrics, getActiveKtxList } from '@/lib/systemMetrics';
 import {
+  buildRoomCapacityMapFromFacilities,
   fetchFacilitiesList,
-  fetchRoomCapacities,
   getRoomCapacity,
   normalizeRoomLabel,
   FacilityItem,
@@ -29,6 +29,7 @@ import {
   getDefaultVNDateRange,
   getVNDateString,
 } from '@/lib/workerFluctuation';
+import { daysSinceVN } from '@/lib/vnDate';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, LineChart, Line, ReferenceLine,
@@ -93,37 +94,14 @@ function matchesKtx(w: Worker, k: string): boolean {
   return (w.ktx ?? '').trim() === k.trim();
 }
 
-function daysSinceEntryVN(rawDate?: string | null): number | null {
-  if (!rawDate) return null;
-  const s = rawDate.trim();
-  if (!s) return null;
-  let dt: Date | null = null;
-  const dm = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (dm) {
-    dt = new Date(Date.UTC(parseInt(dm[3], 10), parseInt(dm[2], 10) - 1, parseInt(dm[1], 10)));
-  } else {
-    const ym = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-    if (ym) {
-      dt = new Date(Date.UTC(parseInt(ym[1], 10), parseInt(ym[2], 10) - 1, parseInt(ym[3], 10)));
-    } else {
-      const parsed = new Date(s);
-      if (!Number.isNaN(parsed.getTime())) dt = parsed;
-    }
-  }
-  if (!dt || Number.isNaN(dt.getTime())) return null;
-  const nowVN = new Date(Date.now() + 7 * 60 * 60 * 1000);
-  const todayUtc = Date.UTC(nowVN.getUTCFullYear(), nowVN.getUTCMonth(), nowVN.getUTCDate());
-  const targetUtc = Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate());
-  return Math.floor((todayUtc - targetUtc) / (24 * 60 * 60 * 1000));
-}
-
 function matchesTamTru(w: Worker, t: TamTruFilter): boolean {
   if (t === 'all') return true;
   if (t === 'registered') return w.tamTruStatus === 'registered';
   if (t === 'unregistered') return w.tamTruStatus !== 'registered';
   if (t === 'overdue') {
     if (w.tamTruStatus === 'registered') return false;
-    const days = daysSinceEntryVN(w.ngayVaoKTX || w.createdAt);
+    if (w.ngayRaKTX || w.ghiChu?.includes('[Đã Check-out') || w.ghiChu?.includes('[CHECKOUT]')) return false;
+    const days = daysSinceVN(w.ngayVaoKTX || w.createdAt);
     return days !== null && days > 7;
   }
   return true;
@@ -204,27 +182,30 @@ export default function ReportDashboard() {
     }
   }, []);
 
-  const loadFacilities = useCallback(async () => {
+  const loadFacilities = useCallback(async (force = false) => {
     try {
-      const [facs, capMap] = await Promise.all([
-        fetchFacilitiesList(),
-        fetchRoomCapacities(),
-      ]);
+      const facs = await fetchFacilitiesList(force);
       setFacilitiesList(facs);
-      setCapacities(capMap);
+      setCapacities(buildRoomCapacityMapFromFacilities(facs));
     } catch (err) {
       console.warn('[ReportDashboard] load facilities error:', err);
     }
   }, []);
 
   useEffect(() => {
-    loadFacilities();
+    loadFacilities(false);
     const supabase = createClient();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleReload = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => loadFacilities(true), 250);
+    };
     const channel = supabase
       .channel('report_facilities_realtime_v1')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, loadFacilities)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, scheduleReload)
       .subscribe();
     return () => {
+      if (timer) clearTimeout(timer);
       supabase.removeChannel(channel);
     };
   }, [loadFacilities]);
@@ -486,9 +467,11 @@ export default function ReportDashboard() {
         tamTruRegistered++;
       } else {
         tamTruUnregistered++;
-        const days = daysSinceEntryVN(w.ngayVaoKTX || w.createdAt);
-        if (days !== null && days > 7) {
-          tamTruOverdue++;
+        if (!w.ngayRaKTX && !w.ghiChu?.includes('[Đã Check-out') && !w.ghiChu?.includes('[CHECKOUT]')) {
+          const days = daysSinceVN(w.ngayVaoKTX || w.createdAt);
+          if (days !== null && days > 7) {
+            tamTruOverdue++;
+          }
         }
       }
       const dvName = (w.donVi || '').trim() || 'Chưa phân đơn vị';

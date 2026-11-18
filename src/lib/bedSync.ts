@@ -346,30 +346,41 @@ export async function reconcileBedsWithWorkers(supabase: SupabaseClient): Promis
     }
   }
 
-  // Execute info updates & assignments
-  for (const u of infoUpdates) {
-    const { error } = await supabase
-      .from('beds')
-      .update({
-        status: 'occupied',
-        ma_nv: u.ma_nv,
-        ho_va_ten: u.ho_va_ten,
+  // Execute info updates & assignments in parallel batches to avoid N+1 serial latency
+  const UPDATE_CONCURRENCY = 20;
+  for (let i = 0; i < infoUpdates.length; i += UPDATE_CONCURRENCY) {
+    const batch = infoUpdates.slice(i, i + UPDATE_CONCURRENCY);
+    await Promise.all(
+      batch.map(async (u) => {
+        const { error } = await supabase
+          .from('beds')
+          .update({
+            status: 'occupied',
+            ma_nv: u.ma_nv,
+            ho_va_ten: u.ho_va_ten,
+          })
+          .eq('id', u.bedId);
+        if (error) console.warn('[bedSync] info update warning:', error.message);
       })
-      .eq('id', u.bedId);
-    if (error) console.warn('[bedSync] info update warning:', error.message);
+    );
   }
 
-  for (const a of assignments) {
-    const { error } = await supabase
-      .from('beds')
-      .update({
-        status: 'occupied',
-        worker_id: a.worker.id,
-        ma_nv: a.worker.ma_nv || null,
-        ho_va_ten: a.worker.ho_va_ten || null,
+  for (let i = 0; i < assignments.length; i += UPDATE_CONCURRENCY) {
+    const batch = assignments.slice(i, i + UPDATE_CONCURRENCY);
+    await Promise.all(
+      batch.map(async (a) => {
+        const { error } = await supabase
+          .from('beds')
+          .update({
+            status: 'occupied',
+            worker_id: a.worker.id,
+            ma_nv: a.worker.ma_nv || null,
+            ho_va_ten: a.worker.ho_va_ten || null,
+          })
+          .eq('id', a.bedId);
+        if (error) console.warn('[bedSync] assign update warning:', error.message);
       })
-      .eq('id', a.bedId);
-    if (error) console.warn('[bedSync] assign update warning:', error.message);
+    );
   }
 
   return {

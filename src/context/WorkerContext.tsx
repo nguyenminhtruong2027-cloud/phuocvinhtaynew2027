@@ -49,6 +49,7 @@ function dbRowToWorker(row: Record<string, unknown>): Worker {
     avatar: row.avatar ? String(row.avatar) : undefined,
     tamTruStatus: (row.status ?? row.tam_tru_status ?? 'unregistered') as 'registered' | 'unregistered',
     createdAt: row.created_at ? String(row.created_at) : undefined,
+    deletedAt: row.deleted_at ? String(row.deleted_at) : undefined,
   };
 }
 
@@ -266,14 +267,29 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
 
   const addWorker = useCallback(async (worker: Worker) => {
     const dbRow = workerToDbRow(worker);
-    if (!dbRow.id) dbRow.id = generateWorkerId();
-    const { error } = await supabase
+    const id = dbRow.id ? String(dbRow.id) : generateWorkerId();
+    dbRow.id = id;
+    const { data: insertedRow, error } = await supabase
       .from('workers')
-      .insert(dbRow);
+      .insert(dbRow)
+      .select('created_at')
+      .maybeSingle();
     if (error) throw new Error(error.message);
-    await syncBedForWorkerSave(supabase, undefined, { ...worker, id: String(dbRow.id) });
-    await fetchWorkers(true);
-  }, [fetchWorkers, supabase]);
+    const savedWorker: Worker = {
+      ...worker,
+      id,
+      khoaTraCuu: String(dbRow.khoa_tra_cuu || `${worker.ktx}|${worker.day}|${worker.phongSo}`),
+      createdAt: insertedRow?.created_at ? String(insertedRow.created_at) : (worker.createdAt || new Date().toISOString()),
+    };
+    await syncBedForWorkerSave(supabase, undefined, savedWorker);
+    workerMetaByIdRef.current.set(id, savedWorker);
+    setWorkers(prev => {
+      if (prev.some(w => w.id === id)) return prev.map(w => (w.id === id ? savedWorker : w));
+      const next = [...prev, savedWorker].sort((a, b) => (a.stt ?? 0) - (b.stt ?? 0) || a.hoVaTen.localeCompare(b.hoVaTen));
+      setTotalWorkerCount(next.length);
+      return next;
+    });
+  }, [supabase]);
 
   const updateWorker = useCallback(async (worker: Worker) => {
     const prevWorker = workerMetaByIdRef.current.get(worker.id) || workers.find(w => w.id === worker.id);
@@ -284,11 +300,17 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       .eq('id', worker.id);
     if (error) throw new Error(error.message);
     await syncBedForWorkerSave(supabase, prevWorker, worker);
-    await fetchWorkers(true);
-  }, [workers, fetchWorkers, supabase]);
+    const updatedWorker: Worker = {
+      ...prevWorker,
+      ...worker,
+      khoaTraCuu: String(dbRow.khoa_tra_cuu || `${worker.ktx}|${worker.day}|${worker.phongSo}`),
+    };
+    workerMetaByIdRef.current.set(worker.id, updatedWorker);
+    setWorkers(prev => prev.map(w => (w.id === worker.id ? updatedWorker : w)));
+  }, [workers, supabase]);
 
   const deleteWorker = useCallback(async (id: string) => {
-    const workerToDelete = workers.find(w => w.id === id);
+    const workerToDelete = workerMetaByIdRef.current.get(id) || workers.find(w => w.id === id);
     if (workerToDelete) {
       preserveDeletedWorkerEntries([workerToDelete]);
       await supabase
@@ -308,20 +330,25 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       .eq('id', id);
     if (error) throw new Error(error.message);
     await releaseBedsForWorkers(supabase, [id]);
-    await fetchWorkers(true);
-  }, [workers, fetchWorkers, supabase]);
+    workerMetaByIdRef.current.delete(id);
+    setWorkers(prev => {
+      const next = prev.filter(w => w.id !== id);
+      setTotalWorkerCount(next.length);
+      return next;
+    });
+  }, [workers, supabase]);
 
   const deleteWorkers = useCallback(async (ids: string[]) => {
     if (ids.length === 0) return;
     const now = new Date().toISOString();
     const workersToDelete = ids
-      .map(id => workers.find(wk => wk.id === id))
+      .map(id => workerMetaByIdRef.current.get(id) || workers.find(wk => wk.id === id))
       .filter((w): w is Worker => Boolean(w));
     if (workersToDelete.length > 0) {
       preserveDeletedWorkerEntries(workersToDelete);
     }
     const logRows = ids.map(id => {
-      const w = workers.find(wk => wk.id === id);
+      const w = workerMetaByIdRef.current.get(id) || workers.find(wk => wk.id === id);
       return {
         worker_id: id,
         ho_va_ten: w?.hoVaTen || null,
@@ -340,8 +367,14 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       .in('id', ids);
     if (error) throw new Error(error.message);
     await releaseBedsForWorkers(supabase, ids);
-    await fetchWorkers(true);
-  }, [workers, fetchWorkers, supabase]);
+    const idSet = new Set(ids);
+    ids.forEach(id => workerMetaByIdRef.current.delete(id));
+    setWorkers(prev => {
+      const next = prev.filter(w => !idSet.has(w.id));
+      setTotalWorkerCount(next.length);
+      return next;
+    });
+  }, [workers, supabase]);
 
   const deleteAllWorkers = useCallback(async () => {
     const now = new Date().toISOString();

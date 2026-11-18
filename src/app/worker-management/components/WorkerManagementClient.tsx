@@ -1583,7 +1583,7 @@ function BulkTransferWorkersModal({
 }
 
 export function WorkerManagementClient() {
-  const { workers, loading, addWorker, updateWorker, deleteWorkers, deleteAllWorkers, importWorkers, updateTamTruStatus, bulkUpdateKtx, bulkUpdateWorkers, refreshWorkers } = useWorkers();
+  const { workers, loading, addWorker, updateWorker, deleteWorkers, deleteAllWorkers, importWorkers, updateTamTruStatus, bulkUpdateKtx, bulkUpdateWorkers } = useWorkers();
   const searchParams = useSearchParams();
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [sortKey, setSortKey] = useState<keyof Worker>('stt');
@@ -1672,20 +1672,24 @@ export function WorkerManagementClient() {
     [workers]
   );
 
+  const searchIndexById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const w of workers) {
+      map.set(
+        w.id,
+        removeAccents(
+          `${w.hoVaTen || ''} ${w.maNV || ''} ${w.cccd || ''} ${w.soDienThoai || ''} ${w.toTruong || ''} ${w.day || ''} ${w.phongSo || ''} ${w.hoKhauTinh || ''}`
+        )
+      );
+    }
+    return map;
+  }, [workers]);
+
   const filtered = useMemo(() => {
     let list = [...workers];
     const s = removeAccents(filters.search);
     if (s) {
-      list = list.filter(w =>
-        removeAccents(w.hoVaTen).includes(s) ||
-        removeAccents(w.maNV).includes(s) ||
-        removeAccents(w.cccd || '').includes(s) ||
-        removeAccents(w.soDienThoai || '').includes(s) ||
-        removeAccents(w.toTruong || '').includes(s) ||
-        removeAccents(w.day || '').includes(s) ||
-        removeAccents(w.phongSo || '').includes(s) ||
-        removeAccents(w.hoKhauTinh || '').includes(s)
-      );
+      list = list.filter(w => (searchIndexById.get(w.id) || '').includes(s));
     }
     if (filters.ktx) list = list.filter(w => w.ktx === filters.ktx);
     if (filters.building) list = list.filter(w => w.day === filters.building);
@@ -1701,16 +1705,23 @@ export function WorkerManagementClient() {
       const target = removeAccents(filters.toTruong);
       list = list.filter(w => removeAccents(w.toTruong || '') === target || removeAccents(w.toTruong || '').includes(target));
     }
-    if (filters.province) list = list.filter(w => removeAccents(w.hoKhauTinh || '').includes(removeAccents(filters.province)));
+    if (filters.province) {
+      const targetProv = removeAccents(filters.province);
+      list = list.filter(w => removeAccents(w.hoKhauTinh || '').includes(targetProv));
+    }
     if (filters.tamTruStatus) list = list.filter(w => (w.tamTruStatus || 'unregistered') === filters.tamTruStatus);
     list.sort((a, b) => {
+      if (sortKey === 'stt') {
+        const cmp = Number(a.stt ?? 0) - Number(b.stt ?? 0);
+        return sortDir === 'asc' ? cmp : -cmp;
+      }
       const av = String(a[sortKey] ?? '');
       const bv = String(b[sortKey] ?? '');
-      const cmp = av.localeCompare(bv, 'vi');
+      const cmp = av.localeCompare(bv, 'vi', { numeric: true, sensitivity: 'base' });
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return list;
-  }, [workers, filters, sortKey, sortDir]);
+  }, [workers, searchIndexById, filters, sortKey, sortDir]);
 
   const totalPages = Math.ceil(filtered.length / pageSize);
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
@@ -1992,14 +2003,9 @@ export function WorkerManagementClient() {
 
   const handleImport = useCallback(async (rows: Worker[]) => {
     await importWorkers(rows);
-    // Force a full re-fetch so dashboard stats and all views sync immediately
-    await refreshWorkers();
-    const userEmail = currentUser?.email ?? 'unknown';
-    const userName = currentUser?.name ?? userEmail;
-    const now = formatDateVN(nowVN());
     writeAuditLog('IMPORT', `Import ${rows.length} công nhân từ file Excel/CSV`);
     toast.success(`Đã nhập thành công ${rows.length} công nhân vào hệ thống`);
-  }, [currentUser, writeAuditLog, importWorkers, refreshWorkers]);
+  }, [writeAuditLog, importWorkers]);
 
   if (loading) {
     return (

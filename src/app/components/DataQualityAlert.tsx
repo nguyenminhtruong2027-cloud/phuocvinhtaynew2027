@@ -10,6 +10,7 @@ import { useWorkers } from '@/context/WorkerContext';
 import { normalizeGender } from '@/lib/roomGender';
 import { formatRoomDisplay, normalizeRoomLabel } from '@/lib/facilityCapacity';
 import { exportMultiSheetExcel } from '@/lib/exportExcel';
+import { daysSinceVN } from '@/lib/vnDate';
 
 interface GenderConflictRoom {
   ktx: string;
@@ -25,43 +26,6 @@ interface DataQualityAlertProps {
   selectedKtx?: string;
   roomGenderMap?: Record<string, 'male' | 'female' | 'auto'>;
   onSelectRoom?: (ktx: string, building: string, room: string) => void;
-}
-
-/** Parses DD/MM/YYYY or ISO YYYY-MM-DD into a Date normalized to VN calendar midnight (UTC+7). */
-function parseDateSafe(raw?: string | null): Date | null {
-  if (!raw) return null;
-  const s = raw.trim();
-  if (!s) return null;
-
-  const ddmmyyyy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (ddmmyyyy) {
-    const d = parseInt(ddmmyyyy[1], 10);
-    const m = parseInt(ddmmyyyy[2], 10) - 1;
-    const y = parseInt(ddmmyyyy[3], 10);
-    const dt = new Date(Date.UTC(y, m, d));
-    return isNaN(dt.getTime()) ? null : dt;
-  }
-
-  const yyyymmdd = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (yyyymmdd) {
-    const y = parseInt(yyyymmdd[1], 10);
-    const m = parseInt(yyyymmdd[2], 10) - 1;
-    const d = parseInt(yyyymmdd[3], 10);
-    const dt = new Date(Date.UTC(y, m, d));
-    return isNaN(dt.getTime()) ? null : dt;
-  }
-
-  const parsed = new Date(s);
-  return isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function daysSinceVN(rawDate?: string | null): number | null {
-  const dt = parseDateSafe(rawDate);
-  if (!dt) return null;
-  const nowVN = new Date(Date.now() + 7 * 60 * 60 * 1000);
-  const todayUtc = Date.UTC(nowVN.getUTCFullYear(), nowVN.getUTCMonth(), nowVN.getUTCDate());
-  const targetUtc = Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate());
-  return Math.floor((todayUtc - targetUtc) / (24 * 60 * 60 * 1000));
 }
 
 export default function DataQualityAlert({

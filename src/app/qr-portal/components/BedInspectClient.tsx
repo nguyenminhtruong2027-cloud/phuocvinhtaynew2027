@@ -7,6 +7,8 @@ import {
   CheckCircle2, AlertCircle, ScanLine, Printer, ArrowRightLeft,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/context/AuthContext';
+import { releaseBedsForWorkers } from '@/lib/bedSync';
 import { toast } from 'sonner';
 import BedQrPrintModal from '@/app/bed-management/components/BedQrPrintModal';
 import BedTransferModal from '@/app/bed-management/components/BedTransferModal';
@@ -51,6 +53,7 @@ function renderSkeleton() {
 }
 
 export default function BedInspectClient() {
+  const { isAdmin, canWriteBlock } = useAuth();
   const [isMounted, setIsMounted] = useState(false);
   const [bed, setBed] = useState<BedRow | null>(null);
   const [worker, setWorker] = useState<WorkerLite | null>(null);
@@ -61,6 +64,7 @@ export default function BedInspectClient() {
   const [showAssign, setShowAssign] = useState(false);
   const [assignSearch, setAssignSearch] = useState('');
   const [workers, setWorkers] = useState<WorkerLite[]>([]);
+  const [bedOccupiedWorkerIds, setBedOccupiedWorkerIds] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [showQrPrint, setShowQrPrint] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
@@ -191,6 +195,17 @@ export default function BedInspectClient() {
         from += PAGE;
       }
       setWorkers(Array.from(byId.values()));
+      try {
+        const { data: occBeds } = await supabase
+          .from('beds')
+          .select('worker_id')
+          .not('worker_id', 'is', null);
+        const occSet = new Set<string>();
+        (occBeds || []).forEach((b: any) => {
+          if (b?.worker_id) occSet.add(String(b.worker_id));
+        });
+        setBedOccupiedWorkerIds(occSet);
+      } catch {}
     } catch (err) {
       console.warn('[bed-inspector] load workers failed:', err);
     }
@@ -219,16 +234,26 @@ export default function BedInspectClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMounted, bedLookup]);
 
+  const canWriteBed = useMemo(() => {
+    if (!bed) return false;
+    return isAdmin || canWriteBlock(bed.day, bed.ktx);
+  }, [bed, isAdmin, canWriteBlock]);
+
   // ─── Mutations ─────────────────────────────────────────────────────────────
   const setBedStatus = useCallback(
     async (status: 'maintenance' | 'empty') => {
       if (!bed) return;
+      if (!canWriteBed) {
+        toast.error(`Bạn không có quyền cập nhật giường tại ${bed.ktx} - ${bed.day}.`);
+        return;
+      }
       setBusy(true);
       setMessage('');
       try {
         const { error } = await supabase.from('beds').update({ status }).eq('id', bed.id);
         if (error) throw new Error(error.message);
         setMessage(status === 'maintenance' ? '🔧 Đã chuyển giường sang bảo trì.' : '✅ Giường đã sẵn sàng sử dụng lại.');
+        await loadBedData(true);
       } catch (err: any) {
         console.error('[bed-inspector] set status failed:', err);
         setMessage(err?.message || 'Không thể cập nhật trạng thái giường.');
@@ -236,11 +261,15 @@ export default function BedInspectClient() {
         setBusy(false);
       }
     },
-    [bed, supabase]
+    [bed, canWriteBed, loadBedData, supabase]
   );
 
   const confirmPresence = useCallback(async () => {
     if (!bed) return;
+    if (!canWriteBed) {
+      toast.error(`Bạn không có quyền xác nhận giường tại ${bed.ktx} - ${bed.day}.`);
+      return;
+    }
     setBusy(true);
     setMessage('');
     try {
@@ -271,18 +300,41 @@ export default function BedInspectClient() {
     } finally {
       setBusy(false);
     }
-  }, [bed, worker, supabase]);
+  }, [bed, canWriteBed, worker, supabase]);
 
   const requestCheckout = useCallback(async () => {
     if (!bed) return;
+    if (!canWriteBed) {
+      toast.error(`Bạn không có quyền check-out giường tại ${bed.ktx} - ${bed.day}.`);
+      return;
+    }
     setBusy(true);
     setMessage('');
     try {
+      const targetWorkerId = bed.worker_id || worker?.id || null;
+      const targetMaNv = bed.ma_nv || worker?.maNV || '';
+      const { data: existingPending } = await supabase
+        .from('worker_registrations')
+        .select('id')
+        .eq('status', 'pending')
+        .like('ghi_chu', '[CHECKOUT]%')
+        .eq('ktx', bed.ktx)
+        .eq('day', bed.day)
+        .eq('phong_so', bed.phong_so)
+        .eq('giuong', bed.giuong)
+        .limit(1);
+      if (existingPending && existingPending.length > 0) {
+        setMessage('ℹ️ Giường này đã có yêu cầu check-out đang chờ duyệt.');
+        return;
+      }
+
       const now = new Date().toISOString();
       const note = `[CHECKOUT] Lý do: Qua Kiểm Tra Giường QR${now ? ` | Ngày dự kiến dọn ra: ${now.split('T')[0]}` : ''}`;
       const { error } = await supabase.from('worker_registrations').insert({
+        type: 'CHECKOUT',
+        worker_id: targetWorkerId,
         ho_va_ten: bed.ho_va_ten || worker?.hoVaTen || '',
-        ma_nv: bed.ma_nv || worker?.maNV || '',
+        ma_nv: targetMaNv,
         so_cccd: worker?.cccd || '',
         so_dien_thoai: worker?.soDienThoai || '',
         ktx: bed.ktx,
@@ -293,29 +345,47 @@ export default function BedInspectClient() {
         ghi_chu: note,
       });
       if (error) throw new Error(error.message);
-      setMessage('🚪 Đã tạo yêu cầu check-out — chờ quản lý duyệt ở tab Duyệt Check-out.');
+      setMessage('🚪 Đã tạo yêu cầu check-out — giường sẽ giải phóng sau khi quản lý duyệt.');
     } catch (err: any) {
       console.error('[bed-inspector] checkout request failed:', err);
       setMessage(err?.message || 'Không thể tạo yêu cầu check-out.');
     } finally {
       setBusy(false);
     }
-  }, [bed, worker, supabase]);
+  }, [bed, canWriteBed, worker, supabase]);
 
   const handleAssign = useCallback(
     async (candidate: WorkerLite) => {
       if (!bed) return;
+      if (!canWriteBed) {
+        toast.error(`Bạn không có quyền gán công nhân tại ${bed.ktx} - ${bed.day}.`);
+        return;
+      }
       setBusy(true);
       setMessage('');
       try {
-        const { error } = await supabase
+        await releaseBedsForWorkers(supabase, [candidate.id]);
+        const { error: workerErr } = await supabase
           .from('workers')
           .update({ ktx: bed.ktx, day: bed.day, phong_so: bed.phong_so, giuong: bed.giuong })
           .eq('id', candidate?.id ?? '');
-        if (error) throw new Error(error.message);
+        if (workerErr) throw new Error(workerErr.message);
+
+        const { error: bedErr } = await supabase
+          .from('beds')
+          .update({
+            status: 'occupied',
+            worker_id: candidate.id,
+            ma_nv: candidate.maNV || null,
+            ho_va_ten: candidate.hoVaTen || null,
+          })
+          .eq('id', bed.id);
+        if (bedErr) throw new Error(bedErr.message);
+
         setShowAssign(false);
         setAssignSearch('');
-        setMessage('✓ Đã gán công nhân vào giường (bảng workers đã cập nhật).');
+        setMessage('✓ Đã gán công nhân vào giường và đồng bộ hệ thống.');
+        await Promise.all([loadBedData(true), loadWorkers()]);
       } catch (err: any) {
         console.error('[bed-inspector] assign failed:', err);
         setMessage(err?.message || 'Không thể gán công nhân.');
@@ -323,16 +393,16 @@ export default function BedInspectClient() {
         setBusy(false);
       }
     },
-    [bed, supabase]
+    [bed, canWriteBed, loadBedData, loadWorkers, supabase]
   );
 
   const occupiedIds = useMemo(() => {
-    const set = new Set<string>([]);
+    const set = new Set<string>(bedOccupiedWorkerIds);
     (workers || []).forEach(w => {
-      if (w?.ktx && w?.day && w?.phongSo && w?.giuong) set.add(w?.id ?? '');
+      if (w?.id && w?.ktx && w?.day && w?.phongSo && w?.giuong) set.add(w.id);
     });
     return set;
-  }, [workers]);
+  }, [workers, bedOccupiedWorkerIds]);
 
   const candidates = useMemo(() => {
     const q = assignSearch.trim().toLowerCase();
@@ -456,74 +526,82 @@ export default function BedInspectClient() {
 
               {/* Action buttons */}
               <div className="rounded-2xl border border-bdr bg-surf p-4 space-y-2.5">
-                {occupied && name && (
+                {!canWriteBed ? (
+                  <p className="text-xs text-wn font-semibold text-center py-2">
+                    Chế độ chỉ xem — Bạn không phụ trách dãy {bed.day} ({bed.ktx}).
+                  </p>
+                ) : (
                   <>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={confirmPresence}
-                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-ok2 hover:bg-ok2 text-tx text-sm font-extrabold transition-colors disabled:opacity-50"
-                    >
-                      {busy ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />} ✓ Xác nhận có mặt
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => setShowTransfer(true)}
-                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-pri hover:opacity-90 text-tx text-sm font-extrabold transition-colors disabled:opacity-50"
-                    >
-                      {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowRightLeft size={15} />} ⇄ Chuyển / Đổi Giường
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => setBedStatus('maintenance')}
-                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-wn hover:bg-wn text-[#0B0F17] text-sm font-extrabold transition-colors disabled:opacity-50"
-                    >
-                      {busy ? <Loader2 size={15} className="animate-spin" /> : <Wrench size={15} />} 🔧 Báo hỏng / Bảo trì
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={requestCheckout}
-                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-dgr hover:bg-dgr text-tx text-sm font-extrabold transition-colors disabled:opacity-50"
-                    >
-                      {busy ? <Loader2 size={15} className="animate-spin" /> : <DoorOpen size={15} />} 🚪 Check-out
-                    </button>
+                    {occupied && name && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={confirmPresence}
+                          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-ok2 hover:bg-ok2 text-tx text-sm font-extrabold transition-colors disabled:opacity-50"
+                        >
+                          {busy ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />} ✓ Xác nhận có mặt
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => setShowTransfer(true)}
+                          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-pri hover:opacity-90 text-tx text-sm font-extrabold transition-colors disabled:opacity-50"
+                        >
+                          {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowRightLeft size={15} />} ⇄ Chuyển / Đổi Giường
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => setBedStatus('maintenance')}
+                          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-wn hover:bg-wn text-[#0B0F17] text-sm font-extrabold transition-colors disabled:opacity-50"
+                        >
+                          {busy ? <Loader2 size={15} className="animate-spin" /> : <Wrench size={15} />} 🔧 Báo hỏng / Bảo trì
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={requestCheckout}
+                          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-dgr hover:bg-dgr text-tx text-sm font-extrabold transition-colors disabled:opacity-50"
+                        >
+                          {busy ? <Loader2 size={15} className="animate-spin" /> : <DoorOpen size={15} />} 🚪 Check-out
+                        </button>
+                      </>
+                    )}
+                    {maintenance ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => setBedStatus('empty')}
+                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-ok2 hover:bg-ok2 text-tx text-sm font-extrabold disabled:opacity-50"
+                      >
+                        {busy ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />} ✓ Hoàn tất bảo trì
+                      </button>
+                    ) : (
+                      !occupied && (
+                        <>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => { setShowAssign(true); setAssignSearch(''); }}
+                            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-pri hover:bg-pri2 text-tx text-sm font-extrabold transition-colors disabled:opacity-50"
+                          >
+                            {busy ? <Loader2 size={15} className="animate-spin" /> : <UserCheck size={15} />} ＋ Gán Nhanh Công Nhân
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => setBedStatus('maintenance')}
+                            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-wn hover:bg-wn text-[#0B0F17] text-sm font-extrabold transition-colors disabled:opacity-50"
+                          >
+                            {busy ? <Loader2 size={15} className="animate-spin" /> : <Wrench size={15} />} 🔧 Báo hỏng / Bảo trì
+                          </button>
+                        </>
+                      )
+                    )}
+                    {busy && <p className="text-[11px] text-mu flex items-center gap-1.5"><Loader2 size={11} className="animate-spin" /> Đang xử lý…</p>}
                   </>
                 )}
-                {maintenance ? (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => setBedStatus('empty')}
-                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-ok2 hover:bg-ok2 text-tx text-sm font-extrabold disabled:opacity-50"
-                  >
-                    {busy ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />} ✓ Hoàn tất bảo trì
-                  </button>
-                ) : (
-                  !occupied && (
-                    <>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => { setShowAssign(true); setAssignSearch(''); }}
-                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-pri hover:bg-pri2 text-tx text-sm font-extrabold transition-colors disabled:opacity-50"
-                      >
-                        {busy ? <Loader2 size={15} className="animate-spin" /> : <UserCheck size={15} />} ＋ Gán Nhanh Công Nhân
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => setBedStatus('maintenance')}
-                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-wn hover:bg-wn text-[#0B0F17] text-sm font-extrabold transition-colors disabled:opacity-50"
-                      >
-                        {busy ? <Loader2 size={15} className="animate-spin" /> : <Wrench size={15} />} 🔧 Báo hỏng / Bảo trì
-                      </button>
-                    </>
-                  )
-                )}
-                {busy && <p className="text-[11px] text-mu flex items-center gap-1.5"><Loader2 size={11} className="animate-spin" /> Đang xử lý…</p>}
               </div>
             </>
           );

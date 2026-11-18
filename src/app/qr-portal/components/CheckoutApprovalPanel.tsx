@@ -28,6 +28,7 @@ import {
 
 export interface CheckoutRequest {
   id: string;
+  worker_id?: string | null;
   ho_va_ten: string;
   ma_nv: string;
   so_cccd: string;
@@ -264,13 +265,11 @@ export default function CheckoutApprovalPanel({
       const { data, error } = await supabase
         .from('worker_registrations')
         .select('*')
+        .like('ghi_chu', '[CHECKOUT]%')
         .order('created_at', { ascending: false });
 
       if (!error && data) {
-        const checkoutRows = (data as CheckoutRequest[]).filter(r =>
-          r.ghi_chu?.startsWith('[CHECKOUT]')
-        );
-        const deduped = Array.from(new Map(checkoutRows.map(r => [r.id, r])).values());
+        const deduped = Array.from(new Map((data as CheckoutRequest[]).map(r => [r.id, r])).values());
         setCheckouts(deduped);
       }
     } catch (e: any) {
@@ -286,13 +285,19 @@ export default function CheckoutApprovalPanel({
   }, [fetchCheckouts]);
 
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleReload = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => fetchCheckouts(true), 250);
+    };
     const channel = supabase
       .channel('worker_registrations_checkout_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_registrations' }, () => {
-        fetchCheckouts(true);
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_registrations' }, scheduleReload)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      if (timer) clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
   }, [fetchCheckouts, supabase]);
 
   // Phân quyền Staff (Requirement 5)
@@ -369,7 +374,18 @@ export default function CheckoutApprovalPanel({
 
       const matchedWorkersMap = new Map<string, any>();
 
-      if (req.ma_nv && req.ma_nv.trim()) {
+      if (req.worker_id && req.worker_id.trim()) {
+        const { data: byId } = await supabase
+          .from('workers')
+          .select('*')
+          .eq('id', req.worker_id.trim())
+          .limit(1);
+        (byId || []).forEach((w: any) => {
+          if (w?.id) matchedWorkersMap.set(w.id, w);
+        });
+      }
+
+      if (matchedWorkersMap.size === 0 && req.ma_nv && req.ma_nv.trim()) {
         const { data: byCode } = await supabase
           .from('workers')
           .select('*')

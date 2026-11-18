@@ -234,6 +234,72 @@ export async function fetchDynamicKtxStructure(forceRefresh = false): Promise<Kt
   return _inflightPromise;
 }
 
+const _structureListeners = new Set<(groups: KtxBlockGroup[]) => void>();
+let _sharedRealtimeCleanup: (() => void) | null = null;
+let _reloadDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+function notifyStructureListeners(groups: KtxBlockGroup[]) {
+  _structureListeners.forEach(listener => {
+    try {
+      listener(groups);
+    } catch {}
+  });
+}
+
+function scheduleSharedStructureReload() {
+  if (_reloadDebounceTimer) clearTimeout(_reloadDebounceTimer);
+  _reloadDebounceTimer = setTimeout(async () => {
+    _reloadDebounceTimer = null;
+    const data = await fetchDynamicKtxStructure(true);
+    notifyStructureListeners(data || []);
+  }, 350);
+}
+
+function ensureSharedRealtimeSubscription() {
+  if (_sharedRealtimeCleanup) return;
+  let supabase: ReturnType<typeof createClient> | null = null;
+  try {
+    supabase = createClient();
+  } catch (err) {
+    console.warn('[ktxStructure] Realtime disabled (client init failed):', err);
+    return;
+  }
+
+  let channel: ReturnType<typeof supabase.channel> | null = null;
+  try {
+    channel = supabase
+      .channel('ktx_structure_realtime_shared')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'workers' }, scheduleSharedStructureReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, scheduleSharedStructureReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_units' }, scheduleSharedStructureReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, scheduleSharedStructureReload)
+      .subscribe();
+  } catch (err) {
+    console.warn('[ktxStructure] Realtime subscribe failed (table may be missing):', err);
+  }
+
+  const onUpdated = () => scheduleSharedStructureReload();
+  if (typeof window !== 'undefined') {
+    window.addEventListener('ktx_workers_updated', onUpdated);
+    window.addEventListener('ktx_facilities_updated', onUpdated);
+  }
+
+  _sharedRealtimeCleanup = () => {
+    if (_reloadDebounceTimer) {
+      clearTimeout(_reloadDebounceTimer);
+      _reloadDebounceTimer = null;
+    }
+    try {
+      if (channel && supabase) supabase.removeChannel(channel);
+    } catch {}
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('ktx_workers_updated', onUpdated);
+      window.removeEventListener('ktx_facilities_updated', onUpdated);
+    }
+    _sharedRealtimeCleanup = null;
+  };
+}
+
 /**
  * React Hook for consuming dynamic KTX and block structure throughout the app
  */
@@ -245,7 +311,9 @@ export function useKtxStructure() {
     setLoading(true);
     try {
       const data = await fetchDynamicKtxStructure(force);
-      setKtxGroups(data || []);
+      const next = data || [];
+      setKtxGroups(next);
+      notifyStructureListeners(next);
     } finally {
       setLoading(false);
     }
@@ -257,45 +325,21 @@ export function useKtxStructure() {
     }
   }, [reload]);
 
-  // Realtime: auto-discover new KTX/dãy the moment workers/facilities/room_units/profiles change.
   useEffect(() => {
-    let supabase: ReturnType<typeof createClient> | null = null;
-    try {
-      supabase = createClient();
-    } catch (err) {
-      console.warn('[ktxStructure] Realtime disabled (client init failed):', err);
-      return;
-    }
-    let channel: ReturnType<typeof supabase.channel> | null = null;
-    try {
-      channel = supabase
-        .channel('ktx_structure_realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'workers' }, () => reload(true))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, () => reload(true))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'room_units' }, () => reload(true))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => reload(true))
-        .subscribe();
-    } catch (err) {
-      console.warn('[ktxStructure] Realtime subscribe failed (table may be missing):', err);
-    }
-
-    const onWorkersUpdated = () => reload(true);
-    const onFacilitiesUpdated = () => reload(true);
-    if (typeof window !== 'undefined') {
-      window.addEventListener('ktx_workers_updated', onWorkersUpdated);
-      window.addEventListener('ktx_facilities_updated', onFacilitiesUpdated);
-    }
+    const listener = (groups: KtxBlockGroup[]) => {
+      setKtxGroups(groups);
+      setLoading(false);
+    };
+    _structureListeners.add(listener);
+    ensureSharedRealtimeSubscription();
 
     return () => {
-      try {
-        if (channel) supabase!.removeChannel(channel);
-      } catch {}
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('ktx_workers_updated', onWorkersUpdated);
-        window.removeEventListener('ktx_facilities_updated', onFacilitiesUpdated);
+      _structureListeners.delete(listener);
+      if (_structureListeners.size === 0 && _sharedRealtimeCleanup) {
+        _sharedRealtimeCleanup();
       }
     };
-  }, [reload]);
+  }, []);
 
   const ktxNames = ktxGroups.map(g => g.ktx);
 
