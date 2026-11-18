@@ -1323,6 +1323,7 @@ function BulkDeleteByFilterModal({
 function BulkTransferWorkersModal({
   selectedWorkers,
   allWorkers,
+  roomCapacities,
   onClose,
   onTransfer,
   isAdmin,
@@ -1330,6 +1331,7 @@ function BulkTransferWorkersModal({
 }: {
   selectedWorkers: Worker[];
   allWorkers: Worker[];
+  roomCapacities: RoomCapacityMap;
   onClose: () => void;
   onTransfer: (target: {
     ktx: string;
@@ -1407,6 +1409,11 @@ function BulkTransferWorkersModal({
         normalizePhong(w.phongSo) === normR
     ).length;
   }, [allWorkers, authorizedSelected, targetKtx, targetDay, targetRoom]);
+
+  const targetCapacity = useMemo(() => {
+    if (!targetKtx || !targetDay || !targetRoom.trim()) return DEFAULT_ROOM_CAPACITY;
+    return getRoomCapacity(roomCapacities, targetKtx, targetDay, targetRoom.trim()) || DEFAULT_ROOM_CAPACITY;
+  }, [roomCapacities, targetKtx, targetDay, targetRoom]);
 
   const projectedCount = currentTargetCount + authorizedSelected.length;
   const targetAuthorized = isAdmin || (targetDay.trim() ? canWriteBlock(targetDay.trim(), targetKtx.trim()) : false);
@@ -1537,17 +1544,17 @@ function BulkTransferWorkersModal({
 
           {targetRoom.trim() && targetDay.trim() && (
             <div className={`p-3 rounded-xl border text-xs space-y-1 ${
-              projectedCount > DEFAULT_ROOM_CAPACITY
+              projectedCount > targetCapacity
                 ? 'tint-wn border-wn text-wn'
                 : 'bg-muted/40 border-border text-muted-foreground'
             }`}>
               <p>
                 Phòng đích <strong className="text-foreground">{targetKtx} · {targetDay} · {targetRoom}</strong> hiện có{' '}
                 <strong className="text-foreground font-tabular">{currentTargetCount}</strong> người → sau khi chuyển:{' '}
-                <strong className="font-tabular">{projectedCount}/{DEFAULT_ROOM_CAPACITY}</strong> người.
+                <strong className="font-tabular">{projectedCount}/{targetCapacity}</strong> người.
               </p>
-              {projectedCount > DEFAULT_ROOM_CAPACITY && (
-                <p className="font-semibold">⚠ Sẽ vượt sức chứa mặc định ({DEFAULT_ROOM_CAPACITY} người) — hệ thống vẫn cho phép lưu.</p>
+              {projectedCount > targetCapacity && (
+                <p className="font-semibold">⚠ Sẽ vượt định mức giường của phòng ({targetCapacity} người) — hệ thống vẫn cho phép lưu.</p>
               )}
               <p className="opacity-80">Giường cũ của các công nhân được chuyển sẽ tự động được giải phóng.</p>
             </div>
@@ -1598,6 +1605,28 @@ export function WorkerManagementClient() {
 
   const { currentUser, canDeleteSingle, canBulkDelete, canDeleteAll, isAdmin, canWriteBlock } = useAuth();
   const { addLog } = useAudit();
+  const [roomCapacities, setRoomCapacities] = useState<RoomCapacityMap>({});
+
+  useEffect(() => {
+    let active = true;
+    const loadCapacities = () => {
+      fetchRoomCapacities()
+        .then(map => {
+          if (active) setRoomCapacities(map);
+        })
+        .catch(() => {});
+    };
+    loadCapacities();
+    if (typeof window !== 'undefined') {
+      window.addEventListener('ktx_facilities_updated', loadCapacities);
+    }
+    return () => {
+      active = false;
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('ktx_facilities_updated', loadCapacities);
+      }
+    };
+  }, []);
 
   // Audit logging must never interrupt the primary operation.
   const writeAuditLog = useCallback((actionType: 'CREATE' | 'UPDATE' | 'DELETE' | 'IMPORT', details: string) => {
@@ -1693,13 +1722,14 @@ export function WorkerManagementClient() {
     else { setSortKey(key); setSortDir('asc'); }
   }, [sortKey]);
 
-  const checkRoomCapacity = useCallback((ktx: string, day: string, phongSo: string, excludeId?: string): { count: number; overCapacity: boolean } => {
+  const checkRoomCapacity = useCallback((ktx: string, day: string, phongSo: string, excludeId?: string): { count: number; capacity: number; overCapacity: boolean } => {
     const normP = normalizePhong(phongSo);
     const count = workers.filter(w =>
       w.ktx === ktx && w.day === day && (w.phongSo === phongSo || normalizePhong(w.phongSo) === normP) && w.id !== excludeId
     ).length;
-    return { count, overCapacity: count >= DEFAULT_ROOM_CAPACITY };
-  }, [workers]);
+    const capacity = getRoomCapacity(roomCapacities, ktx, day, phongSo) || DEFAULT_ROOM_CAPACITY;
+    return { count, capacity, overCapacity: count >= capacity };
+  }, [workers, roomCapacities]);
 
   const handleSave = useCallback(async (data: Worker) => {
     const isNew = !workers.some(w => w.id === data.id);
@@ -1714,15 +1744,15 @@ export function WorkerManagementClient() {
       const old = workers.find(w => w.id === data.id);
       const isRoomChange = old && (old.ktx !== data.ktx || old.day !== data.day || old.phongSo !== data.phongSo);
       if (isRoomChange) {
-        const { count, overCapacity } = checkRoomCapacity(data.ktx, data.day, data.phongSo, data.id);
+        const { count, capacity, overCapacity } = checkRoomCapacity(data.ktx, data.day, data.phongSo, data.id);
         if (overCapacity) {
-          toast.warning(`⚠️ Phòng quá tải: ${count + 1}/${DEFAULT_ROOM_CAPACITY} người — vẫn lưu được.`);
+          toast.warning(`⚠️ Phòng quá tải: ${count + 1}/${capacity} người — vẫn lưu được.`);
         }
       }
     } else {
-      const { count, overCapacity } = checkRoomCapacity(data.ktx, data.day, data.phongSo);
+      const { count, capacity, overCapacity } = checkRoomCapacity(data.ktx, data.day, data.phongSo);
       if (overCapacity) {
-        toast.warning(`⚠️ Phòng quá tải: ${count + 1}/${DEFAULT_ROOM_CAPACITY} người — vẫn lưu được.`);
+        toast.warning(`⚠️ Phòng quá tải: ${count + 1}/${capacity} người — vẫn lưu được.`);
       }
     }
 
@@ -1916,9 +1946,10 @@ export function WorkerManagementClient() {
       setSelectedIds(new Set());
       setShowBulkTransfer(false);
 
-      if (currentDestCount + ids.length > DEFAULT_ROOM_CAPACITY) {
+      const targetCapacity = getRoomCapacity(roomCapacities, target.ktx, target.day, target.phongSo) || DEFAULT_ROOM_CAPACITY;
+      if (currentDestCount + ids.length > targetCapacity) {
         toast.warning(
-          `Đã chuyển ${ids.length} công nhân sang ${target.day} - ${target.phongSo} (Quá tải: ${currentDestCount + ids.length}/${DEFAULT_ROOM_CAPACITY} người)`
+          `Đã chuyển ${ids.length} công nhân sang ${target.day} - ${target.phongSo} (Quá tải: ${currentDestCount + ids.length}/${targetCapacity} người)`
         );
       } else {
         toast.success(`Đã chuyển ${ids.length} công nhân sang ${target.ktx} · ${target.day} · ${target.phongSo}`);
@@ -1926,7 +1957,7 @@ export function WorkerManagementClient() {
     } catch (err) {
       toast.error(`Lỗi chuyển phòng hàng loạt: ${err instanceof Error ? err.message : 'Không thể cập nhật'}`);
     }
-  }, [workers, selectedIds, isAdmin, canWriteBlock, currentUser, bulkUpdateWorkers, addLog]);
+  }, [workers, selectedIds, isAdmin, canWriteBlock, currentUser, bulkUpdateWorkers, addLog, roomCapacities]);
 
   const handleExport = useCallback(() => {
     const data = filtered.map((w, idx) => {
@@ -2150,6 +2181,7 @@ export function WorkerManagementClient() {
         <BulkTransferWorkersModal
           selectedWorkers={workers.filter(w => selectedIds.has(w.id))}
           allWorkers={workers}
+          roomCapacities={roomCapacities}
           onClose={() => setShowBulkTransfer(false)}
           onTransfer={handleBulkTransfer}
           isAdmin={isAdmin}

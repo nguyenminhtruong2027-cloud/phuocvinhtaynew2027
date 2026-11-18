@@ -44,13 +44,68 @@ function stripCheckoutTag(rawGhiChu: string): string {
 
 /**
  * Fetches all checkout requests from Supabase.
- * Checks `checkout_requests` table first, and merges with workers having pending checkout tags and audit logs.
+ * Canonical source: `worker_registrations` where `ghi_chu` starts with `[CHECKOUT]`
+ * (used by `/checkout`, `CheckoutApprovalPanel`, `BedManagementClient`, and `BedInspectClient`).
+ * Falls back to legacy `checkout_requests`, `[CHECKOUT_PENDING]` worker tags, and `audit_logs` if present.
  */
 export async function getCheckoutRequests(): Promise<CheckoutRequest[]> {
   const supabase = createClient();
   const requestMap = new Map<string, CheckoutRequest>();
 
-  // 1. Try fetching from `checkout_requests` table if it exists
+  // 0. Canonical source: `worker_registrations` with `[CHECKOUT]` prefix in `ghi_chu`
+  try {
+    const { data: regRows, error: regErr } = await supabase
+      .from('worker_registrations')
+      .select('*')
+      .like('ghi_chu', '[CHECKOUT]%')
+      .order('created_at', { ascending: false });
+
+    if (!regErr && Array.isArray(regRows)) {
+      regRows.forEach((row: any) => {
+        const rawNote = String(row.ghi_chu || '');
+        const lines = rawNote.split('\n');
+        let reason = 'Dọn ra KTX';
+        let checkoutDate = String(row.ngay_vao_ktx || '').trim();
+        let extraNote = '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed === '[CHECKOUT]') continue;
+          if (trimmed.startsWith('Lý do:')) {
+            reason = trimmed.replace(/^Lý do:\s*/i, '').trim() || reason;
+          } else if (trimmed.startsWith('Ngày dọn ra:')) {
+            checkoutDate = trimmed.replace(/^Ngày dọn ra:\s*/i, '').trim() || checkoutDate;
+          } else if (trimmed.startsWith('Ghi chú:')) {
+            extraNote = trimmed.replace(/^Ghi chú:\s*/i, '').trim();
+          }
+        }
+
+        const id = String(row.id);
+        requestMap.set(id, {
+          id,
+          ho_va_ten: String(row.ho_va_ten || ''),
+          ma_nv: String(row.ma_nv || ''),
+          so_cccd: String(row.so_cccd || ''),
+          so_dien_thoai: String(row.so_dien_thoai || ''),
+          ktx: String(row.ktx || ''),
+          day: String(row.day || ''),
+          phong_so: String(row.phong_so || ''),
+          giuong: row.giuong ? String(row.giuong) : undefined,
+          ly_do: reason,
+          ngay_don_ra: checkoutDate || String(row.created_at || '').split('T')[0],
+          ghi_chu: extraNote || undefined,
+          status: (row.status as any) || 'pending',
+          reviewed_by: row.reviewed_by ? String(row.reviewed_by) : null,
+          reviewed_at: row.reviewed_at ? String(row.reviewed_at) : null,
+          created_at: String(row.created_at || new Date().toISOString()),
+        });
+      });
+    }
+  } catch (err) {
+    console.warn('[checkoutService] Error reading canonical worker_registrations [CHECKOUT] rows:', err);
+  }
+
+  // 1. Try fetching from legacy `checkout_requests` table if it exists
   try {
     const { data, error } = await supabase
       .from('checkout_requests')
@@ -182,7 +237,8 @@ export async function getCheckoutRequests(): Promise<CheckoutRequest[]> {
 }
 
 /**
- * Creates and submits a new checkout declaration request
+ * @deprecated Superseded by the canonical `worker_registrations` `[CHECKOUT]` flow
+ * in `/checkout` and `CheckoutApprovalPanel.tsx`. Retained only for backward compatibility.
  */
 export async function submitCheckoutRequest(params: {
   ho_va_ten: string;
@@ -294,10 +350,7 @@ export async function submitCheckoutRequest(params: {
 }
 
 /**
- * Approves a checkout request:
- * 1. Frees up the room and bed in `workers` table (clears day, phong_so, giuong, sets ngay_ra_ktx, tam_tru_status: unregistered)
- * 2. Updates request status to 'approved'
- * 3. Logs completion in `audit_logs`
+ * @deprecated Superseded by `CheckoutApprovalPanel.tsx` canonical `worker_registrations` `[CHECKOUT]` flow.
  */
 export async function approveCheckoutRequest(
   request: CheckoutRequest,

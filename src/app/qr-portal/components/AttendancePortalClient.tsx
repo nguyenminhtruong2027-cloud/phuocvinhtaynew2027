@@ -5,6 +5,7 @@ import { QrCode, Calendar, Play, Square, Users, UserCheck, UserX, Download, Refr
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
+import { useAudit } from '@/context/AuditContext';
 import { getVNDateString } from '@/lib/vnDate';
 import { QrCodeImage, downloadQrPng } from '@/components/QrCodeImage';
 
@@ -224,6 +225,7 @@ export default function AttendancePortalClient() {
 
   const [attendanceUrl, setAttendanceUrl] = useState('');
   const { currentUser } = useAuth();
+  const { addLog } = useAudit();
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
 
@@ -460,8 +462,16 @@ export default function AttendancePortalClient() {
         .select()
         .single();
       if (!error && data) {
+        const opened = data as AttendanceSession;
+        try {
+          addLog(
+            currentUser?.email || 'system',
+            'ATTENDANCE_SESSION',
+            `Mở phiên điểm danh ngày ${selectedDate} — Khu vực: ${getZoneLabel(opened)}`
+          );
+        } catch {}
         await fetchSessions(selectedDate);
-        setActiveSession(data as AttendanceSession);
+        setActiveSession(opened);
         setActiveTab('records');
       }
     } catch (e: any) {
@@ -478,6 +488,13 @@ export default function AttendancePortalClient() {
     try {
       const { error } = await supabase.from('attendance_sessions').update({ is_active: false }).eq('id', activeSession.id);
       if (!error) {
+        try {
+          addLog(
+            currentUser?.email || 'system',
+            'ATTENDANCE_SESSION',
+            `Đóng phiên điểm danh ngày ${activeSession.session_date} — Khu vực: ${getZoneLabel(activeSession)}`
+          );
+        } catch {}
         setActiveSession(prev => prev ? { ...prev, is_active: false } : prev);
         await fetchSessions(selectedDate, true);
       }
@@ -496,6 +513,13 @@ export default function AttendancePortalClient() {
       await supabase.from('attendance_records').delete().eq('session_id', activeSession.id);
       const { error } = await supabase.from('attendance_sessions').delete().eq('id', activeSession.id);
       if (!error) {
+        try {
+          addLog(
+            currentUser?.email || 'system',
+            'ATTENDANCE_SESSION',
+            `Xóa phiên điểm danh ngày ${activeSession.session_date} — Khu vực: ${getZoneLabel(activeSession)}`
+          );
+        } catch {}
         setRecords([]);
         setShowDeleteConfirm(false);
         await fetchSessions(selectedDate);
@@ -521,6 +545,14 @@ export default function AttendancePortalClient() {
     try {
       const { error } = await supabase.from('attendance_records').update({ status: editStatus, ghi_chu: editNote }).eq('id', recId);
       if (!error) {
+        const rec = records.find(r => r.id === recId);
+        try {
+          addLog(
+            currentUser?.email || 'system',
+            'ATTENDANCE_UPDATE',
+            `Cập nhật điểm danh ${rec ? `${rec.ho_va_ten} (${rec.ma_nv})` : recId}: ${STATUS_LABELS[editStatus]?.label || editStatus}${editNote ? ` — Ghi chú: ${editNote}` : ''}`
+          );
+        } catch {}
         setRecords(prev => prev.map(r => r.id === recId ? { ...r, status: editStatus, ghi_chu: editNote } : r));
         setEditingId(null);
       }
@@ -611,6 +643,13 @@ export default function AttendancePortalClient() {
         .select()
         .single();
       if (!error && data) {
+        try {
+          addLog(
+            currentUser?.email || 'system',
+            'ATTENDANCE_UPDATE',
+            `Điểm danh hộ: ${w.ho_va_ten} (${w.ma_nv}) — ngày ${activeSession.session_date} (${[w.ktx, w.day, w.phong_so ? `P.${w.phong_so}` : ''].filter(Boolean).join(' · ')})`
+          );
+        } catch {}
         setRecords(prev => {
           const exists = prev.some(r => r.id === (data as AttendanceRecord).id);
           if (exists) return prev.map(r => r.id === (data as AttendanceRecord).id ? data as AttendanceRecord : r);
@@ -627,9 +666,19 @@ export default function AttendancePortalClient() {
   // ─── Delete record (feature 4) ────────────────────────────────────────────
   const handleDeleteRecord = async (recId: string) => {
     setDeletingRecordId(recId);
+    const targetRec = records.find(r => r.id === recId);
     try {
       const { error } = await supabase.from('attendance_records').delete().eq('id', recId);
-      if (!error) setRecords(prev => prev.filter(r => r.id !== recId));
+      if (!error) {
+        try {
+          addLog(
+            currentUser?.email || 'system',
+            'ATTENDANCE_UPDATE',
+            `Xóa bản ghi điểm danh: ${targetRec ? `${targetRec.ho_va_ten} (${targetRec.ma_nv})` : recId} — ngày ${targetRec?.session_date || selectedDate}`
+          );
+        } catch {}
+        setRecords(prev => prev.filter(r => r.id !== recId));
+      }
     } catch (e: any) {
       console.error('deleteRecord error:', e.message);
     } finally {

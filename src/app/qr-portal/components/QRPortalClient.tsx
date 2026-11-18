@@ -28,7 +28,8 @@ import {
 import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
 import { toast } from 'sonner';
-import { syncBedForWorkerSave } from '@/lib/bedSync';
+import { syncBedForWorkerSave, normalizeBedLabel } from '@/lib/bedSync';
+import { normalizeRoomLabel } from '@/lib/facilityCapacity';
 import { QrCodeImage, downloadQrPng, generateQrDataUrl } from '@/components/QrCodeImage';
 import { printHtmlViaIframe, escapeHtml } from '@/lib/printHtml';
 import {
@@ -907,6 +908,70 @@ export default function QRPortalClient() {
       const dayVal = normalizeDayLabel(regToApprove.day || '');
       const roomVal = (regToApprove.phong_so || '').trim();
       const bedVal = (regToApprove.giuong || '').trim();
+
+      // 0a. Live DB duplicate guard against active workers (CCCD & Mã NV)
+      const cleanCccd = (regToApprove.so_cccd || '').trim();
+      if (cleanCccd.length >= 8) {
+        const { data: dupCccdRows } = await supabase
+          .from('workers')
+          .select('id, ho_va_ten, ma_nv, ktx, day, phong_so, ngay_ra_ktx')
+          .eq('cccd', cleanCccd)
+          .limit(5);
+        const activeDup = (dupCccdRows || []).find(
+          (w: any) => w.id !== workerId && !(w.ngay_ra_ktx || '').trim()
+        );
+        if (activeDup) {
+          throw new Error(
+            `CCCD ${cleanCccd} đang thuộc về công nhân "${activeDup.ho_va_ten}" (${[activeDup.ktx, activeDup.day, activeDup.phong_so ? `P.${activeDup.phong_so}` : ''].filter(Boolean).join(' · ') || 'Chưa xếp phòng'}). Vui lòng kiểm tra tránh trùng hồ sơ.`
+          );
+        }
+      }
+
+      const cleanMaNv = (regToApprove.ma_nv || '').trim();
+      const maNvLower = cleanMaNv.toLowerCase();
+      if (cleanMaNv && cleanMaNv !== '-' && maNvLower !== 'chờ mã' && maNvLower !== 'cho ma') {
+        const { data: dupMaRows } = await supabase
+          .from('workers')
+          .select('id, ho_va_ten, ma_nv, ktx, day, phong_so, ngay_ra_ktx')
+          .eq('ma_nv', cleanMaNv)
+          .limit(5);
+        const activeDup = (dupMaRows || []).find(
+          (w: any) => w.id !== workerId && !(w.ngay_ra_ktx || '').trim()
+        );
+        if (activeDup) {
+          throw new Error(
+            `Mã NV "${cleanMaNv}" đang thuộc về công nhân "${activeDup.ho_va_ten}" (${[activeDup.ktx, activeDup.day, activeDup.phong_so ? `P.${activeDup.phong_so}` : ''].filter(Boolean).join(' · ') || 'Chưa xếp phòng'}).`
+          );
+        }
+      }
+
+      // 0b. Live DB bed conflict guard (prevent concurrent overwrite or assigning to maintenance bed)
+      if (ktxVal && dayVal && roomVal && bedVal) {
+        const { data: roomBeds } = await supabase
+          .from('beds')
+          .select('id, phong_so, giuong, status, worker_id, ho_va_ten')
+          .eq('ktx', ktxVal)
+          .eq('day', dayVal);
+        const normTargetRoom = normalizeRoomLabel(roomVal);
+        const normTargetBed = normalizeBedLabel(bedVal);
+        const matchedBed = (roomBeds || []).find(
+          (b: any) =>
+            normalizeRoomLabel(b.phong_so || '') === normTargetRoom &&
+            normalizeBedLabel(b.giuong || '') === normTargetBed
+        );
+        if (matchedBed) {
+          if (matchedBed.status === 'maintenance') {
+            throw new Error(
+              `Giường ${bedVal} tại ${ktxVal} · ${dayVal} · Phòng ${roomVal} đang bảo trì, không thể xếp chỗ.`
+            );
+          }
+          if (matchedBed.status === 'occupied' && matchedBed.worker_id && matchedBed.worker_id !== workerId) {
+            throw new Error(
+              `Giường ${bedVal} tại ${ktxVal} · ${dayVal} · Phòng ${roomVal} đã có ${matchedBed.ho_va_ten || 'công nhân khác'} đang ở. Vui lòng chọn giường trống khác trước khi duyệt.`
+            );
+          }
+        }
+      }
 
       // 1. Insert/upsert into `workers` FIRST using valid UUID so registration is not marked approved if insert fails
       const { error: insertErr } = await supabase.from('workers').upsert({

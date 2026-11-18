@@ -22,7 +22,14 @@ const ACTION_COLORS: Record<AuditAction, string> = {
   CHECKOUT_REQUEST: 'tint-wn text-wn border-wn',
   CHECKOUT_APPROVED: 'bg-dgrbg text-dgr border-dgr',
   BED_REASSIGN: 'tint-wn text-wn border-wn',
+  BED_INSPECT_CONFIRM: 'bg-okbg text-ok border-bdr2',
   APPROVE_REGISTRATION: 'bg-okbg text-ok border-bdr2',
+  FACILITY_CREATE: 'bg-okbg text-ok border-bdr2',
+  FACILITY_UPDATE: 'bg-bdg text-lnk border-bdr2',
+  FACILITY_DELETE: 'bg-dgrbg text-dgr border-dgr',
+  ATTENDANCE_SESSION: 'bg-bdg text-pri2 border-bdr2',
+  ATTENDANCE_UPDATE: 'tint-wn text-wn border-wn',
+  USER_PASSWORD_RESET: 'tint-wn text-wn border-wn',
 };
 
 const ACTION_LABELS: Record<AuditAction, string> = {
@@ -39,7 +46,14 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   CHECKOUT_REQUEST: 'CHECKOUT_REQUEST — Yêu cầu trả phòng',
   CHECKOUT_APPROVED: 'CHECKOUT_APPROVED — Duyệt trả phòng',
   BED_REASSIGN: 'BED_REASSIGN — Đổi / Gán giường',
+  BED_INSPECT_CONFIRM: 'BED_INSPECT_CONFIRM — Xác nhận có mặt QR',
   APPROVE_REGISTRATION: 'APPROVE_REGISTRATION — Duyệt QR đăng ký',
+  FACILITY_CREATE: 'FACILITY_CREATE — Thêm phòng / CSVC',
+  FACILITY_UPDATE: 'FACILITY_UPDATE — Cập nhật CSVC',
+  FACILITY_DELETE: 'FACILITY_DELETE — Xóa phòng / CSVC',
+  ATTENDANCE_SESSION: 'ATTENDANCE_SESSION — Phiên điểm danh',
+  ATTENDANCE_UPDATE: 'ATTENDANCE_UPDATE — Cập nhật điểm danh',
+  USER_PASSWORD_RESET: 'USER_PASSWORD_RESET — Đặt lại mật khẩu',
 };
 
 const ALL_ACTIONS: AuditAction[] = [
@@ -48,9 +62,16 @@ const ALL_ACTIONS: AuditAction[] = [
   'DELETE',
   'IMPORT',
   'BED_REASSIGN',
+  'BED_INSPECT_CONFIRM',
   'CHECKOUT_REQUEST',
   'CHECKOUT_APPROVED',
   'APPROVE_REGISTRATION',
+  'FACILITY_CREATE',
+  'FACILITY_UPDATE',
+  'FACILITY_DELETE',
+  'ATTENDANCE_SESSION',
+  'ATTENDANCE_UPDATE',
+  'USER_PASSWORD_RESET',
   'Đổi trạng thái tạm trú',
   'Chuyển phòng',
   'Thêm',

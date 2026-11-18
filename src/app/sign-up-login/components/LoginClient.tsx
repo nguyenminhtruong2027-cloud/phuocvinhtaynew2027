@@ -1,9 +1,10 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { Eye, EyeOff, Loader2, LogIn, Building2, ShieldCheck } from 'lucide-react';
+import { Eye, EyeOff, Loader2, LogIn, Building2, ShieldCheck, KeyRound, CheckCircle2 } from 'lucide-react';
 import AppLogo from '@/components/ui/AppLogo';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
 
 interface LoginForm {
   email: string;
@@ -16,12 +17,40 @@ export default function LoginClient() {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [forgotMode, setForgotMode] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
   const { signIn } = useAuth();
   const router = useRouter();
+  const supabase = createClient();
 
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const emailTrimmed = form.email.trim();
+    if (!emailTrimmed) {
+      setError('Vui lòng nhập Email tài khoản để nhận liên kết đặt lại mật khẩu.');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    setResetSent(false);
+    try {
+      const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/profile` : undefined;
+      const { error: resetErr } = await supabase.auth.resetPasswordForEmail(emailTrimmed, { redirectTo });
+      if (resetErr) {
+        setError(resetErr.message);
+      } else {
+        setResetSent(true);
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Không thể gửi email đặt lại mật khẩu.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,72 +143,131 @@ export default function LoginClient() {
             <p className="text-xs text-muted-foreground mt-2">Vui lòng đăng nhập để tiếp tục</p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4" suppressHydrationWarning>
-            {error && (
-              <div className="bg-dgrbg border border-dgr rounded-lg px-4 py-3" suppressHydrationWarning>
-                <p className="text-sm text-dgr">{error}</p>
-              </div>
-            )}
-
-            <div suppressHydrationWarning>
-              <label className="block text-sm font-semibold text-foreground mb-1.5">
-                Email <span className="text-dgr">*</span>
-              </label>
-              <input
-                type="email"
-                value={form.email}
-                onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                className="input-field w-full"
-                placeholder="you@ktx.com"
-                autoComplete="email"
-                disabled={loading}
-                suppressHydrationWarning
-              />
-            </div>
-
-            <div suppressHydrationWarning>
-              <label className="block text-sm font-semibold text-foreground mb-1.5">
-                Mật khẩu <span className="text-dgr">*</span>
-              </label>
-              <div className="relative" suppressHydrationWarning>
+          {forgotMode ? (
+            <form onSubmit={handleForgotPassword} className="space-y-4" suppressHydrationWarning>
+              {error && (
+                <div className="bg-dgrbg border border-dgr rounded-lg px-4 py-3">
+                  <p className="text-sm text-dgr">{error}</p>
+                </div>
+              )}
+              {resetSent && (
+                <div className="bg-okbg border border-bdr2 rounded-lg px-4 py-3 flex items-start gap-2">
+                  <CheckCircle2 size={16} className="text-ok shrink-0 mt-0.5" />
+                  <p className="text-xs text-ok leading-relaxed">
+                    Đã gửi email khôi phục mật khẩu tới <strong>{form.email.trim()}</strong> (nếu tài khoản tồn tại). Với tài khoản nội bộ không dùng email thật, hãy liên hệ Quản trị viên để đặt lại mật khẩu trực tiếp.
+                  </p>
+                </div>
+              )}
+              <div>
+                <label className="block text-sm font-semibold text-foreground mb-1.5">
+                  Email tài khoản <span className="text-dgr">*</span>
+                </label>
                 <input
-                  type={showPass ? 'text' : 'password'}
-                  value={form.password}
-                  onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-                  className="input-field w-full pr-10"
-                  placeholder="••••••••"
-                  autoComplete="current-password"
+                  type="email"
+                  value={form.email}
+                  onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                  className="input-field w-full"
+                  placeholder="you@ktx.com"
+                  autoComplete="email"
+                  disabled={loading}
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={loading}
+                className="btn-primary w-full justify-center py-2.5 text-sm min-h-[44px] cursor-pointer shadow-sm"
+              >
+                {loading ? (
+                  <><Loader2 size={16} className="animate-spin" />Đang gửi yêu cầu...</>
+                ) : (
+                  <><KeyRound size={16} />Gửi email khôi phục mật khẩu</>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setForgotMode(false); setError(''); setResetSent(false); }}
+                className="w-full text-center text-xs font-semibold text-lnk hover:underline py-1 cursor-pointer"
+              >
+                ← Quay lại đăng nhập
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4" suppressHydrationWarning>
+              {error && (
+                <div className="bg-dgrbg border border-dgr rounded-lg px-4 py-3" suppressHydrationWarning>
+                  <p className="text-sm text-dgr">{error}</p>
+                </div>
+              )}
+
+              <div suppressHydrationWarning>
+                <label className="block text-sm font-semibold text-foreground mb-1.5">
+                  Email <span className="text-dgr">*</span>
+                </label>
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                  className="input-field w-full"
+                  placeholder="you@ktx.com"
+                  autoComplete="email"
                   disabled={loading}
                   suppressHydrationWarning
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPass(!showPass)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                  tabIndex={-1}
-                  suppressHydrationWarning
-                >
-                  {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
               </div>
-            </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="btn-primary w-full justify-center py-2.5 text-sm min-h-[44px] mt-2 cursor-pointer shadow-sm"
-              suppressHydrationWarning
-            >
-              {loading ? (
-                <><Loader2 size={16} className="animate-spin" />Đang đăng nhập...</>
-              ) : (
-                <><LogIn size={16} />Đăng nhập</>
-              )}
-            </button>
-          </form>
+              <div suppressHydrationWarning>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-sm font-semibold text-foreground">
+                    Mật khẩu <span className="text-dgr">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => { setForgotMode(true); setError(''); setResetSent(false); }}
+                    className="text-xs font-medium text-lnk hover:underline cursor-pointer"
+                  >
+                    Quên mật khẩu?
+                  </button>
+                </div>
+                <div className="relative" suppressHydrationWarning>
+                  <input
+                    type={showPass ? 'text' : 'password'}
+                    value={form.password}
+                    onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                    className="input-field w-full pr-10"
+                    placeholder="••••••••"
+                    autoComplete="current-password"
+                    disabled={loading}
+                    suppressHydrationWarning
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPass(!showPass)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                    tabIndex={-1}
+                    suppressHydrationWarning
+                  >
+                    {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="btn-primary w-full justify-center py-2.5 text-sm min-h-[44px] mt-2 cursor-pointer shadow-sm"
+                suppressHydrationWarning
+              >
+                {loading ? (
+                  <><Loader2 size={16} className="animate-spin" />Đang đăng nhập...</>
+                ) : (
+                  <><LogIn size={16} />Đăng nhập</>
+                )}
+              </button>
+            </form>
+          )}
 
           <p className="text-xs text-muted-foreground text-center mt-6" suppressHydrationWarning>
-            Liên hệ quản trị viên để được cấp tài khoản truy cập hệ thống.
+            Liên hệ Quản trị viên hoặc Quản trị tối cao để được cấp/đặt lại tài khoản nội bộ.
           </p>
         </div>
       </div>

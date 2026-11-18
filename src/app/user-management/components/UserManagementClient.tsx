@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth, UserRole } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
 import { createClient, getSupabaseConfig } from '@/lib/supabase/client';
-import { UserPlus, Pencil, Trash2, Shield, ShieldCheck, Crown, Lock, RefreshCw, AlertCircle, CheckCircle, Building2, Search, Database, Check, Copy } from 'lucide-react';
+import { UserPlus, Pencil, Trash2, Shield, ShieldCheck, Crown, Lock, RefreshCw, AlertCircle, CheckCircle, Building2, Search, Database, Check, Copy, KeyRound } from 'lucide-react';
 import { useKtxStructure, KtxBlockGroup } from '@/lib/ktxStructure';
 
 interface ProfileRecord {
@@ -92,6 +92,9 @@ export default function UserManagementClient() {
   const [showModal, setShowModal] = useState(false);
   const [editTarget, setEditTarget] = useState<ProfileRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProfileRecord | null>(null);
+  const [resetTarget, setResetTarget] = useState<ProfileRecord | null>(null);
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetError, setResetError] = useState('');
   const [form, setForm] = useState<UserFormData>(emptyForm);
   const [formError, setFormError] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'super_admin' | 'admin' | 'staff'>('all');
@@ -573,6 +576,85 @@ export default function UserManagementClient() {
     }
   };
 
+  const handleResetPassword = async () => {
+    if (!resetTarget) return;
+    const perms = getAccountPermissions(resetTarget.role, resetTarget.id);
+    const isSelf = resetTarget.id === currentUser?.id;
+    if (!perms.canEdit || isSelf) {
+      setResetError('Bạn không có quyền đặt lại mật khẩu cho tài khoản này.');
+      return;
+    }
+    if (!resetPassword || resetPassword.length < 6) {
+      setResetError('Mật khẩu mới phải có ít nhất 6 ký tự.');
+      return;
+    }
+
+    setSubmitting(true);
+    setResetError('');
+    try {
+      let { data: { session } } = await supabase.auth.getSession();
+      if (!session || session.access_token === 'mock-access-token-ktx') {
+        const nextProfiles = profiles.map(p =>
+          p.id === resetTarget.id ? { ...p, password: resetPassword } : p
+        );
+        setProfiles(nextProfiles);
+        saveLocalProfiles(nextProfiles);
+        addLog(
+          currentUser?.email || 'system',
+          'USER_PASSWORD_RESET',
+          `Đặt lại mật khẩu cục bộ cho tài khoản ${resetTarget.email} (${resetTarget.full_name})`
+        );
+        showToast(`Đã đặt lại mật khẩu cho ${resetTarget.full_name}.`, 'success');
+        setResetTarget(null);
+        setResetPassword('');
+        return;
+      }
+
+      try {
+        const { data: refreshed } = await supabase.auth.refreshSession();
+        if (refreshed?.session?.access_token) {
+          session = refreshed.session;
+        }
+      } catch {}
+
+      const { url: supabaseUrl, key: supabaseKey } = getSupabaseConfig();
+      const response = await fetch(`${supabaseUrl}/functions/v1/reset-user-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          user_id: resetTarget.id,
+          new_password: resetPassword,
+        }),
+      });
+      const resJson = await response.json().catch(() => ({}));
+      if (!response.ok || resJson?.error) {
+        if (response.status === 404) {
+          setResetError('Chưa deploy Edge Function "reset-user-password" trên Supabase Dashboard.');
+        } else {
+          setResetError(resJson?.error || `Lỗi đặt lại mật khẩu (${response.status}).`);
+        }
+        return;
+      }
+
+      addLog(
+        currentUser?.email || 'system',
+        'USER_PASSWORD_RESET',
+        `Đặt lại mật khẩu cho tài khoản ${resetTarget.email} (${resetTarget.full_name}, vai trò ${resetTarget.role})`
+      );
+      showToast(`Đã đặt lại mật khẩu mới cho ${resetTarget.full_name} thành công.`, 'success');
+      setResetTarget(null);
+      setResetPassword('');
+    } catch (err) {
+      setResetError(`Lỗi kết nối: ${err instanceof Error ? err.message : 'Không xác định'}`);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   // Helper for dynamic colors on badges
   const getColorClasses = (color: string) => {
     switch (color) {
@@ -901,6 +983,19 @@ export default function UserManagementClient() {
                                   className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground cursor-pointer"
                                 >
                                   <Pencil size={14} />
+                                </button>
+                              )}
+                              {perms.canEdit && !isSelf && (
+                                <button
+                                  onClick={() => {
+                                    setResetTarget(profile);
+                                    setResetPassword('');
+                                    setResetError('');
+                                  }}
+                                  title="Đặt lại mật khẩu"
+                                  className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-wn cursor-pointer"
+                                >
+                                  <KeyRound size={14} />
                                 </button>
                               )}
                               {perms.canDelete && (
@@ -1282,6 +1377,67 @@ export default function UserManagementClient() {
                 className="px-4 py-2 rounded-xl bg-dgr hover:opacity-90 text-tx font-semibold text-sm transition-colors cursor-pointer"
               >
                 {submitting ? 'Đang xóa...' : 'Xóa tài khoản'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Password Modal */}
+      {resetTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl tint-wn border border-wn flex items-center justify-center text-wn shrink-0">
+                <KeyRound size={17} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-foreground">Đặt lại mật khẩu</h3>
+                <p className="text-xs text-muted-foreground">
+                  {resetTarget.full_name} ({resetTarget.email})
+                </p>
+              </div>
+            </div>
+
+            {resetError && (
+              <div className="flex items-start gap-2 text-xs text-dgr bg-dgrbg px-3 py-2.5 rounded-lg border border-dgr/40">
+                <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                <span>{resetError}</span>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-semibold text-foreground mb-1.5">
+                Mật khẩu mới (tối thiểu 6 ký tự)
+              </label>
+              <input
+                type="password"
+                value={resetPassword}
+                onChange={e => setResetPassword(e.target.value)}
+                placeholder="Nhập mật khẩu mới..."
+                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => {
+                  setResetTarget(null);
+                  setResetPassword('');
+                  setResetError('');
+                }}
+                disabled={submitting}
+                className="btn-secondary text-sm cursor-pointer"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={handleResetPassword}
+                disabled={submitting}
+                className="btn-primary text-sm flex items-center gap-1.5 cursor-pointer"
+              >
+                <KeyRound size={14} />
+                <span>{submitting ? 'Đang cập nhật...' : 'Xác nhận đổi mật khẩu'}</span>
               </button>
             </div>
           </div>

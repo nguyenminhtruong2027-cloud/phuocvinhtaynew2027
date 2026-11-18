@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
+import { useAudit } from '@/context/AuditContext';
 import { toast } from 'sonner';
 import {
   Search, Edit2, Check, X, Plus, Loader2, BedDouble, Wind, Package, Fan,
@@ -806,6 +807,7 @@ function AddRoomModal({ activeKtx, ktxOptions, existingRows, onSave, onClose, sa
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function FacilitiesClient() {
   const { isAdmin, canDeleteAll, canWriteBlock, currentUser } = useAuth();
+  const { addLog } = useAudit();
   const [rows, setRows] = useState<FacilityRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeKtx, setActiveKtx] = useState<string>('');
@@ -1171,6 +1173,13 @@ export default function FacilitiesClient() {
         }
         invalidateKtxStructureCache();
         reloadKtxStructure(true);
+        try {
+          addLog(
+            currentUser?.email || 'system',
+            'FACILITY_CREATE',
+            `Thêm phòng: ${insertedRow.ktx} · ${insertedRow.day} · ${insertedRow.phong_khu_vuc} (${insertedRow.giuong} giường, ${insertedRow.room_type === 'functional' ? 'Phòng chức năng' : 'Phòng ở'})`
+          );
+        } catch {}
         toast.success(`Đã thêm ${insertedRow.phong_khu_vuc} (${insertedRow.ktx} - ${insertedRow.day})`);
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('ktx_facilities_updated'));
@@ -1239,6 +1248,14 @@ export default function FacilitiesClient() {
         setRows(prev => prev.map(r => r.id === editingRow.id ? { ...r, ...updatePayload } as FacilityRow : r));
         setEditingId(null);
         setEditingRow(null);
+        try {
+          const roomLabel = targetRow ? `${targetRow.ktx} · ${targetRow.day} · ${targetRow.phong_khu_vuc}` : editingRow.id;
+          addLog(
+            currentUser?.email || 'system',
+            'FACILITY_UPDATE',
+            `Cập nhật CSVC phòng: ${roomLabel} (Giường: ${editingRow.giuong}, ${editingRow.room_type === 'functional' ? 'Phòng chức năng' : 'Phòng ở'}, ${editingRow.is_visible ? 'Hiện sơ đồ' : 'Ẩn sơ đồ'})`
+          );
+        } catch {}
         toast.success('Đã cập nhật trang thiết bị và đồng bộ giường');
         invalidateKtxStructureCache();
         reloadKtxStructure(true);
@@ -1271,6 +1288,13 @@ export default function FacilitiesClient() {
         setRows(prev => prev.map(r => r.id === row.id ? { ...r, is_visible: !nextVisible } : r));
       } else {
         await syncBedsForFacilityRoom(supabase, { ...row, is_visible: nextVisible });
+        try {
+          addLog(
+            currentUser?.email || 'system',
+            'FACILITY_UPDATE',
+            `${nextVisible ? 'Hiện' : 'Ẩn'} phòng trên sơ đồ: ${row.ktx} · ${row.day} · ${row.phong_khu_vuc}`
+          );
+        } catch {}
         invalidateKtxStructureCache();
         reloadKtxStructure(true);
         if (typeof window !== 'undefined') {
@@ -1332,6 +1356,13 @@ export default function FacilitiesClient() {
           return next;
         });
         setDeleteTarget(null);
+        try {
+          addLog(
+            currentUser?.email || 'system',
+            'FACILITY_DELETE',
+            `Xóa phòng: ${deletedTarget.ktx} · ${deletedTarget.day} · ${deletedTarget.phong_khu_vuc}`
+          );
+        } catch {}
         invalidateKtxStructureCache();
         reloadKtxStructure(true);
         if (typeof window !== 'undefined') {
@@ -1476,6 +1507,15 @@ export default function FacilitiesClient() {
       });
       setBulkDeleteModal(null);
 
+      try {
+        const ktxListLabel = Array.from(new Set(safeRooms.map(r => r.ktx).filter(Boolean))).join(', ');
+        addLog(
+          currentUser?.email || 'system',
+          'FACILITY_DELETE',
+          `${bulkDeleteModal.mode === 'all' ? 'Xóa toàn bộ phòng trống' : 'Xóa hàng loạt phòng'}: ${idsToDelete.length} phòng${ktxListLabel ? ` (${ktxListLabel})` : ''}`
+        );
+      } catch {}
+
       // Trigger sync event for Dashboard & KTX structure cache
       invalidateKtxStructureCache();
       reloadKtxStructure(true);
@@ -1490,7 +1530,7 @@ export default function FacilitiesClient() {
     } finally {
       setBulkDeleting(false);
     }
-  }, [bulkDeleteModal, supabase, reloadKtxStructure]);
+  }, [bulkDeleteModal, supabase, reloadKtxStructure, addLog, currentUser]);
 
   // Checkbox selection helpers
   const isAllSelected = sortedRows.length > 0 && sortedRows.every(r => selectedIds.has(r.id));

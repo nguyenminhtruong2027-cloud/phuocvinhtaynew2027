@@ -252,24 +252,12 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       )
       .subscribe();
 
-    const profilesChannel = supabase
-      .channel('profiles_realtime_v2')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'profiles' },
-        () => {
-          fetchWorkers(false);
-        }
-      )
-      .subscribe();
-
     channelRef.current = workersChannel;
 
     return () => {
       supabase.removeChannel(workersChannel);
-      supabase.removeChannel(profilesChannel);
     };
-  }, [shouldLoadWorkers, fetchWorkers, supabase]);
+  }, [shouldLoadWorkers, supabase]);
 
   const refreshWorkers = useCallback(async () => {
     await fetchWorkers(true);
