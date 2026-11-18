@@ -11,6 +11,9 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: false,
   },
+  experimental: {
+    optimizePackageImports: ['lucide-react', 'motion', 'recharts'],
+  },
   images: {
     remotePatterns: imageHosts,
     minimumCacheTTL: 60,

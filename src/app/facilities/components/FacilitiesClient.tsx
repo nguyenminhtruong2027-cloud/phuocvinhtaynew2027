@@ -498,13 +498,13 @@ function BulkDeleteModal({
         </div>
 
         {occupiedCount > 0 && (
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3.5 text-xs text-amber-300 space-y-1">
-            <p className="font-bold flex items-center gap-1.5 text-amber-400">
+          <div className="tint-wn border border-wn/35 rounded-xl p-3.5 text-xs text-wn space-y-1">
+            <p className="font-bold flex items-center gap-1.5 text-wn">
               <AlertCircle size={14} className="shrink-0" />
               <span>Phát hiện {occupiedCount} phòng đang có {totalWorkers} công nhân cư trú:</span>
             </p>
-            <p className="text-muted-foreground">
-              Theo quy tắc bảo toàn dữ liệu lưu trú, hệ thống <strong className="text-amber-200">sẽ giữ lại</strong> {occupiedCount} phòng này và chỉ tiến hành xóa các phòng trống. {isAllOccupied ? 'Hiện không có phòng trống nào đủ điều kiện xóa.' : `Chỉ ${safeCount} phòng còn lại đang trống (0 người) sẽ bị xóa.`}
+            <p className="text-mu">
+              Theo quy tắc bảo toàn dữ liệu lưu trú, hệ thống <strong className="text-tx">sẽ giữ lại</strong> {occupiedCount} phòng này và chỉ tiến hành xóa các phòng trống. {isAllOccupied ? 'Hiện không có phòng trống nào đủ điều kiện xóa.' : `Chỉ ${safeCount} phòng còn lại đang trống (0 người) sẽ bị xóa.`}
             </p>
           </div>
         )}
@@ -515,7 +515,7 @@ function BulkDeleteModal({
             <span className="font-bold text-foreground">{targets.length} phòng</span>
           </div>
           {occupiedCount > 0 && (
-            <div className="flex justify-between items-center text-amber-400">
+            <div className="flex justify-between items-center text-wn">
               <span>Bảo vệ (đang có công nhân):</span>
               <span className="font-bold">Giữ lại {occupiedCount} phòng</span>
             </div>
@@ -1913,7 +1913,7 @@ export default function FacilitiesClient() {
         ) : (
           <div className="overflow-x-auto scrollbar-thin">
             <table className="w-full min-w-[1000px]">
-              <thead className="bg-act/95 backdrop-blur-md border-b border-bdr2 sticky top-0 z-10">
+              <thead className="bg-act border-b border-bdr2 sticky top-0 z-10">
                 <tr>
                   <th className="px-3 py-2.5 w-10 text-center">
                     <input
@@ -1976,12 +1976,12 @@ export default function FacilitiesClient() {
                             <option value="functional">Chức năng</option>
                           </select>
                         ) : row.room_type === 'functional' ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-950/40 text-purple-300 border border-purple-500/30">
-                            🏢 Chức năng
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold tint-pink text-pink-tone border border-pink-tint">
+                            Chức năng
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-bdg text-lnk border border-bdr2">
-                            🛏️ Phòng ở
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-bdg text-lnk border border-bdr2">
+                            Phòng ở
                           </span>
                         )}
                       </td>

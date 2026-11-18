@@ -197,11 +197,25 @@ export async function syncBedForWorkerSave(
  * 2. Syncs `ma_nv` / `ho_va_ten` for valid occupied beds when out of date.
  * 3. Assigns `empty` beds to workers who explicitly specify `ktx + day + phong_so + giuong` without a linked bed.
  */
-export async function reconcileBedsWithWorkers(supabase: SupabaseClient): Promise<{
+export interface ReconcileBedsOptions {
+  isAdmin?: boolean;
+  canWriteBlock?: (day: string, ktx?: string) => boolean;
+}
+
+export async function reconcileBedsWithWorkers(
+  supabase: SupabaseClient,
+  options?: ReconcileBedsOptions
+): Promise<{
   releasedCount: number;
   assignedCount: number;
   updatedInfoCount: number;
 }> {
+  const canTouch = (ktx: string, day: string) => {
+    if (!options || options.isAdmin !== false || !options.canWriteBlock) return true;
+    if (!day.trim()) return true;
+    return options.canWriteBlock(day, ktx);
+  };
+
   const bedsById = new Map<string, BedSyncRow>();
   let from = 0;
   for (let p = 0; p < 30; p++) {
@@ -260,10 +274,13 @@ export async function reconcileBedsWithWorkers(supabase: SupabaseClient): Promis
       continue;
     }
 
+    const bKtx = (bed.ktx || '').trim();
+    const bDay = (bed.day || '').trim();
     const w = bed.worker_id ? workerById.get(bed.worker_id) : undefined;
     if (!w) {
-      // Worker deleted or missing worker_id
-      idsToRelease.push(bed.id);
+      if (canTouch(bKtx, bDay)) {
+        idsToRelease.push(bed.id);
+      }
       bedStatusAfterPass1.set(bed.id, 'empty');
       continue;
     }
@@ -273,8 +290,6 @@ export async function reconcileBedsWithWorkers(supabase: SupabaseClient): Promis
     const wRoom = normalizeRoomLabel(w.phong_so || '');
     const wBed = normalizeBedLabel(w.giuong || '');
 
-    const bKtx = (bed.ktx || '').trim();
-    const bDay = (bed.day || '').trim();
     const bRoom = normalizeRoomLabel(bed.phong_so || '');
     const bBed = normalizeBedLabel(bed.giuong || '');
 
@@ -282,7 +297,9 @@ export async function reconcileBedsWithWorkers(supabase: SupabaseClient): Promis
     const sameBed = !wBed || wBed === bBed;
 
     if (!sameRoom || !sameBed || validLinkedWorkers.has(w.id)) {
-      idsToRelease.push(bed.id);
+      if (canTouch(bKtx, bDay)) {
+        idsToRelease.push(bed.id);
+      }
       bedStatusAfterPass1.set(bed.id, 'empty');
       continue;
     }
@@ -292,7 +309,7 @@ export async function reconcileBedsWithWorkers(supabase: SupabaseClient): Promis
 
     const expectedName = w.ho_va_ten || null;
     const expectedMaNv = w.ma_nv || null;
-    if (bed.status !== 'occupied' || bed.ho_va_ten !== expectedName || bed.ma_nv !== expectedMaNv) {
+    if (canTouch(bKtx, bDay) && (bed.status !== 'occupied' || bed.ho_va_ten !== expectedName || bed.ma_nv !== expectedMaNv)) {
       infoUpdates.push({
         bedId: bed.id,
         ho_va_ten: expectedName,
@@ -339,7 +356,7 @@ export async function reconcileBedsWithWorkers(supabase: SupabaseClient): Promis
 
     const key = `${wKtx}||${wDay}||${wRoom}||${wBed}`;
     const targetBed = emptyBedIndex.get(key);
-    if (targetBed) {
+    if (targetBed && canTouch(targetBed.ktx || wKtx, targetBed.day || wDay)) {
       emptyBedIndex.delete(key);
       validLinkedWorkers.add(w.id);
       assignments.push({ bedId: targetBed.id, worker: w });

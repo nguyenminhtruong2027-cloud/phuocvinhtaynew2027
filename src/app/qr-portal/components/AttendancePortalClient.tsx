@@ -222,6 +222,7 @@ export default function AttendancePortalClient() {
 
   // Delete record (feature 4)
   const [deletingRecordId, setDeletingRecordId] = useState<string | null>(null);
+  const [deleteRecordTarget, setDeleteRecordTarget] = useState<AttendanceRecord | null>(null);
 
   const [attendanceUrl, setAttendanceUrl] = useState('');
   const { currentUser } = useAuth();
@@ -1326,7 +1327,7 @@ export default function AttendancePortalClient() {
                                     className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
                                     <Edit3 size={13} />
                                   </button>
-                                  <button onClick={() => { if (confirm(`Xóa bản ghi điểm danh của ${rec.ho_va_ten}?`)) handleDeleteRecord(rec.id); }} disabled={deletingRecordId === rec.id} title="Xóa bản ghi"
+                                  <button onClick={() => setDeleteRecordTarget(rec)} disabled={deletingRecordId === rec.id} title="Xóa bản ghi"
                                     className="p-1.5 rounded-lg text-muted-foreground hover:bg-dgrbg hover:text-dgr transition-colors disabled:opacity-50">
                                     {deletingRecordId === rec.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
                                   </button>
@@ -1599,6 +1600,50 @@ export default function AttendancePortalClient() {
                 className="flex-1 py-2.5 bg-dgr text-white rounded-xl text-sm font-medium hover:opacity-90 disabled:opacity-60 transition-colors flex items-center justify-center gap-2">
                 {deletingSession ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
                 Xóa toàn bộ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ─── Delete Attendance Record Confirm Modal ─── */}
+      {deleteRecordTarget && (
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="surface-elevated border border-dgr/40 rounded-2xl shadow-2xl p-6 max-w-sm w-full space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 craft-icon-rose rounded-xl flex items-center justify-center flex-shrink-0">
+                <Trash2 size={19} />
+              </div>
+              <div>
+                <h3 className="font-bold text-tx text-sm">Xóa bản ghi điểm danh?</h3>
+                <p className="text-xs text-mu mt-0.5">
+                  {deleteRecordTarget.ho_va_ten} · {deleteRecordTarget.ma_nv || 'Chưa có mã NV'}
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-mu leading-relaxed">
+              Công nhân này sẽ chuyển về trạng thái chưa điểm danh trong phiên ngày <strong className="text-tx">{selectedDate}</strong>.
+            </p>
+            <div className="flex gap-2.5">
+              <button
+                type="button"
+                onClick={() => setDeleteRecordTarget(null)}
+                disabled={deletingRecordId === deleteRecordTarget.id}
+                className="flex-1 py-2 border border-bdr2 rounded-xl text-xs font-semibold text-mu hover:bg-act hover:text-tx transition-colors"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const id = deleteRecordTarget.id;
+                  await handleDeleteRecord(id);
+                  setDeleteRecordTarget(null);
+                }}
+                disabled={deletingRecordId === deleteRecordTarget.id}
+                className="flex-1 py-2 bg-dgr text-white rounded-xl text-xs font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity flex items-center justify-center gap-1.5"
+              >
+                {deletingRecordId === deleteRecordTarget.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                Xác nhận xóa
               </button>
             </div>
           </div>

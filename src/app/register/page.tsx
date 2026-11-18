@@ -170,7 +170,7 @@ function CCCDOCRScanner({ onConfirm, onClose }: {
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+            className="p-1.5 rounded-lg text-mu hover:text-tx hover:bg-act transition-colors"
             suppressHydrationWarning
           >
             <X size={16} />
@@ -213,7 +213,7 @@ function CCCDOCRScanner({ onConfirm, onClose }: {
           {status === 'error' && <p className="text-xs text-dgr text-center py-2">{errorMsg}</p>}
           {status === 'confirming' && (
             <div className="space-y-3" suppressHydrationWarning>
-              <div className="flex items-start gap-2 p-2.5 bg-blue-50 border border-bdr2 rounded-lg" suppressHydrationWarning>
+              <div className="flex items-start gap-2 p-2.5 tint-info border border-bdr2 rounded-lg" suppressHydrationWarning>
                 <AlertTriangle size={13} className="text-pri2 mt-0.5 flex-shrink-0" />
                 <p className="text-xs text-lnk font-medium">Kiểm tra và chỉnh sửa dữ liệu. Bắt buộc nhấn &quot;Xác nhận đúng&quot; để áp dụng.</p>
               </div>

@@ -599,21 +599,21 @@ function ExcelImportModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-      <div className="bg-card rounded-xl shadow-modal w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm">
+      <div className="surface-elevated rounded-2xl shadow-2xl border border-bdr3 w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
           <div>
             <h2 className="text-base font-bold text-foreground">Nhập từ Excel</h2>
             <p className="text-xs text-muted-foreground mt-0.5">Hỗ trợ file .xlsx / .xls — Tự động nhận diện tiêu đề từ hàng 3</p>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-muted"><X size={16} /></button>
+          <button onClick={onClose} className="p-2 rounded-lg text-mu hover:text-tx hover:bg-act transition-colors"><X size={16} /></button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           <div className="p-4 rounded-xl border-2 border-primary/30 bg-primary/5">
             <div className="flex items-center gap-2 mb-2">
               <Building2 size={16} className="text-primary" />
-              <p className="text-sm font-bold text-foreground">Chọn KTX để nhập dữ liệu <span className="text-red-500">*</span></p>
+              <p className="text-sm font-bold text-foreground">Chọn KTX để nhập dữ liệu <span className="text-dgr">*</span></p>
             </div>
             <div className="flex gap-3 flex-wrap">
               {ktxNames.map(ktx => (
@@ -624,13 +624,13 @@ function ExcelImportModal({
               ))}
             </div>
             {hasKtxColumn && (
-              <div className="mt-2 flex items-center gap-1.5 text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-1.5">
+              <div className="mt-2 flex items-center gap-1.5 text-xs text-ok bg-okbg border border-ok2/35 rounded-lg px-3 py-1.5">
                 <FileCheck size={12} />
                 <span>File Excel có cột KTX — hệ thống sẽ ưu tiên đọc từ cột đó.</span>
               </div>
             )}
             {!hasKtxColumn && selectedKtx === '' && parsedRows.length > 0 && (
-              <p className="mt-2 text-xs text-red-600 font-semibold">⚠ Vui lòng chọn KTX trước khi xác nhận nhập.</p>
+              <p className="mt-2 text-xs text-dgr font-semibold">⚠ Vui lòng chọn KTX trước khi xác nhận nhập.</p>
             )}
           </div>
 
@@ -654,20 +654,20 @@ function ExcelImportModal({
             />
           </div>
 
-          <div className="p-3 rounded-lg bg-blue-50 border border-blue-200">
+          <div className="p-3 rounded-lg tint-info border border-bdr2">
             <div className="flex items-start gap-2">
-              <FileText size={14} className="text-blue-600 mt-0.5 flex-shrink-0" />
-              <div className="text-xs text-blue-700 space-y-0.5">
+              <FileText size={14} className="text-lnk mt-0.5 flex-shrink-0" />
+              <div className="text-xs text-lnk space-y-0.5">
                 <p className="font-semibold">Cột được nhận diện tự động:</p>
-                <p>KTX · HỌ VÀ TÊN · MÃ NV · GIỚI TÍNH · ĐƠN VỊ · TIỂU ĐOÀN · CCCD · SỐ ĐIỆN THOẠI · DÃY · PHÒNG SỐ · SỐ GIƯỜNG · NGÀY SINH · HỘ KHẨU · TỔ TRƯỞNG · SĐT TỔ TRƯỞNG · NGÀY VÀO KTX · GHI CHÚ</p>
+                <p className="text-tx/85">KTX · HỌ VÀ TÊN · MÃ NV · GIỚI TÍNH · ĐƠN VỊ · TIỂU ĐOÀN · CCCD · SỐ ĐIỆN THOẠI · DÃY · PHÒNG SỐ · SỐ GIƯỜNG · NGÀY SINH · HỘ KHẨU · TỔ TRƯỞNG · SĐT TỔ TRƯỞNG · NGÀY VÀO KTX · GHI CHÚ</p>
               </div>
             </div>
           </div>
 
           {parseError && (
-            <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 border border-red-200">
-              <AlertCircle size={14} className="text-red-500 mt-0.5 flex-shrink-0" />
-              <p className="text-xs text-red-700">{parseError}</p>
+            <div className="flex items-start gap-2 p-3 rounded-lg tint-dgr border border-dgr/35">
+              <AlertCircle size={14} className="text-dgr mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-dgr">{parseError}</p>
             </div>
           )}
 
@@ -733,13 +733,13 @@ function ExcelImportModal({
 
                 {/* Expandable overloaded rooms preview */}
                 {capacityCheck.overloadedList.length > 0 && showOverloadDetails && (
-                  <div className="pt-2 border-t border-red-200 space-y-1.5 max-h-36 overflow-y-auto">
-                    <p className="text-xs font-semibold text-red-700">
+                  <div className="pt-2 border-t border-dgr/30 space-y-1.5 max-h-36 overflow-y-auto">
+                    <p className="text-xs font-semibold text-dgr">
                       Các phòng dự kiến vượt định mức giường (hệ thống vẫn cho phép lưu nếu cần thiết):
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                       {capacityCheck.overloadedList.map((item, idx) => (
-                        <div key={idx} className="text-xs px-2.5 py-1.5 rounded-lg bg-red-50 border border-red-200 text-red-800 flex items-center justify-between">
+                        <div key={idx} className="text-xs px-2.5 py-1.5 rounded-lg tint-dgr border border-dgr/35 text-dgr flex items-center justify-between">
                           <span className="font-semibold">{item.ktx} · {item.day} · P.{item.room}</span>
                           <span className="font-tabular font-bold">
                             {item.existingCount}+{item.incomingCount} = {item.projectedCount}/{item.capacity}
@@ -837,7 +837,7 @@ function ExcelImportModal({
         <div className="px-5 py-3 border-t border-border flex items-center justify-between flex-shrink-0">
           <p className="text-xs text-muted-foreground">
             {total > 0 ? (
-              <span className={effectiveImportIndices.length > 0 ? 'text-green-700 font-semibold' : 'text-amber-600 font-semibold'}>
+              <span className={effectiveImportIndices.length > 0 ? 'text-ok font-semibold' : 'text-wn font-semibold'}>
                 {effectiveImportIndices.length > 0
                   ? `${effectiveImportIndices.length}/${total} công nhân sẽ được ${dupMode === 'update' ? 'thêm / cập nhật' : 'nhập'}`
                   : 'Không có dòng nào sẽ được nhập (tất cả bị trùng đang ở chế độ Bỏ qua)'}
@@ -933,8 +933,8 @@ function BulkAssignKtxModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-      <div className="bg-card rounded-xl shadow-modal w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm">
+      <div className="surface-elevated rounded-2xl shadow-2xl border border-bdr3 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
           <div>
             <h2 className="text-base font-bold text-foreground flex items-center gap-2">
@@ -943,7 +943,7 @@ function BulkAssignKtxModal({
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">{noKtxWorkers.length} công nhân chưa được gán KTX</p>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-muted"><X size={16} /></button>
+          <button onClick={onClose} className="p-2 rounded-lg text-mu hover:text-tx hover:bg-act transition-colors"><X size={16} /></button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
@@ -1075,11 +1075,11 @@ function TamTruExportModal({ workers, onClose }: { workers: Worker[]; onClose: (
   const unregisteredCount = workers.filter(w => w.tamTruStatus !== 'registered').length;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-      <div className="bg-card rounded-xl shadow-modal w-full max-w-md">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm">
+      <div className="surface-elevated rounded-2xl shadow-2xl border border-bdr3 w-full max-w-md overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <h2 className="text-base font-bold text-foreground">Xuất file Tạm Trú (Excel)</h2>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-muted"><X size={16} /></button>
+          <button onClick={onClose} className="p-2 rounded-lg text-mu hover:text-tx hover:bg-act transition-colors"><X size={16} /></button>
         </div>
         <div className="p-5 space-y-3">
           <p className="text-sm text-muted-foreground">Chọn danh sách cần xuất (theo bộ lọc hiện tại):</p>
@@ -1238,7 +1238,7 @@ function BulkDeleteByFilterModal({
                 <button
                   key={t}
                   onClick={() => { setFilterType(t); setConfirmed(false); }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${filterType === t ? 'bg-red-600 text-white border-red-600' : 'bg-card text-foreground border-border hover:border-red-300'}`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${filterType === t ? 'bg-dgr text-white border-dgr' : 'bg-surf text-tx border-bdr hover:border-dgr/40'}`}
                 >
                   {t === 'ktx' ? 'Theo KTX' : t === 'day' ? 'Theo Dãy' : 'Theo Phòng'}
                 </button>
@@ -1249,7 +1249,7 @@ function BulkDeleteByFilterModal({
           {/* Selectors */}
           <div className="flex flex-wrap gap-3">
             <div className="form-group min-w-[130px]">
-              <label className="label-field">KTX <span className="text-red-500">*</span></label>
+              <label className="label-field">KTX <span className="text-dgr">*</span></label>
               <select value={selKtx} onChange={e => { setSelKtx(e.target.value); setSelDay(''); setSelPhong(''); setConfirmed(false); }} className="input-field">
                 <option value="">Chọn KTX</option>
                 {ktxList.map(k => <option key={k} value={k}>{k}</option>)}
@@ -1257,7 +1257,7 @@ function BulkDeleteByFilterModal({
             </div>
             {(filterType === 'day' || filterType === 'phong') && (
               <div className="form-group min-w-[130px]">
-                <label className="label-field">Dãy <span className="text-red-500">*</span></label>
+                <label className="label-field">Dãy <span className="text-dgr">*</span></label>
                 <select value={selDay} onChange={e => { setSelDay(e.target.value); setSelPhong(''); setConfirmed(false); }} className="input-field" disabled={!selKtx}>
                   <option value="">Chọn Dãy</option>
                   {dayList.map(d => <option key={d} value={d}>{d}</option>)}
@@ -1266,7 +1266,7 @@ function BulkDeleteByFilterModal({
             )}
             {filterType === 'phong' && (
               <div className="form-group min-w-[110px]">
-                <label className="label-field">Phòng <span className="text-red-500">*</span></label>
+                <label className="label-field">Phòng <span className="text-dgr">*</span></label>
                 <select value={selPhong} onChange={e => { setSelPhong(e.target.value); setConfirmed(false); }} className="input-field" disabled={!selDay}>
                   <option value="">Chọn Phòng</option>
                   {phongList.map(p => <option key={p} value={p}>P.{p}</option>)}
@@ -1277,11 +1277,11 @@ function BulkDeleteByFilterModal({
 
           {/* Preview count */}
           {targetWorkers.length > 0 && (
-            <div className="p-3 rounded-lg bg-red-50 border border-red-200">
-              <p className="text-sm font-semibold text-red-700">
-                Sẽ xóa <span className="text-xl font-bold">{targetWorkers.length}</span> công nhân thuộc {filterLabel}
+            <div className="p-3 rounded-xl tint-dgr border border-dgr/35">
+              <p className="text-sm font-semibold text-dgr">
+                Sẽ xóa <span className="text-xl font-bold font-tabular">{targetWorkers.length}</span> công nhân thuộc {filterLabel}
               </p>
-              <p className="text-xs text-red-500 mt-1">⚠ Hành động này không thể hoàn tác!</p>
+              <p className="text-xs text-mu mt-1">⚠ Hành động này không thể hoàn tác!</p>
             </div>
           )}
           {targetWorkers.length === 0 && selKtx && (
@@ -1309,7 +1309,7 @@ function BulkDeleteByFilterModal({
           <button
             onClick={handleDelete}
             disabled={!confirmed || targetWorkers.length === 0 || deleting}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-semibold transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-dgr hover:opacity-90 text-white text-sm font-semibold transition-opacity disabled:opacity-50 cursor-pointer"
           >
             <Trash2 size={14} />
             {deleting ? 'Đang xóa...' : `Xóa ${targetWorkers.length} công nhân`}
@@ -1663,6 +1663,22 @@ export function WorkerManagementClient() {
       setPage(1);
     }
   }, [searchParams]);
+
+  // Open WorkerDetailModal directly once per ?view=workerId param from CommandPalette
+  const lastHandledViewRef = useRef<string | null>(null);
+  useEffect(() => {
+    const viewId = searchParams?.get('view');
+    if (!viewId) {
+      lastHandledViewRef.current = null;
+      return;
+    }
+    if (lastHandledViewRef.current === viewId || workers.length === 0) return;
+    const match = workers.find(w => w.id === viewId);
+    if (match) {
+      lastHandledViewRef.current = viewId;
+      setViewingWorker(match);
+    }
+  }, [searchParams, workers]);
 
   const noKtxCount = useMemo(
     () =>
@@ -2040,7 +2056,7 @@ export function WorkerManagementClient() {
 
   return (
     <div className="min-h-screen bg-transparent text-tx">
-      <div className="px-3 sm:px-6 lg:px-8 xl:px-10 py-4 sm:py-5 max-w-screen-2xl mx-auto space-y-4">
+      <div className={`px-3 sm:px-6 lg:px-8 xl:px-10 py-4 sm:py-5 max-w-screen-2xl mx-auto space-y-4 transition-[padding] duration-150 ${selectedIds.size > 0 ? 'pb-24' : ''}`}>
         {/* ── Compact Module Header ── */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3.5 border-b border-bdr">
           <div className="flex items-center gap-3">

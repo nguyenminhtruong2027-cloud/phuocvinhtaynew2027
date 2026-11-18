@@ -490,6 +490,7 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
   const [saving, setSaving] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [scanSuccess, setScanSuccess] = useState(false);
+  const [confirmDuplicateCccd, setConfirmDuplicateCccd] = useState(false);
   const isEdit = !!worker;
 
   const { ktxGroups, ktxNames } = useKtxStructure();
@@ -571,6 +572,21 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
 
     return warnings;
   }, [allWorkers, worker?.id, watchedMaNV, watchedCccd]);
+
+  const hasActiveCccdDup = useMemo(() => {
+    const cleanCccd = watchedCccd.replace(/\s+/g, '').trim();
+    if (cleanCccd.length < 8) return false;
+    return allWorkers.some(
+      w =>
+        w.id !== worker?.id &&
+        !(w.ngayRaKTX || '').trim() &&
+        (w.cccd || '').replace(/\s+/g, '').trim() === cleanCccd
+    );
+  }, [allWorkers, worker?.id, watchedCccd]);
+
+  useEffect(() => {
+    setConfirmDuplicateCccd(false);
+  }, [watchedCccd]);
 
   // Live room bed availability for quick-pick empty beds
   const [bedAvail, setBedAvail] = useState<RoomBedAvailability | null>(null);
@@ -671,16 +687,29 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
                   </div>
                 )}
                 {duplicateAlerts.length > 0 && (
-                  <div className="mb-3 px-3 py-2 tint-wn border border-wn/40 rounded-lg text-xs text-wn space-y-1">
-                    {duplicateAlerts.map((dup, i) => (
-                      <div key={`${dup.field}-${i}`} className="flex items-start gap-1.5">
-                        <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-                        <span>
-                          Trùng <strong>{dup.field}</strong> với công nhân{' '}
-                          <strong className="text-foreground">{dup.workerName}</strong> ({dup.detail})
-                        </span>
-                      </div>
-                    ))}
+                  <div className="mb-3 px-3 py-2.5 tint-wn border border-wn/40 rounded-lg text-xs text-wn space-y-2">
+                    <div className="space-y-1">
+                      {duplicateAlerts.map((dup, i) => (
+                        <div key={`${dup.field}-${i}`} className="flex items-start gap-1.5">
+                          <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                          <span>
+                            Trùng <strong>{dup.field}</strong> với công nhân{' '}
+                            <strong className="text-foreground">{dup.workerName}</strong> ({dup.detail})
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    {hasActiveCccdDup && (
+                      <label className="flex items-center gap-2 pt-1.5 border-t border-wn/30 cursor-pointer select-none text-tx font-medium">
+                        <input
+                          type="checkbox"
+                          checked={confirmDuplicateCccd}
+                          onChange={e => setConfirmDuplicateCccd(e.target.checked)}
+                          className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                        />
+                        <span>Xác nhận đây không phải hồ sơ trùng và vẫn muốn lưu CCCD này</span>
+                      </label>
+                    )}
                   </div>
                 )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -846,9 +875,20 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
             </div>
 
             <div className="sticky bottom-0 bg-card border-t border-border px-5 py-3 flex items-center justify-between gap-3">
+              {hasActiveCccdDup && !confirmDuplicateCccd ? (
+                <span className="text-[11px] font-semibold text-wn">
+                  ⚠ Cần tick xác nhận trùng CCCD trước khi lưu
+                </span>
+              ) : (
+                <span />
+              )}
               <div className="flex gap-2">
                 <button type="button" onClick={onClose} className="btn-secondary text-xs">Hủy bỏ</button>
-                <button type="submit" disabled={saving} className="btn-primary text-xs min-w-[110px] justify-center">
+                <button
+                  type="submit"
+                  disabled={saving || (hasActiveCccdDup && !confirmDuplicateCccd)}
+                  className="btn-primary text-xs min-w-[110px] justify-center"
+                >
                   {saving ? <><Loader2 size={13} className="animate-spin" />Đang lưu...</> : <><Save size={13} />{isEdit ? 'Lưu thay đổi' : 'Thêm công nhân'}</>}
                 </button>
               </div>

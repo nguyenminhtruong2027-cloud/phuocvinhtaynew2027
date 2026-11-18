@@ -34,6 +34,115 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'nav-audit', label: 'Nhật Ký Hệ Thống', href: '/audit-log', icon: ClipboardList, adminOnly: true, group: 'admin' },
 ];
 
+const SidebarNavLink = React.memo(function SidebarNavLink({
+  item,
+  pathname,
+  collapsed,
+  workerCount,
+  isMobile = false,
+  onMobileClose,
+}: {
+  item: NavItem;
+  pathname: string | null;
+  collapsed: boolean;
+  workerCount: number;
+  isMobile?: boolean;
+  onMobileClose?: () => void;
+}) {
+  const IconComponent = item.icon;
+  const isActive = pathname === item.href;
+  const badge = item.dynamicBadge ? workerCount : undefined;
+
+  if (isMobile) {
+    return (
+      <Link
+        href={item.href}
+        onClick={onMobileClose}
+        className={`flex items-center gap-3.5 px-4 py-3.5 rounded-xl transition-colors duration-100 ${
+          isActive
+            ? 'bg-act text-tx font-bold border border-bdr2 shadow-sm'
+            : 'text-nav hover:bg-act/70 hover:text-tx'
+        }`}
+      >
+        <span className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+          isActive ? 'craft-icon-blue' : 'bg-surf border border-bdr text-ic'
+        }`}>
+          <IconComponent size={17} strokeWidth={2.1} />
+        </span>
+        <span className="text-sm flex-1">{item.label}</span>
+        {badge !== undefined && badge > 0 && (
+          <span
+            className={`text-xs rounded-full px-2 py-0.5 font-bold font-tabular ${
+              isActive ? 'bg-pri text-white' : 'bg-surf text-mu border border-bdr'
+            }`}
+          >
+            {badge}
+          </span>
+        )}
+      </Link>
+    );
+  }
+
+  return (
+    <Link
+      href={item.href}
+      title={collapsed ? item.label : undefined}
+      className={`group relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors duration-100 ${
+        isActive
+          ? 'text-tx font-bold'
+          : 'text-nav hover:text-tx'
+      }`}
+    >
+      {isActive ? (
+        <motion.span
+          layoutId="sidebar-active-pill"
+          transition={{ type: 'spring', stiffness: 520, damping: 36 }}
+          aria-hidden="true"
+          className="absolute inset-0 rounded-xl bg-act border border-bdr2 shadow-sm"
+          style={{ boxShadow: 'inset 0 1px 0 var(--specular)' }}
+        />
+      ) : (
+        <span
+          aria-hidden="true"
+          className="absolute inset-0 rounded-xl bg-act/0 group-hover:bg-act/60 transition-colors duration-100"
+        />
+      )}
+
+      {isActive && (
+        <motion.span
+          layoutId="sidebar-active-rail"
+          transition={{ type: 'spring', stiffness: 520, damping: 36 }}
+          aria-hidden="true"
+          className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full z-10"
+          style={{ background: 'var(--pri2)', boxShadow: '0 0 10px var(--pri2)' }}
+        />
+      )}
+
+      <span
+        className={`relative z-10 w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-transform duration-100 group-hover:scale-105 ${
+          isActive ? 'craft-icon-blue' : 'text-ic group-hover:text-lnk'
+        }`}
+      >
+        <IconComponent size={16} strokeWidth={isActive ? 2.25 : 2} />
+      </span>
+
+      {!collapsed && (
+        <span className="relative z-10 flex-1 leading-snug truncate transition-transform duration-100 group-hover:translate-x-0.5">
+          {item.label}
+        </span>
+      )}
+      {!collapsed && badge !== undefined && badge > 0 && (
+        <span className="relative z-10 text-[11px] bg-bdg text-lnk border border-bdr2 rounded-md px-1.5 py-0.5 font-mono font-tabular font-bold">
+          {badge}
+        </span>
+      )}
+      {collapsed && badge !== undefined && badge > 0 && (
+        <span className="relative z-10 absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-pri2" />
+      )}
+    </Link>
+  );
+});
+
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -91,105 +200,10 @@ export default function Sidebar() {
       : 'bg-gradient-to-tr from-blue-600 to-indigo-600';
   const avatarInitial = displayName.charAt(0).toUpperCase();
 
-  const NavLink = ({ item, isMobile = false }: { item: NavItem; isMobile?: boolean }) => {
-    const IconComponent = item.icon;
-    const isActive = pathname === item.href;
-    const badge = item.dynamicBadge ? workerCount : undefined;
-
-    if (isMobile) {
-      return (
-        <Link
-          href={item.href}
-          onClick={() => setMobileOpen(false)}
-          className={`flex items-center gap-3.5 px-4 py-3.5 rounded-xl transition-all duration-150 ${
-            isActive
-              ? 'bg-act text-tx font-bold border border-bdr2 shadow-sm'
-              : 'text-nav hover:bg-act/70 hover:text-tx'
-          }`}
-        >
-          <span className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-            isActive ? 'craft-icon-blue' : 'bg-surf border border-bdr text-ic'
-          }`}>
-            <IconComponent size={17} strokeWidth={2.1} />
-          </span>
-          <span className="text-sm flex-1">{item.label}</span>
-          {badge !== undefined && badge > 0 && (
-            <span
-              className={`text-xs rounded-full px-2 py-0.5 font-bold font-tabular ${
-                isActive ? 'bg-pri text-white' : 'bg-surf text-mu border border-bdr'
-              }`}
-            >
-              {badge}
-            </span>
-          )}
-        </Link>
-      );
-    }
-
-    return (
-      <Link
-        href={item.href}
-        title={collapsed ? item.label : undefined}
-        className={`group relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors duration-150 ${
-          isActive
-            ? 'text-tx font-bold'
-            : 'text-nav hover:text-tx'
-        }`}
-      >
-        {isActive ? (
-          <motion.span
-            layoutId="sidebar-active-pill"
-            transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-            aria-hidden="true"
-            className="absolute inset-0 rounded-xl bg-act border border-bdr2 shadow-sm"
-            style={{ boxShadow: 'inset 0 1px 0 var(--specular)' }}
-          />
-        ) : (
-          <span
-            aria-hidden="true"
-            className="absolute inset-0 rounded-xl bg-act/0 group-hover:bg-act/60 transition-colors duration-150"
-          />
-        )}
-
-        {isActive && (
-          <motion.span
-            layoutId="sidebar-active-rail"
-            transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-            aria-hidden="true"
-            className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full z-10"
-            style={{ background: 'var(--pri2)', boxShadow: '0 0 10px var(--pri2)' }}
-          />
-        )}
-
-        <span
-          className={`relative z-10 w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-transform duration-150 group-hover:scale-105 ${
-            isActive ? 'craft-icon-blue' : 'text-ic group-hover:text-lnk'
-          }`}
-        >
-          <IconComponent size={16} strokeWidth={isActive ? 2.25 : 2} />
-        </span>
-
-        {!collapsed && (
-          <span className="relative z-10 flex-1 leading-snug truncate transition-transform duration-150 group-hover:translate-x-0.5">
-            {item.label}
-          </span>
-        )}
-        {!collapsed && badge !== undefined && badge > 0 && (
-          <span className="relative z-10 text-[11px] bg-bdg text-lnk border border-bdr2 rounded-md px-1.5 py-0.5 font-mono font-tabular font-bold">
-            {badge}
-          </span>
-        )}
-        {collapsed && badge !== undefined && badge > 0 && (
-          <span className="relative z-10 absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-pri2" />
-        )}
-      </Link>
-    );
-  };
-
   return (
     <>
       {/* ── Desktop Sidebar ── */}
-      <aside className={`hidden lg:flex flex-col bg-side/95 backdrop-blur-md border-r border-bdr h-screen sticky top-0 overflow-hidden shadow-2xl transition-[width] duration-200 ease-out z-30 ${collapsed ? 'w-[70px]' : 'w-64'}`}>
+      <aside className={`hidden lg:flex flex-col bg-side border-r border-bdr h-screen sticky top-0 overflow-hidden shadow-xl transition-[width] duration-150 ease-out z-30 ${collapsed ? 'w-[70px]' : 'w-64'}`}>
         {/* Brand Header */}
         <div className={`flex items-center border-b border-bdr px-4 py-4 ${collapsed ? 'justify-center' : 'gap-3'}`}>
           <CraftIconBadge
@@ -213,7 +227,7 @@ export default function Sidebar() {
             type="button"
             onClick={openCommandPalette}
             title="Tìm kiếm nhanh (Ctrl + K)"
-            className={`mb-2.5 w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-surf/80 hover:bg-act border border-bdr2 text-xs text-mu hover:text-tx transition-colors cursor-pointer ${
+            className={`mb-2.5 w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-surf hover:bg-act border border-bdr2 text-xs text-mu hover:text-tx transition-colors cursor-pointer ${
               collapsed ? 'justify-center px-2' : ''
             }`}
             style={{ boxShadow: 'inset 0 1px 0 var(--specular)' }}
@@ -234,7 +248,15 @@ export default function Sidebar() {
               CHỨC NĂNG CHÍNH
             </p>
           )}
-          {mainItems.map(item => <NavLink key={item.id} item={item} />)}
+          {mainItems.map(item => (
+            <SidebarNavLink
+              key={item.id}
+              item={item}
+              pathname={pathname}
+              collapsed={collapsed}
+              workerCount={workerCount}
+            />
+          ))}
 
           {adminItems.length > 0 && (
             <>
@@ -244,7 +266,15 @@ export default function Sidebar() {
                 </p>
               )}
               {collapsed && <div className="my-2 border-t border-bdr mx-1" />}
-              {adminItems.map(item => <NavLink key={item.id} item={item} />)}
+              {adminItems.map(item => (
+                <SidebarNavLink
+                  key={item.id}
+                  item={item}
+                  pathname={pathname}
+                  collapsed={collapsed}
+                  workerCount={workerCount}
+                />
+              ))}
             </>
           )}
 
@@ -315,7 +345,7 @@ export default function Sidebar() {
       </aside>
 
       {/* ── Mobile Top Bar ── */}
-      <header className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-side/90 border-b border-bdr backdrop-blur-md flex items-center justify-between px-3.5 h-14 shadow-lg w-full max-w-full">
+      <header className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-side border-b border-bdr flex items-center justify-between px-3.5 h-14 shadow-md w-full max-w-full">
         <div className="flex items-center gap-2.5">
           <button
             onClick={() => setMobileOpen(true)}
@@ -367,8 +397,8 @@ export default function Sidebar() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.18 }}
-              className="fixed inset-0 bg-black/70 backdrop-blur-sm"
+              transition={{ duration: 0.16 }}
+              className="fixed inset-0 bg-black/70"
               onClick={() => setMobileOpen(false)}
               aria-hidden="true"
             />
@@ -377,7 +407,7 @@ export default function Sidebar() {
               initial={{ x: '-100%' }}
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}
-              transition={{ type: 'spring', stiffness: 360, damping: 34 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 36 }}
               className="fixed inset-y-0 left-0 w-80 max-w-[85vw] bg-side border-r border-bdr shadow-2xl flex flex-col z-50"
             >
               <div className="flex items-center justify-between px-4 py-4 border-b border-bdr bg-surf/60">
@@ -403,7 +433,15 @@ export default function Sidebar() {
                   Chức năng chính
                 </p>
                 {mainItems.map(item => (
-                  <NavLink key={`m-${item.id}`} item={item} isMobile />
+                  <SidebarNavLink
+                    key={`m-${item.id}`}
+                    item={item}
+                    pathname={pathname}
+                    collapsed={false}
+                    workerCount={workerCount}
+                    isMobile
+                    onMobileClose={() => setMobileOpen(false)}
+                  />
                 ))}
 
                 {adminItems.length > 0 && (
@@ -412,7 +450,15 @@ export default function Sidebar() {
                       Quản trị hệ thống
                     </p>
                     {adminItems.map(item => (
-                      <NavLink key={`m-${item.id}`} item={item} isMobile />
+                      <SidebarNavLink
+                        key={`m-${item.id}`}
+                        item={item}
+                        pathname={pathname}
+                        collapsed={false}
+                        workerCount={workerCount}
+                        isMobile
+                        onMobileClose={() => setMobileOpen(false)}
+                      />
                     ))}
                   </>
                 )}

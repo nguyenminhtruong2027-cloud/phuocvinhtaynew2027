@@ -5,19 +5,19 @@ import type { LucideIcon } from 'lucide-react';
 
 export function MotionProvider({ children }: { children: React.ReactNode }) {
   return (
-    <MotionConfig reducedMotion="user" transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}>
+    <MotionConfig reducedMotion="user" transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}>
       {children}
     </MotionConfig>
   );
 }
 
 /**
- * AnimatedNumber — Hiệu ứng đếm số mượt mà bằng requestAnimationFrame (tabular-nums, an toàn SSR).
+ * AnimatedNumber — Hiệu ứng đếm số nhanh gọn bằng requestAnimationFrame (tabular-nums, an toàn SSR).
  */
 export function AnimatedNumber({
   value,
   format = (n: number) => Math.round(n).toLocaleString('vi-VN'),
-  duration = 550,
+  duration = 260,
 }: {
   value: number;
   format?: (n: number) => string;
@@ -29,7 +29,8 @@ export function AnimatedNumber({
   useEffect(() => {
     const start = prevRef.current;
     const end = Number.isFinite(value) ? value : 0;
-    if (start === end) {
+    if (start === end || duration <= 0) {
+      prevRef.current = end;
       setDisplay(end);
       return;
     }
@@ -46,7 +47,6 @@ export function AnimatedNumber({
     const tick = (now: number) => {
       const elapsed = now - startTime;
       const t = Math.min(elapsed / duration, 1);
-      // Ease out cubic
       const eased = 1 - Math.pow(1 - t, 3);
       const current = start + (end - start) * eased;
       setDisplay(current);
@@ -69,24 +69,14 @@ export function AnimatedNumber({
 }
 
 /**
- * PageReveal — Hiệu ứng chuyển cảnh nhẹ nhàng cho vùng nội dung chính khi đổi trang.
+ * PageReveal — Hiển thị tức thì vùng nội dung chính (không unmount theo routeKey).
  */
-export function PageReveal({ children, routeKey }: { children: React.ReactNode; routeKey?: string }) {
-  return (
-    <motion.div
-      key={routeKey}
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-      className="min-h-full"
-    >
-      {children}
-    </motion.div>
-  );
+export function PageReveal({ children }: { children: React.ReactNode; routeKey?: string }) {
+  return <div className="min-h-full">{children}</div>;
 }
 
 /**
- * StaggerGrid & StaggerItem — Lưới xuất hiện tuần tự nhanh gọn (<= 220ms).
+ * StaggerGrid & StaggerItem — Lưới xuất hiện nhanh gọn (<= 140ms).
  */
 export function StaggerGrid({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
@@ -96,7 +86,7 @@ export function StaggerGrid({ children, className = '' }: { children: React.Reac
       variants={{
         hidden: {},
         visible: {
-          transition: { staggerChildren: 0.04 },
+          transition: { staggerChildren: 0.015 },
         },
       }}
       className={className}
@@ -110,11 +100,11 @@ export function StaggerItem({ children, className = '' }: { children: React.Reac
   return (
     <motion.div
       variants={{
-        hidden: { opacity: 0, y: 8 },
+        hidden: { opacity: 0, y: 4 },
         visible: {
           opacity: 1,
           y: 0,
-          transition: { duration: 0.2, ease: [0.22, 1, 0.36, 1] },
+          transition: { duration: 0.14, ease: [0.22, 1, 0.36, 1] },
         },
       }}
       className={className}

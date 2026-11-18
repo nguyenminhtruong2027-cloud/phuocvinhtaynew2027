@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
+import { useWorkers } from '@/context/WorkerContext';
 import { compareKtxNames, DEFAULT_ROOM_CAPACITY } from '@/data/workers';
 import { fetchRoomCapacities, getRoomCapacity, RoomCapacityMap, formatRoomDisplay } from '@/lib/facilityCapacity';
 import { reconcileBedsWithWorkers, releaseBedsForWorkers } from '@/lib/bedSync';
@@ -99,8 +100,26 @@ export default function BedManagementClient() {
   const router = useRouter();
   const { isAdmin, canWriteBlock, currentUser } = useAuth();
   const { addLog } = useAudit();
+  const { workers: contextWorkers, refreshWorkers } = useWorkers();
   const [beds, setBeds] = useState<BedRow[]>([]);
-  const [workers, setWorkers] = useState<WorkerLite[]>([]);
+  const workers = useMemo<WorkerLite[]>(
+    () =>
+      (contextWorkers || []).map(w => ({
+        id: w.id,
+        hoVaTen: w.hoVaTen || '',
+        maNV: w.maNV || '',
+        cccd: w.cccd || '',
+        donVi: w.donVi || '',
+        gioiTinh: w.gioiTinh || '',
+        soDienThoai: w.soDienThoai || '',
+        ngayVaoKTX: w.ngayVaoKTX || '',
+        ktx: w.ktx || '',
+        day: w.day || '',
+        phongSo: w.phongSo || '',
+        giuong: w.giuong || '',
+      })),
+    [contextWorkers]
+  );
   const [capacities, setCapacities] = useState<RoomCapacityMap>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -175,31 +194,8 @@ export default function BedManagementClient() {
   }, [supabase]);
 
   const loadWorkers = useCallback(async () => {
-    try {
-      const rows = await fetchAllRows<Record<string, unknown>>(
-        supabase,
-        'workers',
-        'id, ho_va_ten, ma_nv, cccd, don_vi, gioi_tinh, so_dien_thoai, ngay_vao_ktx, ktx, day, phong_so, giuong'
-      );
-      const mapped: WorkerLite[] = (rows || []).map((r, i) => ({
-        id: String(r?.id ?? `w-${i}`),
-        hoVaTen: String(r?.ho_va_ten ?? ''),
-        maNV: String(r?.ma_nv ?? ''),
-        cccd: String(r?.cccd ?? ''),
-        donVi: String(r?.don_vi ?? ''),
-        gioiTinh: String(r?.gioi_tinh ?? ''),
-        soDienThoai: String(r?.so_dien_thoai ?? ''),
-        ngayVaoKTX: String(r?.ngay_vao_ktx ?? ''),
-        ktx: String(r?.ktx ?? ''),
-        day: String(r?.day ?? ''),
-        phongSo: String(r?.phong_so ?? ''),
-        giuong: String(r?.giuong ?? ''),
-      }));
-      setWorkers(mapped);
-    } catch (err) {
-      console.warn('[bed-management] load workers failed:', err);
-    }
-  }, [supabase]);
+    await refreshWorkers();
+  }, [refreshWorkers]);
 
   const loadCapacities = useCallback(async () => {
     try {
@@ -211,9 +207,8 @@ export default function BedManagementClient() {
 
   useEffect(() => {
     loadBeds();
-    loadWorkers();
     loadCapacities();
-  }, [loadBeds, loadWorkers, loadCapacities]);
+  }, [loadBeds, loadCapacities]);
 
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null;
@@ -221,7 +216,6 @@ export default function BedManagementClient() {
       channel = supabase
         .channel('bed_management_realtime')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'beds' }, () => loadBeds(true))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'workers' }, () => { loadWorkers(); loadBeds(true); })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, () => loadCapacities())
         .subscribe();
     } catch (err) {
@@ -232,7 +226,7 @@ export default function BedManagementClient() {
         if (channel) supabase.removeChannel(channel);
       } catch {}
     };
-  }, [supabase, loadBeds, loadWorkers, loadCapacities]);
+  }, [supabase, loadBeds, loadCapacities]);
 
   // ─── Derived data (null-safe) ──────────────────────────────────────────────
   const workerById = useMemo(() => {
@@ -1116,7 +1110,7 @@ export default function BedManagementClient() {
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-700/40">
+                  <tbody className="divide-y divide-bdr">
                     {bedsFiltered.map(bed => {
                       const worker = bed?.worker_id ? (workerById.get(bed.worker_id) || null) : null;
                       const female = isFemale(worker, bed?.ho_va_ten);

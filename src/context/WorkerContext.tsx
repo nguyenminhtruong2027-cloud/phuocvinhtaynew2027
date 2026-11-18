@@ -123,7 +123,7 @@ const WorkerContext = createContext<WorkerContextValue | null>(null);
 const FETCH_PAGE_SIZE = 1000;
 
 export function WorkerProvider({ children }: { children: React.ReactNode }) {
-  const { currentUser, loading: authLoading } = useAuth();
+  const { currentUser, isAdmin, canWriteBlock, loading: authLoading } = useAuth();
   const pathname = usePathname();
   const isPublicPath = PUBLIC_PATHS.some(p => pathname?.startsWith(p));
   const shouldLoadWorkers = !authLoading && Boolean(currentUser) && !isPublicPath;
@@ -135,6 +135,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const workerMetaByIdRef = useRef<Map<string, Worker>>(new Map());
+  const lastFetchedAtRef = useRef<number>(0);
 
   const fetchCount = useCallback(async () => {
     try {
@@ -187,6 +188,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       const uniqueRows = [...Array.from(metaMap.values()), ...noIdRows];
       uniqueRows.sort((a, b) => (a.stt ?? 0) - (b.stt ?? 0) || a.hoVaTen.localeCompare(b.hoVaTen));
       workerMetaByIdRef.current = metaMap;
+      lastFetchedAtRef.current = Date.now();
       setWorkers(uniqueRows);
       setTotalWorkerCount(uniqueRows.length);
     } catch (err: any) {
@@ -255,10 +257,18 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
 
     channelRef.current = workersChannel;
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastFetchedAtRef.current > 45_000) {
+        fetchWorkers(true);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       supabase.removeChannel(workersChannel);
     };
-  }, [shouldLoadWorkers, supabase]);
+  }, [shouldLoadWorkers, supabase, fetchWorkers]);
 
   const refreshWorkers = useCallback(async () => {
     await fetchWorkers(true);
@@ -455,13 +465,13 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
 
     if (rows.some(r => (r.giuong || '').trim() !== '' || workers.some(existing => existing.id === r.id))) {
       try {
-        await reconcileBedsWithWorkers(supabase);
+        await reconcileBedsWithWorkers(supabase, { isAdmin, canWriteBlock });
       } catch (syncErr) {
         console.warn('[WorkerContext] Post-import bed reconcile warning:', syncErr);
       }
     }
     await fetchWorkers(true);
-  }, [workers, fetchWorkers, supabase]);
+  }, [workers, fetchWorkers, supabase, isAdmin, canWriteBlock]);
 
   const updateTamTruStatus = useCallback(async (id: string, status: 'registered' | 'unregistered') => {
     const { error } = await supabase
@@ -479,12 +489,24 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       const batchIds = ids.slice(i, i + BATCH);
       const { error } = await supabase
         .from('workers')
-        .update({ ktx: ktxValue })
+        .update({ ktx: ktxValue, giuong: '' })
         .in('id', batchIds);
       if (error) throw new Error(error.message);
     }
     await releaseBedsForWorkers(supabase, ids);
-    setWorkers(prev => prev.map(w => ids.includes(w.id) ? { ...w, ktx: ktxValue } : w));
+    const idSet = new Set(ids);
+    setWorkers(prev =>
+      prev.map(w =>
+        idSet.has(w.id)
+          ? {
+              ...w,
+              ktx: ktxValue,
+              giuong: '',
+              khoaTraCuu: `${ktxValue}|${w.day}|${w.phongSo}`,
+            }
+          : w
+      )
+    );
   }, [supabase]);
 
   const bulkUpdateWorkers = useCallback(async (

@@ -361,17 +361,6 @@ export default function CheckoutApprovalPanel({
     try {
       const nowStr = new Date().toISOString();
 
-      const { error: updateErr } = await supabase
-        .from('worker_registrations')
-        .update({
-          status: 'approved',
-          reviewed_by: currentUser?.id,
-          reviewed_at: nowStr,
-        })
-        .eq('id', req.id);
-
-      if (updateErr) throw new Error(updateErr.message);
-
       const matchedWorkersMap = new Map<string, any>();
 
       if (req.worker_id && req.worker_id.trim()) {
@@ -421,7 +410,17 @@ export default function CheckoutApprovalPanel({
       const matchedWorkers = Array.from(matchedWorkersMap.values());
       const matchedIds = matchedWorkers.map(w => String(w.id)).filter(Boolean);
 
+      // 1. Delete matched worker(s) & release beds FIRST so request is never marked approved on failure
       if (matchedWorkers.length > 0) {
+        const { error: deleteErr } = await supabase
+          .from('workers')
+          .delete()
+          .in('id', matchedIds);
+
+        if (deleteErr) {
+          throw new Error(`Không thể xóa hồ sơ công nhân (kiểm tra quyền hoặc kết nối): ${deleteErr.message}`);
+        }
+
         preserveDeletedWorkerEntries(
           matchedWorkers.map(w => ({
             id: String(w.id),
@@ -448,11 +447,6 @@ export default function CheckoutApprovalPanel({
         } catch {
           // ignore log error
         }
-
-        await supabase
-          .from('workers')
-          .delete()
-          .in('id', matchedIds);
 
         await releaseBedsForWorkers(supabase, matchedIds);
       }
@@ -490,6 +484,18 @@ export default function CheckoutApprovalPanel({
           // ignore fallback bed release error
         }
       }
+
+      // 2. Mark checkout registration as approved AFTER worker removal & bed release succeed
+      const { error: updateErr } = await supabase
+        .from('worker_registrations')
+        .update({
+          status: 'approved',
+          reviewed_by: currentUser?.id,
+          reviewed_at: nowStr,
+        })
+        .eq('id', req.id);
+
+      if (updateErr) throw new Error(updateErr.message);
 
       setCheckouts(prev =>
         prev.map(c =>

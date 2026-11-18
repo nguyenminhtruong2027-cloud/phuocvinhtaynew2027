@@ -1104,7 +1104,7 @@ export default function UserManagementClient() {
             {/* Modal Body (Scrollable) */}
             <div className="px-6 py-4 flex-1 overflow-y-auto space-y-4">
               {formError && (
-                <div className="flex items-start gap-2 text-xs text-dgr bg-red-50 dark:bg-red-900/20 dark:text-red-400 px-3 py-2.5 rounded-lg border border-red-200 dark:border-red-800">
+                <div className="flex items-start gap-2 text-xs text-dgr tint-dgr px-3 py-2.5 rounded-lg border border-dgr/35">
                   <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
                   <span className="whitespace-normal break-words">{formError}</span>
                 </div>

@@ -236,7 +236,6 @@ export default function CommandPalette() {
       const loc = [w.ktx, w.day, w.phongSo ? `P.${w.phongSo}` : '', w.giuong ? `G${w.giuong}` : '']
         .filter(Boolean)
         .join(' · ');
-      const searchTarget = w.maNV || w.hoVaTen;
       return {
         id: `worker-${w.id}`,
         group: 'worker',
@@ -252,7 +251,7 @@ export default function CommandPalette() {
           </div>
         ),
         icon: UserCheck,
-        onSelect: () => navigate(`/worker-management?search=${encodeURIComponent(searchTarget)}`),
+        onSelect: () => navigate(`/worker-management?view=${encodeURIComponent(w.id)}`),
       };
     });
   }, [query, workers, navigate]);

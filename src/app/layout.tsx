@@ -8,6 +8,7 @@ import { AuthProvider } from '@/context/AuthContext';
 import { AuditProvider } from '@/context/AuditContext';
 import { WorkerProvider } from '@/context/WorkerContext';
 import { MotionProvider } from '@/components/ui/MotionPrimitives';
+import AppShell from '@/components/AppShell';
 
 const jakartaSans = Plus_Jakarta_Sans({
   subsets: ['latin', 'vietnamese'],
@@ -52,7 +53,7 @@ export default function RootLayout({
           <AuthProvider>
             <AuditProvider>
               <WorkerProvider>
-                {children}
+                <AppShell>{children}</AppShell>
               </WorkerProvider>
             </AuditProvider>
           </AuthProvider>
