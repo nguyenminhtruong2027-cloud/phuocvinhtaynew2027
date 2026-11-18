@@ -3,9 +3,10 @@ import React, { useState, useEffect } from 'react';
 import { Worker, calcSoNgay } from '@/data/workers';
 import {
   X, Pencil, Trash2, Phone, MapPin, Calendar, Building2,
-  Shield, User, CreditCard, Users, History, Loader2, ArrowRightLeft, LogIn, LogOut,
+  Shield, User, CreditCard, Users, History, Loader2, ArrowRightLeft, LogIn, LogOut, Printer,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { escapeHtml, printHtmlViaIframe } from '@/lib/printHtml';
 
 interface Props {
   worker: Worker;
@@ -100,7 +101,7 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
       try {
         const supabase = createClient();
         const searchTerms = [workerMaNV.trim(), workerName.trim()].filter(Boolean);
-        const auditRows: Array<{ id: string; created_at: string; action: string; detail: string; user_name?: string; user_email?: string }> = [];
+        const auditRows: Array<{ id: string; timestamp: string; account: string; action: string; detail: string }> = [];
 
         if (searchTerms.length > 0) {
           const orFilter = searchTerms
@@ -108,54 +109,107 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
             .join(',');
           const { data: logs, error } = await supabase
             .from('audit_logs')
-            .select('id, created_at, action, detail, user_name, user_email')
+            .select('id, timestamp, account, action, detail')
             .or(orFilter)
-            .order('created_at', { ascending: false })
+            .order('timestamp', { ascending: false })
             .limit(40);
           if (!error && logs) {
             auditRows.push(...logs);
           }
         }
 
-        const { data: delLogs, error: delErr } = await supabase
-          .from('worker_deletion_log')
-          .select('id, deleted_at, reason, ktx, day, phong_so, deleted_by')
-          .or(
-            workerMaNV.trim()
-              ? `worker_id.eq.${workerId},ma_nv.eq.${workerMaNV.trim()}`
-              : `worker_id.eq.${workerId}`
-          )
-          .order('deleted_at', { ascending: false })
-          .limit(20);
+        const [delRes, entryRes] = await Promise.all([
+          supabase
+            .from('worker_deletion_log')
+            .select('id, deleted_at, ktx, day')
+            .or(
+              workerMaNV.trim()
+                ? `worker_id.eq.${workerId},ma_nv.eq.${workerMaNV.trim()}`
+                : `worker_id.eq.${workerId}`
+            )
+            .order('deleted_at', { ascending: false })
+            .limit(20),
+          supabase
+            .from('worker_entry_log')
+            .select('id, entered_at, ktx, day')
+            .or(
+              workerMaNV.trim()
+                ? `worker_id.eq.${workerId},ma_nv.eq.${workerMaNV.trim()}`
+                : `worker_id.eq.${workerId}`
+            )
+            .order('entered_at', { ascending: false })
+            .limit(10),
+        ]);
 
-        for (const log of auditRows) {
-          const act = String(log.action || '');
+        const formatAuditDetail = (action: string, rawDetail: string): { title: string; detail: string; kind: TimelineEvent['kind'] } => {
+          const act = String(action || '');
+          let prettyDetail = rawDetail || '';
+          try {
+            if (rawDetail.trim().startsWith('{')) {
+              const parsed = JSON.parse(rawDetail);
+              if (act === 'BED_REASSIGN' && parsed.from && parsed.to) {
+                prettyDetail = `Từ ${parsed.from.ktx || ''} · ${parsed.from.day || ''} · P${parsed.from.phong_so || ''} · G${parsed.from.giuong || ''} → Sang ${parsed.to.ktx || ''} · ${parsed.to.day || ''} · P${parsed.to.phong_so || ''} · G${parsed.to.giuong || ''}`;
+                return { title: 'Chuyển / Đổi giường', detail: prettyDetail, kind: 'transfer' };
+              }
+              if (act === 'BED_INSPECT_CONFIRM') {
+                prettyDetail = `Xác nhận có mặt tại ${parsed.ktx || ''} · ${parsed.day || ''} · P${parsed.phong_so || ''} · G${parsed.giuong || ''}`;
+                return { title: 'Xác nhận kiểm tra giường QR', detail: prettyDetail, kind: 'checkin' };
+              }
+              if (act === 'CHECKOUT_APPROVED' || act === 'CHECKOUT_REQUEST') {
+                prettyDetail = `${parsed.ho_va_ten || ''} (${parsed.ma_nv || '—'}) — ${parsed.ktx || ''} · ${parsed.day || ''} · P${parsed.phong_so || ''}${parsed.ly_do ? ` | Lý do: ${parsed.ly_do}` : ''}`;
+                return {
+                  title: act === 'CHECKOUT_APPROVED' ? 'Duyệt trả phòng KTX' : 'Gửi yêu cầu trả phòng',
+                  detail: prettyDetail,
+                  kind: 'checkout',
+                };
+              }
+            }
+          } catch {
+            // Keep raw detail text
+          }
+
           const kind: TimelineEvent['kind'] =
-            act.includes('Chuyển') || act.includes('giường')
+            act.includes('Chuyển') || act.includes('giường') || act === 'BED_REASSIGN'
               ? 'transfer'
-              : act.includes('Trả') || act.includes('Xóa')
+              : act.includes('Trả') || act.includes('Xóa') || act.includes('CHECKOUT') || act === 'DELETE'
               ? 'checkout'
-              : act.includes('Thêm') || act.includes('Duyệt')
+              : act.includes('Thêm') || act.includes('Duyệt') || act === 'CREATE' || act === 'APPROVE_REGISTRATION'
               ? 'checkin'
               : 'update';
+          return { title: act || 'Cập nhật hồ sơ', detail: prettyDetail, kind };
+        };
+
+        for (const log of auditRows) {
+          const parsed = formatAuditDetail(log.action, log.detail);
           list.push({
             id: `audit-${log.id}`,
-            time: log.created_at,
-            title: act || 'Cập nhật hồ sơ',
-            detail: log.detail || '',
-            actor: log.user_name || log.user_email || undefined,
-            kind,
+            time: log.timestamp,
+            title: parsed.title,
+            detail: parsed.detail,
+            actor: log.account || undefined,
+            kind: parsed.kind,
           });
         }
 
-        if (!delErr && delLogs) {
-          for (const d of delLogs) {
+        if (!entryRes.error && entryRes.data) {
+          for (const e of entryRes.data) {
+            list.push({
+              id: `entry-${e.id}`,
+              time: e.entered_at,
+              title: 'Ghi nhận nhập KTX (Hệ thống)',
+              detail: `${e.ktx || 'KTX'} · ${e.day || '—'}`,
+              kind: 'checkin',
+            });
+          }
+        }
+
+        if (!delRes.error && delRes.data) {
+          for (const d of delRes.data) {
             list.push({
               id: `del-${d.id}`,
               time: d.deleted_at,
               title: 'Ghi nhận rời KTX / Trả phòng',
-              detail: `${d.ktx || ''} · ${d.day || ''} · Phòng ${d.phong_so || ''}${d.reason ? ` — ${d.reason}` : ''}`,
-              actor: d.deleted_by || undefined,
+              detail: `${d.ktx || 'KTX'} · ${d.day || '—'}`,
               kind: 'checkout',
             });
           }
@@ -197,6 +251,69 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
             </div>
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                const days = calcSoNgay(w.ngayVaoKTX, w.ngayRaKTX);
+                const tamTruText = w.tamTruStatus === 'registered' ? 'Đã đăng ký tạm trú' : 'Chưa đăng ký tạm trú';
+                const printedAt = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+                const html = `<!DOCTYPE html><html lang="vi"><head><meta charset="utf-8" /><title>Phiếu Cư Trú - ${escapeHtml(w.hoVaTen)}</title>
+<style>
+  @page { size: A5 landscape; margin: 10mm; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #111827; margin: 0; padding: 12px; font-size: 12px; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1e3a8a; padding-bottom: 8px; margin-bottom: 12px; }
+  .title { font-size: 16px; font-weight: 800; color: #1e3a8a; margin: 0; }
+  .sub { font-size: 11px; color: #4b5563; margin-top: 2px; }
+  .badge { padding: 4px 10px; border: 1px solid #2563eb; border-radius: 6px; font-weight: 700; font-size: 11px; color: #1d4ed8; background: #eff6ff; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; }
+  .box { border: 1px solid #d1d5db; border-radius: 8px; padding: 10px; }
+  .box h4 { margin: 0 0 8px 0; font-size: 11px; text-transform: uppercase; color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }
+  .row { display: flex; justify-content: space-between; margin-bottom: 5px; gap: 8px; }
+  .lbl { color: #6b7280; }
+  .val { font-weight: 700; text-align: right; }
+  .signs { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 16px; text-align: center; }
+  .sign-box { padding-top: 4px; }
+  .sign-line { margin-top: 38px; font-size: 11px; color: #4b5563; }
+</style></head><body>
+  <div class="header">
+    <div>
+      <p class="title">PHIẾU THÔNG TIN CƯ TRÚ KTX PHƯỚC VĨNH TÂY</p>
+      <p class="sub">Ngày in: ${escapeHtml(printedAt)}</p>
+    </div>
+    <div class="badge">${escapeHtml(w.ktx || 'KTX')} · ${escapeHtml(w.day || '—')} · P${escapeHtml(w.phongSo || '—')} · G${escapeHtml(w.giuong || '—')}</div>
+  </div>
+  <div class="grid">
+    <div class="box">
+      <h4>Thông tin cá nhân</h4>
+      <div class="row"><span class="lbl">Họ và tên:</span><span class="val">${escapeHtml(w.hoVaTen)}</span></div>
+      <div class="row"><span class="lbl">Mã nhân viên:</span><span class="val">${escapeHtml(w.maNV || '—')}</span></div>
+      <div class="row"><span class="lbl">Giới tính / Ngày sinh:</span><span class="val">${escapeHtml(w.gioiTinh || '—')} · ${escapeHtml(w.ngaySinh || '—')}</span></div>
+      <div class="row"><span class="lbl">Số CCCD:</span><span class="val">${escapeHtml(w.cccd || '—')}</span></div>
+      <div class="row"><span class="lbl">Số điện thoại:</span><span class="val">${escapeHtml(w.soDienThoai || '—')}</span></div>
+      <div class="row"><span class="lbl">Quê quán:</span><span class="val">${escapeHtml(w.hoKhauTinh || '—')}</span></div>
+    </div>
+    <div class="box">
+      <h4>Thông tin lưu trú &amp; đơn vị</h4>
+      <div class="row"><span class="lbl">Đơn vị / Tiểu đoàn:</span><span class="val">${escapeHtml(w.donVi || '—')}${w.tieuDoan ? ` (TD ${escapeHtml(w.tieuDoan)})` : ''}</span></div>
+      <div class="row"><span class="lbl">Vị trí phòng giường:</span><span class="val">${escapeHtml([w.ktx, w.day, w.phongSo ? `Phòng ${w.phongSo}` : '', w.giuong ? `Giường ${w.giuong}` : ''].filter(Boolean).join(' · '))}</span></div>
+      <div class="row"><span class="lbl">Ngày vào / ra KTX:</span><span class="val">${escapeHtml(w.ngayVaoKTX || '—')} → ${escapeHtml(w.ngayRaKTX || 'Đang ở')}</span></div>
+      <div class="row"><span class="lbl">Số ngày lưu trú:</span><span class="val">${days !== null ? `${days} ngày` : '—'}</span></div>
+      <div class="row"><span class="lbl">Trạng thái tạm trú:</span><span class="val">${escapeHtml(tamTruText)}</span></div>
+      <div class="row"><span class="lbl">Tổ trưởng:</span><span class="val">${escapeHtml(w.toTruong || '—')} (${escapeHtml(w.sdtToTruong || '—')})</span></div>
+    </div>
+  </div>
+  <div class="signs">
+    <div class="sign-box"><strong>Người lưu trú ký xác nhận</strong><div class="sign-line">(Ký và ghi rõ họ tên)</div></div>
+    <div class="sign-box"><strong>Đại diện Ban Quản Lý KTX</strong><div class="sign-line">(Ký và ghi rõ họ tên)</div></div>
+  </div>
+</body></html>`;
+                printHtmlViaIframe(html);
+              }}
+              className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-primary transition-colors"
+              title="In phiếu cư trú"
+            >
+              <Printer size={15} />
+            </button>
             {canEdit ? (
               <button onClick={() => onEdit(w)} className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-primary transition-colors" title="Chỉnh sửa">
                 <Pencil size={15} />

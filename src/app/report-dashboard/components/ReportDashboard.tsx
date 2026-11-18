@@ -5,7 +5,7 @@ import {
   Users, LayoutGrid, Percent, AlertCircle, VenusAndMars, HardHat,
   Building2, TrendingUp, TrendingDown, UserPlus, UserMinus, ArrowRightLeft,
   Calendar, Clock, RefreshCw, Filter, X, Building, BarChart2, CheckCircle2,
-  ChevronDown, ChevronRight, Download
+  ChevronDown, ChevronRight, Download, ShieldCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { exportMultiSheetExcel } from '@/lib/exportExcel';
@@ -37,6 +37,7 @@ import {
 // ─── Types ────────────────────────────────────────────────────────────────────
 type GenderFilter = 'all' | 'male' | 'female';
 type UnitFilter = 'all' | 'xd' | 'me' | 'vinalpha' | 'other';
+type TamTruFilter = 'all' | 'registered' | 'unregistered' | 'overdue';
 type KtxFilter = string;
 type ActiveTab = 'tong-quan' | 'bien-dong';
 type FluctuationType = 'all' | 'tang' | 'giam' | 'rong';
@@ -45,6 +46,7 @@ type CutoffMode = FluctuationCutoffMode;
 interface FilterState {
   gender: GenderFilter;
   unit: UnitFilter;
+  tamTru: TamTruFilter;
   ktx: KtxFilter;
   building: string;
   room: string;
@@ -60,7 +62,7 @@ interface FluctuationFilter {
 }
 
 const DEFAULT_FILTERS: FilterState = {
-  gender: 'all', unit: 'all', ktx: 'all', building: '', room: '',
+  gender: 'all', unit: 'all', tamTru: 'all', ktx: 'all', building: '', room: '',
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -89,6 +91,42 @@ function matchesUnit(w: Worker, u: UnitFilter): boolean {
 function matchesKtx(w: Worker, k: string): boolean {
   if (k === 'all' || !k) return true;
   return (w.ktx ?? '').trim() === k.trim();
+}
+
+function daysSinceEntryVN(rawDate?: string | null): number | null {
+  if (!rawDate) return null;
+  const s = rawDate.trim();
+  if (!s) return null;
+  let dt: Date | null = null;
+  const dm = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dm) {
+    dt = new Date(Date.UTC(parseInt(dm[3], 10), parseInt(dm[2], 10) - 1, parseInt(dm[1], 10)));
+  } else {
+    const ym = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (ym) {
+      dt = new Date(Date.UTC(parseInt(ym[1], 10), parseInt(ym[2], 10) - 1, parseInt(ym[3], 10)));
+    } else {
+      const parsed = new Date(s);
+      if (!Number.isNaN(parsed.getTime())) dt = parsed;
+    }
+  }
+  if (!dt || Number.isNaN(dt.getTime())) return null;
+  const nowVN = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  const todayUtc = Date.UTC(nowVN.getUTCFullYear(), nowVN.getUTCMonth(), nowVN.getUTCDate());
+  const targetUtc = Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate());
+  return Math.floor((todayUtc - targetUtc) / (24 * 60 * 60 * 1000));
+}
+
+function matchesTamTru(w: Worker, t: TamTruFilter): boolean {
+  if (t === 'all') return true;
+  if (t === 'registered') return w.tamTruStatus === 'registered';
+  if (t === 'unregistered') return w.tamTruStatus !== 'registered';
+  if (t === 'overdue') {
+    if (w.tamTruStatus === 'registered') return false;
+    const days = daysSinceEntryVN(w.ngayVaoKTX || w.createdAt);
+    return days !== null && days > 7;
+  }
+  return true;
 }
 
 function getDefaultDateRange(): { from: string; to: string } {
@@ -122,7 +160,7 @@ function CustomBarTooltip({ active, payload, label }: any) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function ReportDashboard() {
-  const { workers, loading: workersLoading } = useWorkers();
+  const { workers, loading: workersLoading, refreshing: workersRefreshing, refreshWorkers } = useWorkers();
   const [activeTab, setActiveTab] = useState<ActiveTab>('tong-quan');
 
   // ── Tổng quan filters ──
@@ -166,22 +204,20 @@ export default function ReportDashboard() {
     }
   }, []);
 
+  const loadFacilities = useCallback(async () => {
+    try {
+      const [facs, capMap] = await Promise.all([
+        fetchFacilitiesList(),
+        fetchRoomCapacities(),
+      ]);
+      setFacilitiesList(facs);
+      setCapacities(capMap);
+    } catch (err) {
+      console.warn('[ReportDashboard] load facilities error:', err);
+    }
+  }, []);
+
   useEffect(() => {
-    let active = true;
-    const loadFacilities = async () => {
-      try {
-        const [facs, capMap] = await Promise.all([
-          fetchFacilitiesList(),
-          fetchRoomCapacities(),
-        ]);
-        if (active) {
-          setFacilitiesList(facs);
-          setCapacities(capMap);
-        }
-      } catch (err) {
-        console.warn('[ReportDashboard] load facilities error:', err);
-      }
-    };
     loadFacilities();
     const supabase = createClient();
     const channel = supabase
@@ -189,10 +225,9 @@ export default function ReportDashboard() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, loadFacilities)
       .subscribe();
     return () => {
-      active = false;
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [loadFacilities]);
 
   // ── Unique buildings from workers & facilities for filter ──
   const activeKtxList = useMemo(
@@ -416,6 +451,7 @@ export default function ReportDashboard() {
     return workers.filter(w => {
       if (!matchesGender(w, filters.gender)) return false;
       if (!matchesUnit(w, filters.unit)) return false;
+      if (!matchesTamTru(w, filters.tamTru)) return false;
       if (!matchesKtx(w, filters.ktx)) return false;
       if (filters.building && (w.day ?? '').trim() !== filters.building.trim()) return false;
       if (filters.room && normalizeRoomLabel(w.phongSo) !== normalizeRoomLabel(filters.room)) return false;
@@ -439,6 +475,30 @@ export default function ReportDashboard() {
     const me = filtered.filter(w => { const dv = (w.donVi || '').toLowerCase(); return dv.includes('me') || dv.includes('cơ') || dv.includes('co'); }).length;
     const vinalpha = filtered.filter(w => { const dv = (w.donVi || '').toLowerCase(); return dv.includes('vinalpha') || dv.includes('alpha'); }).length;
     const otherUnit = Math.max(0, total - xd - me - vinalpha);
+
+    let tamTruRegistered = 0;
+    let tamTruUnregistered = 0;
+    let tamTruOverdue = 0;
+    const contractorCounts = new Map<string, number>();
+
+    filtered.forEach(w => {
+      if (w.tamTruStatus === 'registered') {
+        tamTruRegistered++;
+      } else {
+        tamTruUnregistered++;
+        const days = daysSinceEntryVN(w.ngayVaoKTX || w.createdAt);
+        if (days !== null && days > 7) {
+          tamTruOverdue++;
+        }
+      }
+      const dvName = (w.donVi || '').trim() || 'Chưa phân đơn vị';
+      contractorCounts.set(dvName, (contractorCounts.get(dvName) || 0) + 1);
+    });
+
+    const topContractors = Array.from(contractorCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([name, count]) => ({ name, count }));
 
     const workersWithRoom = filtered.filter(w => w.day && w.phongSo).length;
     const missingData = filtered.filter(w => !w.day || !w.phongSo).length;
@@ -495,6 +555,7 @@ export default function ReportDashboard() {
 
     return {
       total, male, female, xd, me, vinalpha, otherUnit,
+      tamTruRegistered, tamTruUnregistered, tamTruOverdue, topContractors,
       buildingCount, roomCount, capacity, fillRate, workersWithRoom, missingData
     };
   }, [filtered, activeFacilities, facilitiesList, filters.ktx, filters.building, filters.room, getRoomCap]);
@@ -516,6 +577,79 @@ export default function ReportDashboard() {
 
     return map;
   }, [filtered, getRoomCap, facilitiesList]);
+
+  const handleExportOverview = useCallback(() => {
+    if (filtered.length === 0 && activeKtxList.length === 0) {
+      toast.warning('Không có dữ liệu phù hợp bộ lọc để xuất Excel.');
+      return;
+    }
+
+    const ktxSummaryRows = activeKtxList.map((ktx, idx) => {
+      const d = ktxBreakdownCounts[ktx] || { total: 0, male: 0, female: 0, rooms: 0, capacity: 0, fillRate: 0 };
+      const registeredCount = filtered.filter(w => (w.ktx ?? '').trim() === ktx && w.tamTruStatus === 'registered').length;
+      const unregisteredCount = Math.max(0, d.total - registeredCount);
+      return {
+        'STT': idx + 1,
+        'Khu KTX': ktx,
+        'Số phòng': d.rooms,
+        'Sức chứa (chỗ)': d.capacity,
+        'Tổng đang ở': d.total,
+        'Tỷ lệ lấp đầy (%)': `${d.fillRate}%`,
+        'Nam': d.male,
+        'Nữ': d.female,
+        'Đã ĐK tạm trú': registeredCount,
+        'Chưa ĐK tạm trú': unregisteredCount,
+      };
+    });
+
+    ktxSummaryRows.push({
+      'STT': '' as any,
+      'Khu KTX': 'TỔNG THEO BỘ LỌC',
+      'Số phòng': stats.roomCount,
+      'Sức chứa (chỗ)': stats.capacity,
+      'Tổng đang ở': stats.total,
+      'Tỷ lệ lấp đầy (%)': `${stats.fillRate}%`,
+      'Nam': stats.male,
+      'Nữ': stats.female,
+      'Đã ĐK tạm trú': stats.tamTruRegistered,
+      'Chưa ĐK tạm trú': stats.tamTruUnregistered,
+    });
+
+    const detailRows = filtered.map((w, idx) => ({
+      'STT': idx + 1,
+      'Họ và tên': w.hoVaTen || '—',
+      'Mã NV': w.maNV || '—',
+      'Giới tính': w.gioiTinh || '—',
+      'Đơn vị / Nhà thầu': w.donVi || '—',
+      'KTX': w.ktx || '—',
+      'Dãy': w.day || '—',
+      'Phòng': w.phongSo || '—',
+      'Giường': w.giuong || '—',
+      'SĐT': w.soDienThoai || '—',
+      'CCCD': w.cccd || '—',
+      'Ngày vào KTX': w.ngayVaoKTX || '—',
+      'Tạm trú': w.tamTruStatus === 'registered' ? 'Đã đăng ký' : 'Chưa đăng ký',
+    }));
+
+    const today = getVNDateString();
+    const scopeTag = filters.ktx !== 'all' ? filters.ktx.replace(/\s+/g, '_') : 'TatCa';
+    const ok = exportMultiSheetExcel(
+      [
+        { name: 'Tổng hợp theo KTX', data: ktxSummaryRows },
+        {
+          name: 'Chi tiết công nhân',
+          data: detailRows,
+          emptyHeaders: ['STT', 'Họ và tên', 'Mã NV', 'Giới tính', 'Đơn vị / Nhà thầu', 'KTX', 'Dãy', 'Phòng', 'Giường', 'SĐT', 'CCCD', 'Ngày vào KTX', 'Tạm trú'],
+        },
+      ],
+      `BaoCao_TongQuan_KTX_${scopeTag}_${today}.xlsx`
+    );
+    if (ok) {
+      toast.success(`Đã xuất báo cáo tổng quan (${detailRows.length.toLocaleString('vi-VN')} công nhân).`);
+    } else {
+      toast.error('Không thể xuất file Excel.');
+    }
+  }, [filtered, activeKtxList, ktxBreakdownCounts, stats, filters.ktx]);
 
   const buildingList = useMemo(() => {
     const set = new Set<string>();
@@ -551,8 +685,8 @@ export default function ReportDashboard() {
   }, [workers, filters.ktx, filters.building, activeFacilities]);
 
   const hasActiveFilter =
-    filters.gender !== 'all' || filters.unit !== 'all' || filters.ktx !== 'all' ||
-    filters.building !== '' || filters.room !== '';
+    filters.gender !== 'all' || filters.unit !== 'all' || filters.tamTru !== 'all' ||
+    filters.ktx !== 'all' || filters.building !== '' || filters.room !== '';
 
   const hasFlFilter = flFilter.ktx || flFilter.day || flFilter.type !== 'all';
 
@@ -595,6 +729,17 @@ export default function ReportDashboard() {
 
           {/* Quick Refresh & Export Status */}
           <div className="flex items-center gap-2 flex-wrap">
+            {activeTab === 'tong-quan' && (
+              <button
+                onClick={handleExportOverview}
+                disabled={filtered.length === 0}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-ok2 hover:opacity-90 text-xs font-bold text-white transition-all shadow-md disabled:opacity-50"
+                title="Xuất Excel gồm 2 sheet: Tổng hợp theo KTX và Chi tiết công nhân theo bộ lọc"
+              >
+                <Download size={13} />
+                <span>Xuất Excel Tổng Quan</span>
+              </button>
+            )}
             {activeTab === 'bien-dong' && (
               <button
                 onClick={handleExportFluctuation}
@@ -607,12 +752,18 @@ export default function ReportDashboard() {
               </button>
             )}
             <button
-              onClick={() => {
-                if (activeTab === 'bien-dong') fetchFluctuation();
+              onClick={async () => {
+                if (activeTab === 'bien-dong') {
+                  await fetchFluctuation();
+                } else {
+                  await Promise.all([refreshWorkers(), loadFacilities()]);
+                  toast.success('Đã làm mới số liệu tổng quan.');
+                }
               }}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-act border border-bdr hover:bg-gray-700 text-xs font-semibold text-tx transition-colors"
+              disabled={flLoading || workersRefreshing}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-act border border-bdr hover:bg-gray-700 text-xs font-semibold text-tx transition-colors disabled:opacity-60"
             >
-              <RefreshCw size={13} className={flLoading ? 'animate-spin text-ok' : 'text-mu'} />
+              <RefreshCw size={13} className={flLoading || workersRefreshing ? 'animate-spin text-ok' : 'text-mu'} />
               <span>Làm mới số liệu</span>
             </button>
           </div>
@@ -675,6 +826,20 @@ export default function ReportDashboard() {
                     <option value="me">ME</option>
                     <option value="vinalpha">Vinalpha</option>
                     <option value="other">Khác</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1 min-w-[140px] flex-1 sm:flex-initial">
+                  <label className="text-xs font-bold text-mu uppercase tracking-wider">Tạm trú</label>
+                  <select
+                    value={filters.tamTru}
+                    onChange={e => set('tamTru', e.target.value)}
+                    className="w-full bg-act border border-bdr rounded-xl px-3 py-2 text-xs font-semibold text-tx focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                  >
+                    <option value="all">Tất cả</option>
+                    <option value="registered">Đã ĐK tạm trú</option>
+                    <option value="unregistered">Chưa ĐK tạm trú</option>
+                    <option value="overdue">Quá hạn (&gt; 7 ngày)</option>
                   </select>
                 </div>
 
@@ -774,8 +939,8 @@ export default function ReportDashboard() {
               </div>
             </div>
 
-            {/* Detail Stats: Giới tính & Nhà thầu & Khu KTX */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {/* Detail Stats: Giới tính, Nhà thầu, Tạm trú & Khu KTX */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               <div className="bg-surf rounded-2xl border border-bdr/60 p-5 shadow-xl">
                 <h4 className="font-bold text-tx mb-4 flex items-center gap-2 text-sm">
                   <VenusAndMars size={18} className="text-lnk" /> Thống kê giới tính
@@ -790,6 +955,42 @@ export default function ReportDashboard() {
                     <span className="text-2xl font-extrabold text-pink-400 font-tabular">{stats.female}</span>
                   </div>
                 </div>
+              </div>
+
+              <div className="bg-surf rounded-2xl border border-bdr/60 p-5 shadow-xl">
+                <h4 className="font-bold text-tx mb-4 flex items-center gap-2 text-sm">
+                  <ShieldCheck size={18} className="text-ok" /> Tuân thủ Tạm Trú
+                </h4>
+                <div className="grid grid-cols-3 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => set('tamTru', filters.tamTru === 'registered' ? 'all' : 'registered')}
+                    className={`text-left p-3 rounded-xl border transition-all ${filters.tamTru === 'registered' ? 'ring-2 ring-emerald-500 bg-okbg border-bdr2' : 'bg-okbg/40 border-bdr2 hover:bg-okbg/70'}`}
+                  >
+                    <span className="text-[11px] font-bold text-ok block mb-1">Đã ĐK</span>
+                    <span className="text-xl font-extrabold text-ok font-tabular">{stats.tamTruRegistered.toLocaleString('vi-VN')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => set('tamTru', filters.tamTru === 'unregistered' ? 'all' : 'unregistered')}
+                    className={`text-left p-3 rounded-xl border transition-all ${filters.tamTru === 'unregistered' ? 'ring-2 ring-amber-500 tint-wn border-wn' : 'bg-act/80 border-bdr hover:bg-act'}`}
+                  >
+                    <span className="text-[11px] font-bold text-wn block mb-1">Chưa ĐK</span>
+                    <span className="text-xl font-extrabold text-wn font-tabular">{stats.tamTruUnregistered.toLocaleString('vi-VN')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => set('tamTru', filters.tamTru === 'overdue' ? 'all' : 'overdue')}
+                    className={`text-left p-3 rounded-xl border transition-all ${filters.tamTru === 'overdue' ? 'ring-2 ring-rose-500 tint-dgr border-dgr' : 'tint-dgr/60 border-dgr/50 hover:tint-dgr'}`}
+                    title="Chưa đăng ký tạm trú quá 7 ngày kể từ ngày vào KTX"
+                  >
+                    <span className="text-[11px] font-bold text-dgr block mb-1">Quá 7 ngày</span>
+                    <span className="text-xl font-extrabold text-dgr font-tabular">{stats.tamTruOverdue.toLocaleString('vi-VN')}</span>
+                  </button>
+                </div>
+                <p className="text-[11px] text-mu mt-2.5">
+                  Tỷ lệ hoàn tất tạm trú: <strong className="text-tx font-tabular">{stats.total > 0 ? Math.round((stats.tamTruRegistered / stats.total) * 100) : 0}%</strong>
+                </p>
               </div>
 
               <div className="bg-surf rounded-2xl border border-bdr/60 p-5 shadow-xl">
@@ -814,56 +1015,69 @@ export default function ReportDashboard() {
                     <span className="text-base font-bold text-wn font-tabular">{stats.otherUnit}</span>
                   </div>
                 </div>
-              </div>
-
-              <div className="bg-surf rounded-2xl border border-bdr/60 p-5 shadow-xl">
-                <div className="flex items-center justify-between mb-4">
-                  <h4 className="font-bold text-tx flex items-center gap-2 text-sm">
-                    <Building2 size={18} className="text-ok" /> Phân bổ theo Khu KTX
-                  </h4>
-                  <span className="text-xs text-mu font-medium font-tabular">
-                    {activeKtxList.length} khu KTX hoạt động
-                  </span>
-                </div>
-                <div className={`grid gap-3 ${activeKtxList.length >= 3 ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
-                  {activeKtxList.map(ktx => {
-                    const data = ktxBreakdownCounts[ktx] || { total: 0, male: 0, female: 0, rooms: 0, fillRate: 0 };
-                    const isSelected = filters.ktx === ktx;
-                    const colorClasses =
-                      ktx === 'KTX 1'
-                        ? { bg: 'bg-blue-950/40 border-bdr2', title: 'text-lnk', num: 'text-lnk' }
-                        : ktx === 'KTX 2'
-                        ? { bg: 'tint-wn border-wn', title: 'text-wn', num: 'text-wn' }
-                        : ktx === 'KTX 3'
-                        ? { bg: 'bg-okbg border-bdr2', title: 'text-ok', num: 'text-ok' }
-                        : { bg: 'bg-act border-bdr2', title: 'text-lnk', num: 'text-lnk' };
-
-                    return (
-                      <div
-                        key={ktx}
-                        onClick={() => set('ktx', isSelected ? 'all' : ktx)}
-                        className={`p-3.5 rounded-xl border transition-all cursor-pointer hover:scale-[1.02] ${colorClasses.bg} ${
-                          isSelected ? 'ring-2 ring-emerald-500 shadow-lg' : ''
-                        }`}
-                        title={`Bấm để lọc theo ${ktx}`}
+                {stats.topContractors.length > 0 && (
+                  <div className="mt-3 pt-2.5 border-t border-bdr/60 flex flex-wrap gap-1.5">
+                    {stats.topContractors.map(c => (
+                      <span
+                        key={c.name}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-act border border-bdr text-[11px] text-mu"
                       >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className={`text-xs font-bold ${colorClasses.title}`}>{ktx}</span>
-                          <span className="text-[10px] font-semibold text-mu font-tabular">
-                            {data.rooms} phòng · {data.fillRate}%
-                          </span>
-                        </div>
-                        <span className={`text-2xl font-extrabold ${colorClasses.num} font-tabular`}>
-                          {data.total.toLocaleString('vi-VN')}
+                        <span className="truncate max-w-[110px]">{c.name}</span>
+                        <strong className="text-tx font-tabular">{c.count}</strong>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-surf rounded-2xl border border-bdr/60 p-5 shadow-xl">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="font-bold text-tx flex items-center gap-2 text-sm">
+                  <Building2 size={18} className="text-ok" /> Phân bổ theo Khu KTX
+                </h4>
+                <span className="text-xs text-mu font-medium font-tabular">
+                  {activeKtxList.length} khu KTX hoạt động
+                </span>
+              </div>
+              <div className={`grid gap-3 ${activeKtxList.length >= 3 ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
+                {activeKtxList.map(ktx => {
+                  const data = ktxBreakdownCounts[ktx] || { total: 0, male: 0, female: 0, rooms: 0, fillRate: 0 };
+                  const isSelected = filters.ktx === ktx;
+                  const colorClasses =
+                    ktx === 'KTX 1'
+                      ? { bg: 'bg-blue-950/40 border-bdr2', title: 'text-lnk', num: 'text-lnk' }
+                      : ktx === 'KTX 2'
+                      ? { bg: 'tint-wn border-wn', title: 'text-wn', num: 'text-wn' }
+                      : ktx === 'KTX 3'
+                      ? { bg: 'bg-okbg border-bdr2', title: 'text-ok', num: 'text-ok' }
+                      : { bg: 'bg-act border-bdr2', title: 'text-lnk', num: 'text-lnk' };
+
+                  return (
+                    <div
+                      key={ktx}
+                      onClick={() => set('ktx', isSelected ? 'all' : ktx)}
+                      className={`p-3.5 rounded-xl border transition-all cursor-pointer hover:scale-[1.01] ${colorClasses.bg} ${
+                        isSelected ? 'ring-2 ring-emerald-500 shadow-lg' : ''
+                      }`}
+                      title={`Bấm để lọc theo ${ktx}`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className={`text-xs font-bold ${colorClasses.title}`}>{ktx}</span>
+                        <span className="text-[10px] font-semibold text-mu font-tabular">
+                          {data.rooms} phòng · {data.fillRate}%
                         </span>
-                        <div className="flex items-center justify-between text-[11px] text-mu mt-1.5 pt-1.5 border-t border-bdr/50">
-                          <span className="text-lnk font-medium">Nam: <strong className="text-tx font-tabular">{data.male}</strong></span>
-                          <span className="text-pink-300 font-medium">Nữ: <strong className="text-tx font-tabular">{data.female}</strong></span>
-                        </div>
                       </div>
-                    );
-                  })}
-                </div>
+                      <span className={`text-2xl font-extrabold ${colorClasses.num} font-tabular`}>
+                        {data.total.toLocaleString('vi-VN')}
+                      </span>
+                      <div className="flex items-center justify-between text-[11px] text-mu mt-1.5 pt-1.5 border-t border-bdr/50">
+                        <span className="text-lnk font-medium">Nam: <strong className="text-tx font-tabular">{data.male}</strong></span>
+                        <span className="text-pink-300 font-medium">Nữ: <strong className="text-tx font-tabular">{data.female}</strong></span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

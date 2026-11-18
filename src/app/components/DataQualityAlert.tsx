@@ -2,12 +2,14 @@
 import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
-  AlertTriangle, ShieldAlert, FileWarning, Users, X, ArrowRight, CheckCircle2,
+  AlertTriangle, ShieldAlert, FileWarning, Users, X, ArrowRight, CheckCircle2, Download,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { getProfileStatus, Worker } from '@/data/workers';
 import { useWorkers } from '@/context/WorkerContext';
 import { normalizeGender } from '@/lib/roomGender';
 import { formatRoomDisplay, normalizeRoomLabel } from '@/lib/facilityCapacity';
+import { exportMultiSheetExcel } from '@/lib/exportExcel';
 
 interface GenderConflictRoom {
   ktx: string;
@@ -90,16 +92,23 @@ export default function DataQualityAlert({
     let unregisteredTamTru = 0;
     let overdueTamTru = 0;
 
+    const unregisteredList: Array<{ worker: Worker; days: number | null }> = [];
+    const incompleteList: Array<{ worker: Worker; issues: string }> = [];
+
     const roomBuckets = new Map<
       string,
       { ktx: string; day: string; room: string; maleCount: number; femaleCount: number }
     >();
 
     for (const w of scopedWorkers) {
-      if (!w?.cccd) missingCCCD++;
-      if (!w?.ngayVaoKTX) missingEntry++;
-      if (!w?.maNV || w.maNV === 'Chờ mã' || w.maNV === 'Chờ Mã') pendingCode++;
-      if (getProfileStatus(w) === 'no_room') noRoom++;
+      const missingFields: string[] = [];
+      if (!w?.cccd) { missingCCCD++; missingFields.push('Thiếu CCCD'); }
+      if (!w?.ngayVaoKTX) { missingEntry++; missingFields.push('Thiếu ngày vào'); }
+      if (!w?.maNV || w.maNV === 'Chờ mã' || w.maNV === 'Chờ Mã') { pendingCode++; missingFields.push('Chờ mã NV'); }
+      if (getProfileStatus(w) === 'no_room') { noRoom++; missingFields.push('Chưa phân phòng'); }
+      if (missingFields.length > 0) {
+        incompleteList.push({ worker: w, issues: missingFields.join(', ') });
+      }
 
       if (w?.tamTruStatus !== 'registered') {
         unregisteredTamTru++;
@@ -107,6 +116,7 @@ export default function DataQualityAlert({
         if (days !== null && days > 7) {
           overdueTamTru++;
         }
+        unregisteredList.push({ worker: w, days });
       }
 
       if (w?.ktx && w?.day && w?.phongSo) {
@@ -155,6 +165,8 @@ export default function DataQualityAlert({
       }
     });
 
+    unregisteredList.sort((a, b) => (b.days ?? -1) - (a.days ?? -1));
+
     return {
       missingCCCD,
       missingEntry,
@@ -163,8 +175,76 @@ export default function DataQualityAlert({
       unregisteredTamTru,
       overdueTamTru,
       genderConflicts,
+      unregisteredList,
+      incompleteList,
     };
   }, [scopedWorkers, roomGenderMap]);
+
+  const handleExportAlerts = () => {
+    const tamTruRows = metrics.unregisteredList.map((item, idx) => ({
+      'STT': idx + 1,
+      'Họ và tên': item.worker.hoVaTen || '—',
+      'Mã NV': item.worker.maNV || '—',
+      'CCCD': item.worker.cccd || '—',
+      'SĐT': item.worker.soDienThoai || '—',
+      'Đơn vị': item.worker.donVi || '—',
+      'KTX': item.worker.ktx || '—',
+      'Dãy': item.worker.day || '—',
+      'Phòng': item.worker.phongSo || '—',
+      'Ngày vào KTX': item.worker.ngayVaoKTX || '—',
+      'Số ngày chưa ĐK': item.days !== null ? item.days : '—',
+      'Mức độ': item.days !== null && item.days > 7 ? 'Quá hạn (>7 ngày)' : 'Chờ ĐK',
+    }));
+
+    const conflictRows = metrics.genderConflicts.map((c, idx) => ({
+      'STT': idx + 1,
+      'KTX': c.ktx,
+      'Dãy': c.day,
+      'Phòng': formatRoomDisplay(c.room),
+      'Nam': c.maleCount,
+      'Nữ': c.femaleCount,
+      'Cảnh báo': c.reason,
+    }));
+
+    const missingRows = metrics.incompleteList.map((item, idx) => ({
+      'STT': idx + 1,
+      'Họ và tên': item.worker.hoVaTen || '—',
+      'Mã NV': item.worker.maNV || '—',
+      'KTX': item.worker.ktx || '—',
+      'Dãy': item.worker.day || '—',
+      'Phòng': item.worker.phongSo || '—',
+      'SĐT': item.worker.soDienThoai || '—',
+      'Thông tin còn thiếu': item.issues,
+    }));
+
+    const scopeLabel = selectedKtx !== 'all' ? selectedKtx.replace(/\s+/g, '_') : 'TatCa_KTX';
+    const today = new Date().toISOString().split('T')[0];
+    const ok = exportMultiSheetExcel(
+      [
+        {
+          name: 'Chưa ĐK Tạm Trú',
+          data: tamTruRows,
+          emptyHeaders: ['STT', 'Họ và tên', 'Mã NV', 'CCCD', 'SĐT', 'Đơn vị', 'KTX', 'Dãy', 'Phòng', 'Ngày vào KTX', 'Số ngày chưa ĐK', 'Mức độ'],
+        },
+        {
+          name: 'Phòng lệch giới tính',
+          data: conflictRows,
+          emptyHeaders: ['STT', 'KTX', 'Dãy', 'Phòng', 'Nam', 'Nữ', 'Cảnh báo'],
+        },
+        {
+          name: 'Hồ sơ thiếu thông tin',
+          data: missingRows,
+          emptyHeaders: ['STT', 'Họ và tên', 'Mã NV', 'KTX', 'Dãy', 'Phòng', 'SĐT', 'Thông tin còn thiếu'],
+        },
+      ],
+      `CanhBao_VanHanh_${scopeLabel}_${today}.xlsx`
+    );
+    if (ok) {
+      toast.success('Đã xuất file Excel danh sách cảnh báo vận hành.');
+    } else {
+      toast.error('Không thể xuất file Excel.');
+    }
+  };
 
   const hasAnyAlert =
     metrics.unregisteredTamTru > 0 ||
@@ -244,6 +324,16 @@ export default function DataQualityAlert({
                 </span>
               </Link>
             )}
+
+            <button
+              type="button"
+              onClick={handleExportAlerts}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-okbg border border-bdr2 text-ok text-xs font-bold hover:opacity-90 transition-opacity"
+              title="Xuất file Excel danh sách tạm trú quá hạn, phòng lệch giới tính và hồ sơ còn thiếu"
+            >
+              <Download size={13} />
+              <span>Xuất DS cảnh báo</span>
+            </button>
           </div>
         </div>
       </div>

@@ -5,15 +5,17 @@ import {
   BedDouble, RefreshCw, Search, X, User, UserCheck, UserX,
   ArrowRightLeft, Loader2, Building2, Phone, Briefcase, VenusAndMars,
   AlertCircle, LayoutGrid, Table2, BarChart3, Wrench, DoorOpen, Calendar,
-  ExternalLink, UserPlus, CheckCircle2, Printer, Lock,
+  ExternalLink, UserPlus, CheckCircle2, Printer, Lock, Download,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
+import { useAudit } from '@/context/AuditContext';
 import { compareKtxNames, DEFAULT_ROOM_CAPACITY } from '@/data/workers';
 import { fetchRoomCapacities, getRoomCapacity, RoomCapacityMap, formatRoomDisplay } from '@/lib/facilityCapacity';
 import { reconcileBedsWithWorkers, releaseBedsForWorkers } from '@/lib/bedSync';
+import { exportToExcel } from '@/lib/exportExcel';
 import BedQrPrintModal from './BedQrPrintModal';
 import BedTransferModal from './BedTransferModal';
 
@@ -94,6 +96,7 @@ function shortName(full?: string | null): string {
 export default function BedManagementClient() {
   const router = useRouter();
   const { isAdmin, canWriteBlock, currentUser } = useAuth();
+  const { addLog } = useAudit();
   const [beds, setBeds] = useState<BedRow[]>([]);
   const [workers, setWorkers] = useState<WorkerLite[]>([]);
   const [capacities, setCapacities] = useState<RoomCapacityMap>({});
@@ -106,6 +109,7 @@ export default function BedManagementClient() {
   const [filterKtx, setFilterKtx] = useState('');
   const [filterDay, setFilterDay] = useState('');
   const [filterRoom, setFilterRoom] = useState('');
+  const [filterStatus, setFilterStatus] = useState<'all' | BedStatus>('all');
 
   const [assignTarget, setAssignTarget] = useState<BedRow | null>(null);
   const [candidateSearch, setCandidateSearch] = useState('');
@@ -242,9 +246,6 @@ export default function BedManagementClient() {
   );
 
   const bedsFiltered = useMemo(() => {
-    const ktx = (filterKtx || '').trim();
-    const day = (filterDay || '').trim();
-    const room = (filterRoom || '').trim();
     const q = searchQuery.trim().toLowerCase();
     return (beds || []).filter(b => {
       // Only real KTX/Dãy/Phòng/Giường rows — no placeholder placeholders ever.
@@ -256,6 +257,7 @@ export default function BedManagementClient() {
       if (filterKtx && ktx !== filterKtx.trim()) return false;
       if (filterDay && day !== filterDay.trim()) return false;
       if (filterRoom && room !== filterRoom.trim()) return false;
+      if (filterStatus !== 'all' && b?.status !== filterStatus) return false;
       if (!q) return true;
       const w = b?.worker_id ? workerById.get(b.worker_id) : null;
       const haystack = [
@@ -264,7 +266,7 @@ export default function BedManagementClient() {
       ].map(v => String(v ?? '').toLowerCase());
       return haystack.some(v => v.includes(q)) || `g${bedNo.toLowerCase().replace(/[^0-9a-z]/g, '')}`.includes(q);
     });
-  }, [beds, filterKtx, filterDay, filterRoom, searchQuery, workerById]);
+  }, [beds, filterKtx, filterDay, filterRoom, filterStatus, searchQuery, workerById]);
 
   const ktxList = useMemo(
     () =>
@@ -457,6 +459,12 @@ export default function BedManagementClient() {
         } catch (err) {
           console.warn('[bed-management] direct bed occupy warning:', err);
         }
+        const actor = currentUser?.name || currentUser?.email || 'Admin';
+        addLog(
+          actor,
+          'Chuyển phòng',
+          `Gán giường: ${worker.hoVaTen} (${worker.maNV || '—'}) → ${assignTarget.ktx} · ${assignTarget.day} · P${assignTarget.phong_so} · G${assignTarget.giuong}`
+        );
         toast.success(`Đã gán ${worker.hoVaTen} vào G${assignTarget.giuong} (Phòng ${assignTarget.phong_so})`);
         setAssignTarget(null);
         setCandidateSearch('');
@@ -464,7 +472,7 @@ export default function BedManagementClient() {
         loadWorkers();
       }
     },
-    [assignTarget, canWriteBed, applyWorkerBed, supabase, loadBeds, loadWorkers]
+    [assignTarget, canWriteBed, applyWorkerBed, supabase, currentUser, addLog, loadBeds, loadWorkers]
   );
 
   const handleSyncBeds = useCallback(async () => {
@@ -600,6 +608,12 @@ export default function BedManagementClient() {
         console.warn('[bed-management] release bed after delete failed:', bedErr);
       }
 
+      const actor = currentUser?.name || currentUser?.email || 'Admin';
+      addLog(
+        actor,
+        'Xóa',
+        `Trả phòng & xóa công nhân khỏi giường: ${bed.ho_va_ten || workerRef?.hoVaTen || ''} (${bed.ma_nv || workerRef?.maNV || '—'}) tại ${bed.ktx} · ${bed.day} · P${bed.phong_so} · G${bed.giuong}`
+      );
       toast.success('Đã làm thủ tục trả phòng thành công!');
       setDrawerBed(null);
       loadBeds(true);
@@ -609,7 +623,7 @@ export default function BedManagementClient() {
     } finally {
       setBusy(false);
     }
-  }, [drawerBed, canWriteBed, workerById, supabase, loadBeds]);
+  }, [drawerBed, canWriteBed, workerById, supabase, currentUser, addLog, loadBeds]);
 
   const setBedStatus = useCallback(
     async (bed: BedRow, status: BedStatus) => {
@@ -625,6 +639,12 @@ export default function BedManagementClient() {
           .update({ status })
           .eq('id', bed.id);
         if (error) throw new Error(error.message);
+        const actor = currentUser?.name || currentUser?.email || 'Admin';
+        addLog(
+          actor,
+          'Sửa',
+          `Cập nhật trạng thái giường ${bed.ktx} · ${bed.day} · P${bed.phong_so} · G${bed.giuong} → ${status === 'maintenance' ? 'Bảo trì' : 'Sẵn sàng (Trống)'}`
+        );
         drawerBed && setDrawerBed(status === 'empty' ? null : { ...drawerBed, status });
         loadBeds(true);
       } catch (err: any) {
@@ -634,8 +654,39 @@ export default function BedManagementClient() {
         setBusy(false);
       }
     },
-    [supabase, canWriteBed, drawerBed, loadBeds]
+    [supabase, canWriteBed, currentUser, addLog, drawerBed, loadBeds]
   );
+
+  const handleExportBeds = useCallback(() => {
+    if (bedsFiltered.length === 0) {
+      toast.warning('Không có dữ liệu giường nào khớp bộ lọc để xuất Excel.');
+      return;
+    }
+    const rows = bedsFiltered.map((b, idx) => {
+      const w = b?.worker_id ? workerById.get(b.worker_id) : null;
+      return {
+        'STT': idx + 1,
+        'KTX': b.ktx || '—',
+        'Dãy': b.day || '—',
+        'Phòng': b.phong_so ? `Phòng ${b.phong_so}` : '—',
+        'Giường': b.giuong ? `G${b.giuong}` : '—',
+        'Trạng thái': b.status === 'occupied' ? 'Đã ở' : b.status === 'maintenance' ? 'Đang bảo trì' : 'Còn trống',
+        'Họ và tên': b.ho_va_ten || w?.hoVaTen || '',
+        'Mã NV': b.ma_nv || w?.maNV || '',
+        'Đơn vị': w?.donVi || '',
+        'SĐT': w?.soDienThoai || '',
+        'Ngày vào KTX': w?.ngayVaoKTX || '',
+      };
+    });
+    const today = new Date().toISOString().split('T')[0];
+    const scope = filterKtx ? filterKtx.replace(/\s+/g, '_') : 'TatCa';
+    const ok = exportToExcel(rows, `DanhSach_Giuong_${scope}_${today}.xlsx`, 'Danh sách giường');
+    if (ok) {
+      toast.success(`Đã xuất ${rows.length.toLocaleString('vi-VN')} giường ra file Excel.`);
+    } else {
+      toast.error('Không thể xuất file Excel.');
+    }
+  }, [bedsFiltered, workerById, filterKtx]);
 
   const candidates = useMemo(() => {
     const q = candidateSearch.trim().toLowerCase();
@@ -758,6 +809,14 @@ export default function BedManagementClient() {
             </button>
           )}
           <button
+            onClick={handleExportBeds}
+            disabled={loading || bedsFiltered.length === 0}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-ok2 hover:opacity-90 text-white text-sm font-bold transition-colors disabled:opacity-50"
+            title="Xuất danh sách giường đang lọc ra Excel"
+          >
+            <Download size={14} /> Xuất Excel
+          </button>
+          <button
             onClick={() => setShowQrPrint(true)}
             className="flex items-center gap-2 px-3 py-2 rounded-lg border border-bdr3 bg-transparent text-tx hover:bg-act text-sm font-bold transition-colors"
             title="In tem QR cho giường ở phạm vi đang chọn"
@@ -833,6 +892,19 @@ export default function BedManagementClient() {
               </select>
             </div>
           )}
+          <div className="flex flex-col gap-1">
+            <label className="text-[11px] font-bold text-mu uppercase tracking-wider">Trạng thái</label>
+            <select
+              value={filterStatus}
+              onChange={e => setFilterStatus(e.target.value as 'all' | BedStatus)}
+              className="bg-surf border border-bdr text-tx rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 min-w-[130px] cursor-pointer"
+            >
+              <option value="all">Tất cả trạng thái</option>
+              <option value="occupied">Đã ở</option>
+              <option value="empty">Còn trống</option>
+              <option value="maintenance">Đang bảo trì</option>
+            </select>
+          </div>
           <div className="flex-1 min-w-[220px]">
             <label className="text-[11px] font-bold text-mu uppercase tracking-wider">Tìm kiếm nhanh</label>
             <div className="relative mt-1">
