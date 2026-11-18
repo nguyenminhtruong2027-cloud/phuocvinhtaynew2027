@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth, UserRole } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
-import { createClient, normalizeSupabaseUrl } from '@/lib/supabase/client';
+import { createClient, getSupabaseConfig } from '@/lib/supabase/client';
 import { UserPlus, Pencil, Trash2, Shield, ShieldCheck, Crown, Lock, RefreshCw, AlertCircle, CheckCircle, Building2, Search, Database, Check, Copy } from 'lucide-react';
 import { useKtxStructure, KtxBlockGroup } from '@/lib/ktxStructure';
 
@@ -402,13 +402,21 @@ export default function UserManagementClient() {
         let edgeError: string | null = null;
 
         try {
-          const { data: { session } } = await supabase.auth.getSession();
+          let { data: { session } } = await supabase.auth.getSession();
           if (session && session.access_token !== 'mock-access-token-ktx') {
-            const supabaseUrl = normalizeSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
+            try {
+              const { data: refreshed } = await supabase.auth.refreshSession();
+              if (refreshed?.session?.access_token) {
+                session = refreshed.session;
+              }
+            } catch {}
+
+            const { url: supabaseUrl, key: supabaseKey } = getSupabaseConfig();
             const response = await fetch(`${supabaseUrl}/functions/v1/create-user`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
+                'apikey': supabaseKey,
                 'Authorization': `Bearer ${session.access_token}`,
               },
               body: JSON.stringify({
@@ -419,11 +427,13 @@ export default function UserManagementClient() {
                 assigned_blocks: effectiveBlocks,
               }),
             });
-            const result = await response.json();
+            const result = await response.json().catch(() => ({}));
             if (response.ok && !result.error) {
               createdUserId = result.user?.id || null;
             } else if (result?.error) {
               edgeError = result.error;
+            } else if (!response.ok) {
+              edgeError = `Lỗi Edge Function (${response.status}).`;
             }
           }
         } catch {
@@ -491,13 +501,21 @@ export default function UserManagementClient() {
       let edgeError: string | null = null;
       let deletedInEdge = false;
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        let { data: { session } } = await supabase.auth.getSession();
         if (session && session.access_token !== 'mock-access-token-ktx') {
-          const supabaseUrl = normalizeSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
+          try {
+            const { data: refreshed } = await supabase.auth.refreshSession();
+            if (refreshed?.session?.access_token) {
+              session = refreshed.session;
+            }
+          } catch {}
+
+          const { url: supabaseUrl, key: supabaseKey } = getSupabaseConfig();
           const response = await fetch(`${supabaseUrl}/functions/v1/delete-user`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
+              'apikey': supabaseKey,
               'Authorization': `Bearer ${session.access_token}`,
             },
             body: JSON.stringify({ user_id: deleteTarget.id }),

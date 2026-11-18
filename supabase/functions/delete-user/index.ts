@@ -26,24 +26,50 @@ Deno?.serve(async (req) => {
       });
     }
 
-    const supabaseAdmin = createClient(
-      Deno?.env?.get('SUPABASE_URL') ?? '',
-      Deno?.env?.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-      { auth: { autoRefreshToken: false, persistSession: false } }
-    );
-
-    const supabaseClient = createClient(
-      Deno?.env?.get('SUPABASE_URL') ?? '',
-      Deno?.env?.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
-    );
-
-    const { data: { user: callerUser }, error: callerError } = await supabaseClient?.auth?.getUser();
-    if (callerError || !callerUser) {
-      return new Response(JSON.stringify({ error: 'Không thể xác thực người dùng.' }), {
+    const jwt = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (!jwt) {
+      return new Response(JSON.stringify({ error: 'Token xác thực không hợp lệ.' }), {
         status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+
+    const supabaseUrl = Deno?.env?.get('SUPABASE_URL') ?? '';
+    const serviceRoleKey = Deno?.env?.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const anonKey = Deno?.env?.get('SUPABASE_ANON_KEY') ?? '';
+
+    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    let callerUser = null;
+    let callerError: { message?: string } | null = null;
+
+    if (serviceRoleKey) {
+      const res = await supabaseAdmin.auth.getUser(jwt);
+      callerUser = res?.data?.user ?? null;
+      callerError = res?.error ?? null;
+    }
+
+    if (!callerUser && anonKey) {
+      const supabaseClient = createClient(supabaseUrl, anonKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      const res = await supabaseClient.auth.getUser(jwt);
+      callerUser = res?.data?.user ?? null;
+      callerError = res?.error ?? callerError;
+    }
+
+    if (!callerUser) {
+      return new Response(
+        JSON.stringify({
+          error: `Không thể xác thực người dùng${callerError?.message ? ` (${callerError.message})` : '.'}`,
+        }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
     }
 
     const { data: callerProfile } = await supabaseAdmin
