@@ -7,8 +7,9 @@ import { toast } from 'sonner';
 import {
   Search, Edit2, Check, X, Plus, Loader2, BedDouble, Wind, Package, Fan,
   Zap, Tv, Lightbulb, UtensilsCrossed, ChevronDown, ChevronUp, Upload,
-  AlertCircle, CheckCircle2, Download, Trash2, Filter, Snowflake, AlertTriangle, CheckSquare, Square, Lock,
+  AlertCircle, CheckCircle2, Download, Trash2, Filter, Snowflake, AlertTriangle, CheckSquare, Square, Lock, Building2,
 } from 'lucide-react';
+import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import * as XLSX from 'xlsx';
 import { exportToExcel } from '@/lib/exportExcel';
 import {
@@ -1612,10 +1613,13 @@ export default function FacilitiesClient() {
       )}
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-foreground">Quản lý Cơ sở vật chất</h1>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Theo dõi và cập nhật trang thiết bị từng phòng/khu vực</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 pb-3 border-b border-bdr">
+        <div className="flex items-center gap-3">
+          <CraftIconBadge icon={Building2} badgeIcon={BedDouble} tone="blue" size="md" />
+          <div>
+            <h1 className="text-lg sm:text-xl font-extrabold text-tx tracking-tight">Quản lý Cơ sở vật chất</h1>
+            <p className="text-xs sm:text-sm text-mu mt-0.5">Theo dõi và cập nhật trang thiết bị từng phòng/khu vực</p>
+          </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
           <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImportExcel} />
@@ -1623,18 +1627,18 @@ export default function FacilitiesClient() {
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={importing}
-              className="flex items-center justify-center gap-2 px-3 py-2 border border-bdr3 bg-transparent text-tx rounded-lg text-xs sm:text-sm font-medium hover:bg-act disabled:opacity-60 transition-colors flex-1 sm:flex-initial"
+              className="flex items-center justify-center gap-2 px-3 py-2 border border-bdr2 bg-surf text-tx rounded-xl text-xs sm:text-sm font-semibold hover:bg-act disabled:opacity-60 transition-colors flex-1 sm:flex-initial shadow-sm"
             >
-              {importing ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
+              {importing ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} className="text-ok" />}
               {importing ? 'Đang import...' : 'Import Excel'}
             </button>
           )}
           <button
             onClick={handleExportExcel}
             disabled={loading || sortedRows.length === 0}
-            className="flex items-center justify-center gap-2 px-3 py-2 border border-bdr3 bg-transparent text-tx rounded-lg text-xs sm:text-sm font-medium hover:bg-act disabled:opacity-60 transition-colors flex-1 sm:flex-initial"
+            className="flex items-center justify-center gap-2 px-3 py-2 border border-bdr2 bg-surf text-tx rounded-xl text-xs sm:text-sm font-semibold hover:bg-act disabled:opacity-60 transition-colors flex-1 sm:flex-initial shadow-sm"
           >
-            <Download size={15} />
+            <Download size={15} className="text-lnk" />
             Xuất Excel
           </button>
           {canDeleteAll && (
@@ -1642,7 +1646,7 @@ export default function FacilitiesClient() {
               onClick={handleRequestDeleteAll}
               disabled={loading || sortedRows.length === 0 || deleting}
               title={hasActiveFilters ? "Xóa tất cả các phòng đang hiển thị theo bộ lọc" : `Xóa tất cả ${sortedRows.length} phòng trong danh mục`}
-              className="flex items-center justify-center gap-1.5 px-3 py-2 border border-rose-500/40 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 rounded-lg text-xs sm:text-sm font-semibold transition-colors disabled:opacity-50 flex-1 sm:flex-initial"
+              className="flex items-center justify-center gap-1.5 px-3 py-2 border border-dgr/40 tint-dgr text-dgr hover:opacity-90 rounded-xl text-xs sm:text-sm font-semibold transition-colors disabled:opacity-50 flex-1 sm:flex-initial"
             >
               <Trash2 size={15} />
               <span>Xóa tất cả</span>
@@ -1651,10 +1655,10 @@ export default function FacilitiesClient() {
           {(isAdmin || (currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && (
             <button
               onClick={() => { setAddModalInitialKtx(null); setShowAddModal(true); }}
-              className="flex items-center justify-center gap-2 px-3 py-2 bg-primary text-primary-foreground rounded-lg text-xs sm:text-sm font-medium hover:opacity-90 transition-opacity flex-1 sm:flex-initial"
+              className="flex items-center justify-center gap-2 px-4 py-2 btn-glow-primary rounded-xl text-xs sm:text-sm font-semibold flex-1 sm:flex-initial cursor-pointer"
             >
               <Plus size={15} />
-              Thêm phòng mới
+              <span>Thêm phòng mới</span>
             </button>
           )}
         </div>

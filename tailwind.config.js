@@ -67,6 +67,7 @@ module.exports = {
       },
       fontFamily: {
         sans: ['var(--font-sans)', 'sans-serif'],
+        mono: ['var(--font-mono)', 'ui-monospace', 'monospace'],
       },
       boxShadow: {
         card: '0 1px 4px var(--sh), 0 0 0 1px var(--bdr)',

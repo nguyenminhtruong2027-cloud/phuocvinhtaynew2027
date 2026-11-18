@@ -18,6 +18,8 @@ import { reconcileBedsWithWorkers, releaseBedsForWorkers } from '@/lib/bedSync';
 import { exportToExcel } from '@/lib/exportExcel';
 import BedQrPrintModal from './BedQrPrintModal';
 import BedTransferModal from './BedTransferModal';
+import { CraftIconBadge } from '@/components/ui/CraftIcon';
+import { SlidingTabs } from '@/components/ui/MotionPrimitives';
 
 type BedStatus = 'empty' | 'occupied' | 'maintenance';
 type ViewMode = 'grid' | 'table' | 'analytics';
@@ -764,37 +766,33 @@ export default function BedManagementClient() {
   );
 
   return (
-    <div className="p-4 md:p-6 space-y-5 bg-page min-h-screen">
+    <div className="px-3 sm:px-6 lg:px-8 xl:px-10 py-4 sm:py-5 max-w-screen-2xl mx-auto space-y-5 bg-transparent min-h-screen">
       {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
-            <BedDouble size={20} className="text-pri2" />
-            Sơ Đồ Mặt Bằng — Quản Lý Giường
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Interactive Floor Plan đồng bộ Realtime từ <code className="text-xs">beds</code> · <code className="text-xs">workers</code> · <code className="text-xs">facilities</code>
-          </p>
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 pb-3.5 border-b border-bdr">
+        <div className="flex items-center gap-3">
+          <CraftIconBadge icon={BedDouble} badgeIcon={LayoutGrid} tone="blue" size="md" />
+          <div>
+            <h1 className="text-lg sm:text-xl font-extrabold text-tx tracking-tight">
+              Sơ Đồ Mặt Bằng — Quản Lý Giường
+            </h1>
+            <p className="text-xs text-mu mt-0.5">
+              Đồng bộ thời gian thực trạng thái giường, công nhân và cơ sở vật chất
+            </p>
+          </div>
         </div>
         {/* View switcher */}
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex gap-1 bg-muted rounded-xl p-1">
-            {([
-              { key: 'grid', label: 'Sơ Đồ Ma Trận', icon: LayoutGrid },
-              { key: 'table', label: 'Danh Sách', icon: Table2 },
-              { key: 'analytics', label: 'Lắp Đầy', icon: BarChart3 },
-            ] as { key: ViewMode; label: string; icon: any }[]).map(v => (
-              <button
-                key={v.key}
-                onClick={() => setView(v.key)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                  view === v.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <v.icon size={13} /> {v.label}
-              </button>
-            ))}
-          </div>
+          <SlidingTabs
+            layoutId="bed-management-view"
+            compact
+            value={view}
+            onChange={setView}
+            tabs={[
+              { id: 'grid', label: 'Sơ Đồ Ma Trận', icon: LayoutGrid },
+              { id: 'table', label: 'Danh Sách', icon: Table2 },
+              { id: 'analytics', label: 'Lấp Đầy', icon: BarChart3 },
+            ]}
+          />
           {isAdmin && (
             <button
               onClick={handleSyncBeds}

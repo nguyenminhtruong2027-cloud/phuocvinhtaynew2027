@@ -7,11 +7,14 @@ import { getUniqueKTX, getUniqueBuildings, getUniqueRooms, countUniqueBuildings,
 import { buildRoomCapacityMapFromFacilities, fetchFacilitiesList, FacilityItem, getRoomCapacity, RoomCapacityMap, normalizeRoomLabel, formatRoomDisplay } from '@/lib/facilityCapacity';
 import KtxOccupancyBreakdown from './components/KtxOccupancyBreakdown';
 import {
-  Users, LayoutGrid, FileSpreadsheet, Wifi,
+  Users, LayoutGrid, FileSpreadsheet, Radio,
   ChevronDown, Search, X, Download, UserPlus, AlertTriangle,
   TrendingUp, TrendingDown, XCircle, GitBranch, HardHat,
-  VenusAndMars, Sparkles, Building, Layers, UserCheck, CheckCircle, ArrowRight
+  VenusAndMars, Sparkles, Building2, Layers, UserCheck, CheckCircle, ArrowRight, Activity
 } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { CraftIconBadge, type CraftTone } from '@/components/ui/CraftIcon';
+import { AnimatedNumber, SlidingTabs, StaggerGrid, StaggerItem } from '@/components/ui/MotionPrimitives';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabase/client';
 import WorkerFormModal from '@/app/worker-management/components/WorkerFormModal';
@@ -75,7 +78,7 @@ function getRoomHeatColor(count: number, capacity: number): { bg: string; border
   };
 }
 
-// ─── Circular Progress Ring Component ─────────────────────────────────────
+// ─── Circular Progress Ring Component (Motion Animated) ───────────────────
 function ProgressRing({
   radius = 36,
   stroke = 6,
@@ -98,7 +101,7 @@ function ProgressRing({
 
   return (
     <div className="relative inline-flex items-center justify-center flex-shrink-0">
-      <svg height={radius * 2} width={radius * 2} className="transform -rotate-90">
+      <svg height={radius * 2} width={radius * 2} className="transform -rotate-90 drop-shadow-sm">
         <circle
           stroke={trackColor}
           fill="transparent"
@@ -107,12 +110,14 @@ function ProgressRing({
           cx={radius}
           cy={radius}
         />
-        <circle
+        <motion.circle
           stroke={color}
           fill="transparent"
           strokeWidth={stroke}
           strokeDasharray={`${circumference} ${circumference}`}
-          style={{ strokeDashoffset, transition: 'stroke-dashoffset 0.8s ease-in-out' }}
+          initial={{ strokeDashoffset: circumference }}
+          animate={{ strokeDashoffset }}
+          transition={{ duration: 0.75, ease: [0.22, 1, 0.36, 1] }}
           strokeLinecap="round"
           r={normalizedRadius}
           cx={radius}
@@ -133,10 +138,9 @@ function ExecutiveKPICard({
   label,
   value,
   sub,
-  icon: Icon,
-  iconBg,
-  iconColor,
-  iconBorder,
+  icon,
+  badgeIcon,
+  tone = 'blue',
   alert,
   onClick,
   badge,
@@ -144,12 +148,11 @@ function ExecutiveKPICard({
   rightVisual,
 }: {
   label: string;
-  value: string | number;
+  value: React.ReactNode;
   sub?: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
-  iconBg: string;
-  iconColor: string;
-  iconBorder: string;
+  icon: React.ComponentType<{ size?: number; className?: string; strokeWidth?: number }>;
+  badgeIcon?: React.ComponentType<{ size?: number; className?: string; strokeWidth?: number }>;
+  tone?: CraftTone;
   alert?: boolean;
   onClick?: () => void;
   badge?: string;
@@ -157,24 +160,34 @@ function ExecutiveKPICard({
   rightVisual?: React.ReactNode;
 }) {
   return (
-    <div
-      className={`rounded-2xl border p-4 sm:p-5 flex flex-col justify-between shadow-xl transition-all duration-300 relative overflow-hidden group w-full ${
+    <motion.div
+      whileHover={onClick ? { y: -3 } : { y: -2 }}
+      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+      className={`rounded-2xl p-4 sm:p-5 flex flex-col justify-between relative overflow-hidden group w-full ${
         alert
-          ? 'tint-dgr border-dgr hover:border-dgr'
-          : 'bg-surf border-bdr hover:border-pri2/40 hover:shadow-blue-500/5'
-      } ${onClick ? 'cursor-pointer hover:-translate-y-0.5' : ''}`}
+          ? 'tint-dgr border border-dgr'
+          : 'surface-elevated'
+      } ${onClick ? 'cursor-pointer' : ''}`}
       onClick={onClick}
     >
-      <div>
+      {/* Subtle corner ambient accent */}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-12 -right-12 w-28 h-28 rounded-full opacity-25 blur-2xl transition-opacity duration-300 group-hover:opacity-45"
+        style={{
+          background: tone === 'teal' ? 'var(--ok2)' : tone === 'amber' ? 'var(--wn)' : tone === 'rose' ? 'var(--dgr)' : 'var(--pri2)',
+        }}
+      />
+      <div className="relative z-10">
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1 min-w-0 flex-1">
-            <span className="text-xs font-bold uppercase tracking-wider text-mu group-hover:text-mu transition-colors block truncate">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-mu block truncate">
               {label}
             </span>
             <div className="flex items-baseline gap-2 flex-wrap">
-              <p className={`text-2xl sm:text-3xl lg:text-4xl font-extrabold font-tabular tracking-tight whitespace-nowrap ${alert ? 'text-dgr' : 'text-tx'}`}>
+              <div className={`text-2xl sm:text-3xl lg:text-[34px] font-extrabold font-tabular tracking-tight whitespace-nowrap leading-tight ${alert ? 'text-dgr' : 'text-tx'}`}>
                 {value}
-              </p>
+              </div>
               {badge && (
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold tint-dgr text-dgr border border-dgr whitespace-nowrap">
                   {badge}
@@ -187,51 +200,51 @@ function ExecutiveKPICard({
           {rightVisual ? (
             rightVisual
           ) : (
-            <div className={`w-12 h-12 sm:w-13 sm:h-13 rounded-2xl flex items-center justify-center flex-shrink-0 border transition-colors duration-100 ${iconBg} ${iconColor} ${iconBorder}`}>
-              <Icon size={24} className="sm:w-[26px] sm:h-[26px]" />
-            </div>
+            <CraftIconBadge
+              icon={icon}
+              badgeIcon={badgeIcon}
+              tone={tone}
+              size="lg"
+            />
           )}
         </div>
       </div>
 
-      {bottomInfo && <div className="mt-3.5 pt-3 border-t border-bdr">{bottomInfo}</div>}
-    </div>
+      {bottomInfo && <div className="relative z-10 mt-3.5 pt-3 border-t border-bdr">{bottomInfo}</div>}
+    </motion.div>
   );
 }
 
 // ─── Executive Alert Card ─────────────────────────────────────────────────
 function ExecutiveAlertCard({
-  icon: Icon,
+  icon,
+  tone = 'slate',
   label,
   value,
-  colorBg,
-  colorText,
-  colorBorder,
   onClick,
 }: {
-  icon: React.ComponentType<{ size?: number; className?: string }>;
+  icon: React.ComponentType<{ size?: number; className?: string; strokeWidth?: number }>;
+  tone?: CraftTone;
   label: string;
-  value: string | number;
-  colorBg: string;
-  colorText: string;
-  colorBorder: string;
+  value: React.ReactNode;
   onClick?: () => void;
 }) {
   return (
-    <div
-      className={`flex items-center gap-2.5 sm:gap-3.5 rounded-xl sm:rounded-2xl border px-3 sm:px-4 py-2.5 sm:py-3.5 bg-surf border-bdr shadow-lg transition-all duration-150 group w-full min-w-0 ${
-        onClick ? 'cursor-pointer hover:border-pri2/40 hover:bg-act' : 'hover:border-bdr2'
+    <motion.div
+      whileHover={onClick ? { y: -2 } : undefined}
+      whileTap={onClick ? { scale: 0.98 } : undefined}
+      transition={{ duration: 0.15 }}
+      className={`flex items-center gap-2.5 sm:gap-3 rounded-xl sm:rounded-2xl px-3 sm:px-3.5 py-2.5 sm:py-3 surface-elevated group w-full min-w-0 ${
+        onClick ? 'cursor-pointer' : ''
       }`}
       onClick={onClick}
     >
-      <div className={`w-9 h-9 sm:w-11 sm:h-11 rounded-lg sm:rounded-xl flex items-center justify-center flex-shrink-0 border transition-colors duration-100 ${colorBg} ${colorText} ${colorBorder}`}>
-        <Icon size={18} className="sm:w-5 sm:h-5" />
-      </div>
+      <CraftIconBadge icon={icon} tone={tone} size="sm" interactive={false} />
       <div className="min-w-0 flex-1">
-        <p className="text-[11px] sm:text-xs text-mu font-medium truncate whitespace-nowrap group-hover:text-mu transition-colors">{label}</p>
-        <p className="text-sm sm:text-lg font-bold text-tx font-tabular tracking-tight whitespace-nowrap truncate">{value}</p>
+        <p className="text-[11px] sm:text-xs text-mu font-medium truncate whitespace-nowrap">{label}</p>
+        <p className="text-sm sm:text-base font-extrabold text-tx font-tabular tracking-tight whitespace-nowrap truncate">{value}</p>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -322,7 +335,7 @@ function GlobalSearchBar({ onSelectWorker }: { onSelectWorker: (id: string) => v
   );
 }
 
-// ─── Room Tooltip (Dark Theme) ─────────────────────────────────────────────
+// ─── Room Tooltip (Theme-aware Glass Popover) ─────────────────────────────
 function RoomTooltip({
   workers,
   room,
@@ -335,14 +348,20 @@ function RoomTooltip({
   onClose: () => void;
 }) {
   return (
-    <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 bg-act border border-bdr text-tx rounded-xl shadow-2xl p-3 text-xs">
+    <motion.div
+      initial={{ opacity: 0, y: 6, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 4, scale: 0.97 }}
+      transition={{ duration: 0.14 }}
+      className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 bg-surf border border-bdr2 text-tx rounded-xl shadow-modal p-3 text-xs backdrop-blur-md"
+    >
       <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-bdr">
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="font-bold text-tx">Phòng {room}</span>
+          <span className="font-bold font-mono text-tx">Phòng {room}</span>
           {genderInfo && (
             <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold border inline-flex items-center gap-0.5 ${
               genderInfo.gender === 'female'
-                ? 'bg-pink-500/25 text-pink-300 border-pink-500/40'
+                ? 'tint-pink text-pink-tone border-pink-tint'
                 : genderInfo.gender === 'male'
                 ? 'bg-bdg text-lnk border-bdr2'
                 : 'bg-act text-mu border-bdr'
@@ -366,24 +385,24 @@ function RoomTooltip({
             return (
               <li key={i} className="flex items-center justify-between gap-1.5">
                 <div className="flex items-center gap-1.5 min-w-0">
-                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isF ? 'bg-pink-400' : 'bg-pri2'}`} />
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isF ? 'bg-pink-500' : 'bg-pri2'}`} />
                   <span className="truncate text-tx">{w.hoVaTen}</span>
-                  <span className={`text-[9px] px-1 rounded font-bold ${isF ? 'text-pink-300 bg-pink-500/15' : 'text-lnk bg-bdg'}`}>
+                  <span className={`text-[9px] px-1 rounded font-bold ${isF ? 'tint-pink text-pink-tone' : 'text-lnk bg-bdg'}`}>
                     {isF ? 'Nữ' : 'Nam'}
                   </span>
                 </div>
-                {w.maNV && <span className="text-[10px] text-mu flex-shrink-0 font-tabular">#{w.maNV}</span>}
+                {w.maNV && <span className="text-[10px] text-mu flex-shrink-0 font-mono">#{w.maNV}</span>}
               </li>
             );
           })}
         </ul>
       )}
-      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-bdr" />
-    </div>
+      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-bdr2" />
+    </motion.div>
   );
 }
 
-// ─── Heatmap Room Cell (Ultra Compact 2-Row Design) ────────────────────────
+// ─── Heatmap Room Cell (Architectural Tactile Room Tile) ────────────────────
 function HeatmapRoomCell({
   room, count, capacity, ktx, building, workers, onClickRoom, unitName, genderInfo, onQuickAssignGender
 }: {
@@ -398,13 +417,12 @@ function HeatmapRoomCell({
   const [showTooltip, setShowTooltip] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const { bg, border, label, dot, textColor } = getRoomHeatColor(count, capacity);
+  const { bg, border, label, dot } = getRoomHeatColor(count, capacity);
 
   const isFemaleRoom = genderInfo.gender === 'female';
   const isMaleRoom = genderInfo.gender === 'male';
   const isMixedRoom = genderInfo.gender === 'mixed';
 
-  // Close quick menu on click outside
   useEffect(() => {
     if (!showMenu) return;
     const handleClickOutside = (e: MouseEvent) => {
@@ -428,21 +446,34 @@ function HeatmapRoomCell({
   };
 
   const occupancyPercent = capacity > 0 ? Math.round((count / capacity) * 100) : 0;
+  const clampedPct = Math.min(occupancyPercent, 100);
+  const progressBarTone =
+    occupancyPercent > 100
+      ? 'bg-dgr'
+      : occupancyPercent >= 100
+      ? 'bg-wn'
+      : isFemaleRoom
+      ? 'bg-pink-500'
+      : 'bg-pri2';
   const roomLabel = formatRoomDisplay(room);
   const fullTooltip = `${roomLabel} · ${count}/${capacity} (${occupancyPercent}%) · ${label}${genderInfo.isCustom ? ` (Phòng ${genderInfo.gender === 'male' ? 'Nam' : genderInfo.gender === 'female' ? 'Nữ' : ''})` : ''}${unitName ? ` · ĐV: ${unitName}` : ''}`;
 
   return (
     <div className="relative min-w-0 w-full overflow-visible">
-      <div
-        className={`border rounded-lg p-1.5 cursor-pointer transition-all duration-150 hover:shadow-md hover:scale-[1.02] active:scale-95 flex flex-col justify-between gap-1 min-w-0 w-full overflow-hidden select-none ${bg} ${
+      <motion.div
+        whileHover={{ y: -2, scale: 1.02 }}
+        whileTap={{ scale: 0.97 }}
+        transition={{ duration: 0.14 }}
+        className={`relative border rounded-xl px-2 pt-1.5 pb-2 cursor-pointer flex flex-col justify-between gap-1 min-w-0 w-full overflow-hidden select-none shadow-sm hover:shadow-md ${bg} ${
           isFemaleRoom
-            ? 'border-pink-500/60 hover:border-pink-400 ring-1 ring-pink-500/35 bg-pink-950/25'
+            ? 'tint-pink border-pink-tint'
             : isMaleRoom
-            ? 'border-pri2/50 hover:border-blue-400 ring-1 ring-blue-500/25 bg-blue-950/25'
+            ? 'tint-info border-pri2/40'
             : isMixedRoom
-            ? 'border-wn hover:border-wn ring-1 ring-amber-500/20 bg-amber-950/20'
+            ? 'tint-wn border-wn'
             : border
         }`}
+        style={{ boxShadow: 'inset 0 1px 0 var(--specular)' }}
         onClick={() => onClickRoom(ktx, building, room)}
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
@@ -452,101 +483,116 @@ function HeatmapRoomCell({
         <div className="flex items-center justify-between gap-1 min-w-0">
           <div className="flex items-center gap-1 min-w-0 truncate">
             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
-            <span className="text-xs font-bold text-tx tracking-tight tabular-nums truncate">
+            <span className="text-xs font-bold font-mono text-tx tracking-tight truncate">
               {roomLabel}
             </span>
           </div>
 
-          {/* Biểu tượng giới tính CHỈ LÀ ICON/KÝ HIỆU (♂ / ♀ / ⚡ / •) */}
+          {/* Biểu tượng giới tính */}
           <div className="relative shrink-0">
             <button
               type="button"
               onClick={handleGenderTagClick}
               title={`Đổi công năng: ${isFemaleRoom ? 'Phòng Nữ' : isMaleRoom ? 'Phòng Nam' : isMixedRoom ? 'Hỗn hợp' : 'Tự động'}`}
-              className={`text-[10px] font-bold w-4 h-4 rounded transition-transform active:scale-90 inline-flex items-center justify-center shrink-0 leading-none ${
+              className={`text-[10px] font-bold w-4.5 h-4.5 px-1 rounded-md transition-transform active:scale-90 inline-flex items-center justify-center shrink-0 leading-none ${
                 isFemaleRoom
-                  ? 'bg-pink-500/25 text-pink-300 border border-pink-500/50 shadow-sm shadow-pink-500/20'
+                  ? 'tint-pink text-pink-tone border border-pink-tint'
                   : isMaleRoom
-                  ? 'bg-bdg text-lnk border border-pri2/40'
+                  ? 'bg-bdg text-lnk border border-pri2/35'
                   : isMixedRoom
                   ? 'tint-wn text-wn border border-wn'
-                  : 'bg-act text-mu border border-bdr hover:bg-act'
+                  : 'bg-surf text-mu border border-bdr hover:bg-act'
               }`}
             >
               {isFemaleRoom ? '♀' : isMaleRoom ? '♂' : isMixedRoom ? '⚡' : '•'}
             </button>
 
-            {/* Quick Admin Gender Popover */}
-            {showMenu && (
-              <div
-                ref={menuRef}
-                onClick={e => e.stopPropagation()}
-                className="absolute right-0 top-full mt-1 z-50 w-36 rounded-xl bg-act border border-bdr shadow-2xl p-1 space-y-1 backdrop-blur-md"
-              >
-                <div className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-mu border-b border-bdr pb-0.5 mb-0.5">
-                  Đổi công năng {roomLabel}
-                </div>
-                <button
-                  type="button"
-                  onClick={(e) => handleSelectGender(e, 'male')}
-                  className={`w-full text-left px-2 py-1 rounded-lg text-xs font-bold flex items-center justify-between transition-colors ${
-                    isMaleRoom ? 'bg-pri text-white shadow-sm' : 'text-lnk hover:bg-bdg'
-                  }`}
+            <AnimatePresence>
+              {showMenu && (
+                <motion.div
+                  ref={menuRef}
+                  initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                  transition={{ duration: 0.14 }}
+                  onClick={e => e.stopPropagation()}
+                  className="absolute right-0 top-full mt-1 z-50 w-36 rounded-xl bg-surf border border-bdr2 shadow-modal p-1 space-y-1 backdrop-blur-md"
                 >
-                  <span className="flex items-center gap-1">
-                    <span>♂</span>
-                    <span>Phòng Nam</span>
-                  </span>
-                  {isMaleRoom && <span className="text-[10px]">✓</span>}
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => handleSelectGender(e, 'female')}
-                  className={`w-full text-left px-2 py-1 rounded-lg text-xs font-bold flex items-center justify-between transition-colors ${
-                    isFemaleRoom ? 'bg-pink-600 text-white shadow-sm' : 'text-pink-300 hover:bg-pink-500/20'
-                  }`}
-                >
-                  <span className="flex items-center gap-1">
-                    <span>♀</span>
-                    <span>Phòng Nữ</span>
-                  </span>
-                  {isFemaleRoom && <span className="text-[10px]">✓</span>}
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => handleSelectGender(e, 'auto')}
-                  className="w-full text-left px-2 py-1 rounded-lg text-[11px] font-medium text-mu hover:text-tx hover:bg-act transition-colors flex items-center justify-between"
-                >
-                  <span className="flex items-center gap-1">
-                    <span>⚡</span>
-                    <span>Tự động</span>
-                  </span>
-                  {!genderInfo.isCustom && <span className="text-[10px]">✓</span>}
-                </button>
-              </div>
-            )}
+                  <div className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-mu border-b border-bdr pb-0.5 mb-0.5">
+                    Đổi công năng {roomLabel}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => handleSelectGender(e, 'male')}
+                    className={`w-full text-left px-2 py-1 rounded-lg text-xs font-bold flex items-center justify-between transition-colors ${
+                      isMaleRoom ? 'bg-pri text-white shadow-sm' : 'text-lnk hover:bg-bdg'
+                    }`}
+                  >
+                    <span className="flex items-center gap-1">
+                      <span>♂</span>
+                      <span>Phòng Nam</span>
+                    </span>
+                    {isMaleRoom && <span className="text-[10px]">✓</span>}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => handleSelectGender(e, 'female')}
+                    className={`w-full text-left px-2 py-1 rounded-lg text-xs font-bold flex items-center justify-between transition-colors ${
+                      isFemaleRoom ? 'bg-pink-600 text-white shadow-sm' : 'text-pink-tone hover:tint-pink'
+                    }`}
+                  >
+                    <span className="flex items-center gap-1">
+                      <span>♀</span>
+                      <span>Phòng Nữ</span>
+                    </span>
+                    {isFemaleRoom && <span className="text-[10px]">✓</span>}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => handleSelectGender(e, 'auto')}
+                    className="w-full text-left px-2 py-1 rounded-lg text-[11px] font-medium text-mu hover:text-tx hover:bg-act transition-colors flex items-center justify-between"
+                  >
+                    <span className="flex items-center gap-1">
+                      <span>⚡</span>
+                      <span>Tự động</span>
+                    </span>
+                    {!genderInfo.isCustom && <span className="text-[10px]">✓</span>}
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
 
-        {/* Dòng 2: Số lượng (20/20) bên trái, Tỷ lệ % (100%) bên phải */}
+        {/* Dòng 2: Số lượng + Tỷ lệ % */}
         <div className="flex items-center justify-between gap-1 min-w-0 font-tabular">
-          <span className="text-[11px] font-semibold text-tx tabular-nums truncate">
+          <span className="text-[11px] font-bold text-tx tabular-nums truncate">
             {count}/{capacity}
           </span>
-          <span className="text-[10px] text-mu opacity-80 shrink-0 font-medium">
+          <span className="text-[10px] text-mu shrink-0 font-semibold">
             {occupancyPercent}%
           </span>
         </div>
-      </div>
 
-      {showTooltip && !showMenu && (
-        <RoomTooltip
-          workers={workers}
-          room={room}
-          genderInfo={genderInfo}
-          onClose={() => setShowTooltip(false)}
-        />
-      )}
+        {/* Bottom micro capacity bar */}
+        <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-[3px] bg-bdr/70 overflow-hidden">
+          <span
+            className={`block h-full transition-all duration-300 ${progressBarTone}`}
+            style={{ width: `${clampedPct}%` }}
+          />
+        </span>
+      </motion.div>
+
+      <AnimatePresence>
+        {showTooltip && !showMenu && (
+          <RoomTooltip
+            workers={workers}
+            room={room}
+            genderInfo={genderInfo}
+            onClose={() => setShowTooltip(false)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -1037,26 +1083,22 @@ export default function OccupancyDashboardPage() {
 
   return (
     <AppLayout>
-      <div className="min-h-screen bg-page text-tx transition-colors duration-200">
+      <div className="min-h-screen bg-transparent text-tx transition-colors duration-200">
         <div className="px-2.5 sm:px-6 lg:px-8 xl:px-10 py-3 sm:py-5 max-w-screen-2xl mx-auto space-y-4 sm:space-y-5 w-full overflow-hidden">
 
           {/* ── 1. Compact Header & Global Search Bar ── */}
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 sm:gap-3 pb-3 border-b border-bdr w-full">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 sm:gap-3 pb-3.5 border-b border-bdr w-full">
             {/* Title Section */}
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 p-0.5 shadow-md shadow-blue-500/20 shrink-0">
-                <div className="w-full h-full bg-act rounded-[10px] flex items-center justify-center">
-                  <Building size={18} className="text-lnk" />
-                </div>
-              </div>
+            <div className="flex items-center gap-3 min-w-0">
+              <CraftIconBadge icon={Building2} badgeIcon={Sparkles} tone="blue" size="md" />
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-2.5 flex-wrap">
                   <h1 className="text-base sm:text-xl font-extrabold text-tx tracking-tight whitespace-nowrap">
                     KÝ TÚC XÁ PHƯỚC VĨNH TÂY
                   </h1>
-                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-okbg text-ok border border-ok-30 whitespace-nowrap">
-                    <span className="w-1.5 h-1.5 rounded-full bg-ok2 animate-pulse" />
-                    Thời Gian Thực
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-ok whitespace-nowrap">
+                    <Radio size={12} />
+                    <span>Thời gian thực</span>
                   </span>
                 </div>
               </div>
@@ -1081,7 +1123,7 @@ export default function OccupancyDashboardPage() {
                   <select
                     value={selectedKTX}
                     onChange={e => { setSelectedKTX(e.target.value); setSelectedBuilding(null); }}
-                    className="appearance-none bg-act border border-bdr rounded-xl pl-3.5 pr-8 py-2 text-xs font-bold text-tx shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 cursor-pointer min-w-[130px]"
+                    className="appearance-none bg-surf border border-bdr2 rounded-xl pl-3.5 pr-8 py-2 text-xs font-bold text-tx shadow-sm focus:outline-none focus:ring-2 focus:ring-pri2/50 cursor-pointer min-w-[130px]"
                   >
                     <option value="all">Tất cả KTX</option>
                     {allKTX.map(ktx => (
@@ -1094,122 +1136,131 @@ export default function OccupancyDashboardPage() {
             </div>
           </div>
 
-          {/* ── 2. Unified Action Buttons Bar (Gradient Blues) ── */}
+          {/* ── 2. Unified Action Buttons Bar ── */}
           <div className="flex flex-col sm:flex-row flex-wrap items-center gap-2.5 sm:gap-3 w-full">
-            <button
+            <motion.button
+              whileTap={{ scale: 0.98 }}
               onClick={() => setShowQuickAdd(true)}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-pri hover:opacity-90 text-white text-xs sm:text-sm font-semibold shadow-md transition-opacity duration-100 active:opacity-80"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl btn-glow-primary text-xs sm:text-sm font-semibold cursor-pointer"
             >
               <UserPlus size={16} />
               <span>Xếp phòng nhanh</span>
               {missingData > 0 && (
-                <span className="bg-white/20 text-white text-xs font-bold rounded-full px-2 py-0.5 leading-none">
+                <span className="bg-white/20 text-white text-xs font-bold rounded-full px-2 py-0.5 leading-none font-tabular">
                   {missingData}
                 </span>
               )}
-            </button>
+            </motion.button>
 
-            <button
+            <motion.button
+              whileTap={{ scale: 0.98 }}
               onClick={() => router.push('/worker-management')}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl border border-bdr3 bg-transparent text-tx hover:bg-act text-xs sm:text-sm font-semibold transition-colors duration-100"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-bdr2 bg-surf text-tx hover:bg-act hover:border-pri2/40 text-xs sm:text-sm font-semibold shadow-sm transition-colors duration-150 cursor-pointer"
             >
-              <FileSpreadsheet size={16} />
+              <FileSpreadsheet size={16} className="text-ok" />
               <span>Import Excel</span>
-            </button>
+            </motion.button>
 
-            <button
+            <motion.button
+              whileTap={{ scale: 0.98 }}
               onClick={handleExportReport}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl border border-bdr3 bg-transparent text-tx hover:bg-act text-xs sm:text-sm font-semibold transition-colors duration-100"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-bdr2 bg-surf text-tx hover:bg-act hover:border-pri2/40 text-xs sm:text-sm font-semibold shadow-sm transition-colors duration-150 cursor-pointer"
             >
-              <Download size={16} />
+              <Download size={16} className="text-lnk" />
               <span>Xuất Báo Cáo Ngày</span>
-            </button>
+            </motion.button>
 
             {loading && (
               <span className="text-xs text-lnk font-medium flex items-center gap-1.5 sm:ml-auto">
-                <span className="w-2 h-2 rounded-full bg-pri2 animate-ping" />
+                <Activity size={13} className="animate-spin text-pri2" />
                 Đang đồng bộ dữ liệu...
               </span>
             )}
           </div>
 
           {/* ── 3. Top 3 Unified Stats Cards (Balanced 3-Column Grid) ── */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
-            {/* Card 1: Tổng Công Nhân */}
-            <ExecutiveKPICard
-              label="Tổng Công Nhân"
-              value={kpiWorkers.toLocaleString('vi-VN')}
-              sub={selectedKTX !== 'all'
-                ? `${selectedKTX} · ${kpiBuildings} dãy hiện hữu`
-                : `${totalKTXAll} ký túc xá · ${kpiBuildings} dãy nhà`}
-              icon={Users}
-              iconBg="bg-bdg"
-              iconColor="text-lnk"
-              iconBorder="border-pri2/25"
-              bottomInfo={
-                <div className="flex items-center justify-between text-xs text-mu font-medium">
-                  <span>Trạng thái hệ thống:</span>
-                  <span className="text-ok font-semibold flex items-center gap-1.5 font-tabular">
-                    <span className="w-1.5 h-1.5 rounded-full bg-ok2 animate-pulse" />
-                    Đang hoạt động
-                  </span>
-                </div>
-              }
-            />
-
-            {/* Card 2: Quy Mô Cơ Sở */}
-            <ExecutiveKPICard
-              label="Quy Mô Cơ Sở"
-              value={`${kpiBuildings} Dãy / ${kpiRooms} Phòng`}
-              sub={`Tổng sức chứa thiết kế: ${kpiCapacity.toLocaleString('vi-VN')} chỗ`}
-              icon={LayoutGrid}
-              iconBg="bg-bdg"
-              iconColor="text-lnk"
-              iconBorder="border-bdr2"
-              bottomInfo={
-                <div className="flex items-center justify-between text-xs text-mu font-medium">
-                  <span>Định mức thiết kế:</span>
-                  <span className="text-lnk font-semibold font-tabular">
-                    Theo số giường thực tế
-                  </span>
-                </div>
-              }
-            />
-
-            {/* Card 3: Tỷ Lệ Lấp Đầy with Circular Progress Ring */}
-            <ExecutiveKPICard
-              label="Tỷ Lệ Lấp Đầy"
-              value={`${kpiFillRate}%`}
-              sub={`${kpiWithRoom.toLocaleString('vi-VN')}/${kpiCapacity.toLocaleString('vi-VN')} chỗ sử dụng · Trống ${kpiVacant.toLocaleString('vi-VN')} chỗ`}
-              icon={Layers}
-              iconBg="bg-okbg"
-              iconColor="text-ok"
-              iconBorder="border-bdr2"
-              rightVisual={
-                <ProgressRing progress={kpiFillRate} radius={32} stroke={5} color="var(--ok2)" trackColor="var(--bdr2)">
-                  <span className="text-xs font-extrabold text-ok font-tabular">{kpiFillRate}%</span>
-                </ProgressRing>
-              }
-              bottomInfo={
-                <div className="w-full space-y-1.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-mu font-medium">Tiến độ lấp đầy:</span>
-                    <span className="text-ok font-bold font-tabular">{kpiFillRate}% công suất</span>
+          <StaggerGrid className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
+            <StaggerItem>
+              <ExecutiveKPICard
+                label="Tổng Công Nhân"
+                value={<AnimatedNumber value={kpiWorkers} />}
+                sub={selectedKTX !== 'all'
+                  ? `${selectedKTX} · ${kpiBuildings} dãy hiện hữu`
+                  : `${totalKTXAll} ký túc xá · ${kpiBuildings} dãy nhà`}
+                icon={Users}
+                badgeIcon={Sparkles}
+                tone="blue"
+                bottomInfo={
+                  <div className="flex items-center justify-between text-xs text-mu font-medium">
+                    <span>Trạng thái hệ thống:</span>
+                    <span className="text-ok font-semibold flex items-center gap-1 font-tabular">
+                      <CheckCircle size={12} />
+                      Đang hoạt động
+                    </span>
                   </div>
-                  <div className="w-full h-1.5 bg-bdr rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all duration-500 ${
-                        kpiFillRate > 100 ? 'bg-dgr' : kpiFillRate >= 90 ? 'bg-wn' : 'bg-ok2'
-                      }`}
-                      style={{ width: `${Math.min(kpiFillRate, 100)}%` }}
-                    />
-                  </div>
-                </div>
-              }
-            />
-          </div>
+                }
+              />
+            </StaggerItem>
 
-          {/* ── 3b. Smart Operational Alerts (Tạm trú, Lệch giới tính, Thiếu hồ sơ) ── */}
+            <StaggerItem>
+              <ExecutiveKPICard
+                label="Quy Mô Cơ Sở"
+                value={
+                  <span className="inline-flex items-baseline gap-1.5">
+                    <AnimatedNumber value={kpiBuildings} />
+                    <span className="text-lg sm:text-xl font-bold text-mu">Dãy /</span>
+                    <AnimatedNumber value={kpiRooms} />
+                    <span className="text-lg sm:text-xl font-bold text-mu">Phòng</span>
+                  </span>
+                }
+                sub={`Tổng sức chứa thiết kế: ${kpiCapacity.toLocaleString('vi-VN')} chỗ`}
+                icon={LayoutGrid}
+                badgeIcon={Building2}
+                tone="slate"
+                bottomInfo={
+                  <div className="flex items-center justify-between text-xs text-mu font-medium">
+                    <span>Định mức thiết kế:</span>
+                    <span className="text-lnk font-semibold font-tabular">
+                      Theo số giường thực tế
+                    </span>
+                  </div>
+                }
+              />
+            </StaggerItem>
+
+            <StaggerItem>
+              <ExecutiveKPICard
+                label="Tỷ Lệ Lấp Đầy"
+                value={<AnimatedNumber value={kpiFillRate} format={n => `${Math.round(n)}%`} />}
+                sub={`${kpiWithRoom.toLocaleString('vi-VN')}/${kpiCapacity.toLocaleString('vi-VN')} chỗ sử dụng · Trống ${kpiVacant.toLocaleString('vi-VN')} chỗ`}
+                icon={Layers}
+                tone="teal"
+                rightVisual={
+                  <ProgressRing progress={kpiFillRate} radius={34} stroke={5} color="var(--ok2)" trackColor="var(--bdr2)">
+                    <span className="text-xs font-extrabold text-ok font-tabular">{kpiFillRate}%</span>
+                  </ProgressRing>
+                }
+                bottomInfo={
+                  <div className="w-full space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-mu font-medium">Tiến độ lấp đầy:</span>
+                      <span className="text-ok font-bold font-tabular">{kpiFillRate}% công suất</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-bdr rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          kpiFillRate > 100 ? 'bg-dgr' : kpiFillRate >= 90 ? 'bg-wn' : 'bg-ok2'
+                        }`}
+                        style={{ width: `${Math.min(kpiFillRate, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                }
+              />
+            </StaggerItem>
+          </StaggerGrid>
+
+          {/* ── 3b. Smart Operational Alerts ── */}
           {!isEmpty && (
             <DataQualityAlert
               selectedKtx={selectedKTX}
@@ -1218,9 +1269,8 @@ export default function OccupancyDashboardPage() {
             />
           )}
 
-          {/* ── 4. Specialists Duty Card & Operational Alerts (Balanced 2-Column Row) ── */}
+          {/* ── 4. Specialists Duty Card & Operational Alerts ── */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 w-full">
-            {/* Left: Specialists Card */}
             <div className="lg:col-span-1">
               <ExecutiveSpecialistsCard
                 specialists={specialists}
@@ -1228,25 +1278,20 @@ export default function OccupancyDashboardPage() {
               />
             </div>
 
-            {/* Right: Operational Alerts Grid + KTX Breakdown */}
             <div className="lg:col-span-2 flex flex-col justify-between gap-3.5">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <ExecutiveAlertCard
                   icon={XCircle}
+                  tone="slate"
                   label="Phòng Trống (0 người)"
                   value={`${systemMetrics.emptyRooms} phòng`}
-                  colorBg="bg-act"
-                  colorText="text-mu"
-                  colorBorder="border-bdr"
                   onClick={() => setRoomFilterMode(prev => prev === 'empty' ? 'all' : 'empty')}
                 />
                 <ExecutiveAlertCard
                   icon={AlertTriangle}
+                  tone={overloadedRooms > 0 ? 'rose' : 'slate'}
                   label="Phòng Quá Tải"
                   value={`${overloadedRooms} phòng`}
-                  colorBg={overloadedRooms > 0 ? "tint-dgr" : "bg-act"}
-                  colorText={overloadedRooms > 0 ? "text-dgr" : "text-mu"}
-                  colorBorder={overloadedRooms > 0 ? "border-dgr" : "border-bdr"}
                   onClick={() => {
                     setShowOverloadedModal(true);
                     setRoomFilterMode('overloaded');
@@ -1254,26 +1299,21 @@ export default function OccupancyDashboardPage() {
                 />
                 <ExecutiveAlertCard
                   icon={TrendingUp}
+                  tone="teal"
                   label="Vào Hôm Nay"
                   value={`+${todayStats.entered} người`}
-                  colorBg="bg-okbg"
-                  colorText="text-ok"
-                  colorBorder="border-bdr2"
                   onClick={() => router.push('/report-dashboard?tab=bien-dong')}
                 />
                 <ExecutiveAlertCard
                   icon={TrendingDown}
+                  tone="amber"
                   label="Ra Hôm Nay"
                   value={`-${todayStats.left} người`}
-                  colorBg="tint-wn"
-                  colorText="text-wn"
-                  colorBorder="border-wn"
                   onClick={() => router.push('/report-dashboard?tab=bien-dong')}
                 />
               </div>
 
-              {/* KTX Occupancy Breakdown Quick Card */}
-              <div className="rounded-2xl border border-bdr bg-surf p-4 sm:p-5 shadow-xl flex-1 flex flex-col justify-between hover:border-pri2/40 transition-all">
+              <div className="rounded-2xl surface-elevated p-4 sm:p-5 flex-1 flex flex-col justify-between">
                 <KtxOccupancyBreakdown
                   items={ktxOccupancy}
                   selectedKtx={selectedKTX}
@@ -1286,12 +1326,10 @@ export default function OccupancyDashboardPage() {
           {/* ── 5. Detailed Statistics: Gender & Contractors ── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             {/* Gender Stats */}
-            <div className="rounded-2xl border border-bdr bg-surf p-4 sm:p-5 shadow-xl transition-all duration-200 hover:border-bdr2/80">
+            <div className="rounded-2xl surface-elevated p-4 sm:p-5">
               <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-10 h-10 rounded-xl bg-bdg border border-pri2/20 flex items-center justify-center text-lnk">
-                    <VenusAndMars size={20} />
-                  </div>
+                <div className="flex items-center gap-3">
+                  <CraftIconBadge icon={VenusAndMars} tone="blue" size="md" />
                   <div>
                     <h2 className="text-base font-bold text-tx tracking-tight">Thống Kê Giới Tính & Công Năng Phòng</h2>
                     <p className="text-xs text-mu">Tự động quét toàn bộ KTX · Cơ cấu nhân sự và số lượng phòng</p>
@@ -1302,9 +1340,9 @@ export default function OccupancyDashboardPage() {
                 </span>
               </div>
 
-              {/* Overall totals with Room counts */}
+              {/* Overall totals with Room counts (Theme-aware contrast for Light & Dark) */}
               <div className="grid grid-cols-2 gap-3 mb-4">
-                <div className="rounded-xl bg-blue-950/40 border border-bdr2 p-3.5 hover:bg-act transition-colors">
+                <div className="rounded-xl tint-info border border-bdr2 p-3.5 hover:border-pri2/40 transition-colors">
                   <div className="flex items-center justify-between gap-1 flex-wrap">
                     <p className="text-xs text-lnk font-semibold">Nam (Toàn hệ thống)</p>
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-bdg text-lnk border border-bdr2">
@@ -1312,24 +1350,24 @@ export default function OccupancyDashboardPage() {
                     </span>
                   </div>
                   <p className="text-2xl font-bold text-lnk font-tabular mt-1">
-                    {genderStats.male.toLocaleString('vi-VN')} <span className="text-xs font-normal text-lnk/80">người</span>
+                    {genderStats.male.toLocaleString('vi-VN')} <span className="text-xs font-normal text-mu">người</span>
                   </p>
                 </div>
 
-                <div className="rounded-xl bg-pink-950/40 border border-pink-500/30 p-3.5 hover:bg-pink-900/40 transition-colors">
+                <div className="rounded-xl tint-pink border border-pink-tint p-3.5 transition-colors">
                   <div className="flex items-center justify-between gap-1 flex-wrap">
-                    <p className="text-xs text-pink-300 font-semibold">Nữ (Toàn hệ thống)</p>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-pink-500/20 text-pink-300 border border-pink-500/30">
+                    <p className="text-xs text-pink-tone font-semibold">Nữ (Toàn hệ thống)</p>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full tint-pink text-pink-tone border border-pink-tint">
                       {overallRoomTotals.femaleRooms} Phòng Nữ
                     </span>
                   </div>
-                  <p className="text-2xl font-bold text-pink-400 font-tabular mt-1">
-                    {genderStats.female.toLocaleString('vi-VN')} <span className="text-xs font-normal text-pink-300/80">người</span>
+                  <p className="text-2xl font-bold text-pink-tone font-tabular mt-1">
+                    {genderStats.female.toLocaleString('vi-VN')} <span className="text-xs font-normal text-mu">người</span>
                   </p>
                 </div>
               </div>
 
-              {/* Per-KTX detailed breakdown table (Dynamically scans all active KTXs from Supabase) */}
+              {/* Per-KTX detailed breakdown table */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-bold text-mu uppercase tracking-wider">
@@ -1343,10 +1381,9 @@ export default function OccupancyDashboardPage() {
                   {ktxGenderRoomStats.map(stat => (
                     <div
                       key={stat.ktx}
-                      className="rounded-xl border border-bdr bg-act/70 p-3 hover:bg-act hover:border-pri2/40 transition-all"
+                      className="rounded-xl border border-bdr bg-act/60 p-3 hover:bg-act hover:border-pri2/40 transition-all"
                     >
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                        {/* KTX Name and personnel count */}
                         <div className="flex items-center gap-2.5 flex-wrap">
                           <span className={`text-xs font-bold px-2.5 py-1 rounded-lg border ${
                             stat.ktx === 'KTX 1' ? 'bg-bdg text-lnk border-bdr2' :
@@ -1361,23 +1398,22 @@ export default function OccupancyDashboardPage() {
                               Nam: <strong className="font-tabular text-lnk">{stat.male}</strong>
                             </span>
                             <span className="text-mu">·</span>
-                            <span className="text-pink-300 font-medium">
-                              Nữ: <strong className="font-tabular text-pink-400">{stat.female}</strong>
+                            <span className="text-pink-tone font-medium">
+                              Nữ: <strong className="font-tabular text-pink-tone">{stat.female}</strong>
                             </span>
                             <span className="text-mu font-tabular">({stat.male + stat.female} người)</span>
                           </div>
                         </div>
 
-                        {/* Room breakdown badges */}
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-bdg text-lnk border border-bdr2 font-tabular">
                             <span>♂ {stat.maleRooms} P.Nam</span>
                           </span>
-                          <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-pink-500/15 text-pink-300 border border-pink-500/30 font-tabular">
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md tint-pink text-pink-tone border border-pink-tint font-tabular">
                             <span>♀ {stat.femaleRooms} P.Nữ</span>
                           </span>
                           {stat.mixedRooms > 0 && (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-wn/15 text-wn border border-wn font-tabular">
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md tint-wn text-wn border border-wn font-tabular">
                               <span>{stat.mixedRooms} Hỗn hợp</span>
                             </span>
                           )}
@@ -1420,12 +1456,10 @@ export default function OccupancyDashboardPage() {
             </div>
 
             {/* Contractor/Unit Stats */}
-            <div className="rounded-2xl border border-bdr bg-surf p-5 shadow-xl transition-all duration-200 hover:border-bdr2/80">
+            <div className="rounded-2xl surface-elevated p-5">
               <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-10 h-10 rounded-xl tint-wn border border-wn flex items-center justify-center text-wn">
-                    <HardHat size={20} />
-                  </div>
+                <div className="flex items-center gap-3">
+                  <CraftIconBadge icon={HardHat} tone="amber" size="md" />
                   <div>
                     <h2 className="text-base font-bold text-tx tracking-tight">Đơn Vị & Nhà Thầu</h2>
                     <p className="text-xs text-mu">Phân bố quân số theo nhà thầu thi công</p>
@@ -1482,12 +1516,10 @@ export default function OccupancyDashboardPage() {
           </div>
 
           {/* ── 6. Heatmap Room Grid ── */}
-          <div className="bg-surf rounded-2xl border border-bdr shadow-xl p-5 sm:p-6 transition-all duration-200 hover:border-bdr2/80">
+          <div className="surface-elevated rounded-2xl p-5 sm:p-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-bdg border border-pri2/20 flex items-center justify-center text-lnk">
-                  <LayoutGrid size={20} />
-                </div>
+                <CraftIconBadge icon={LayoutGrid} badgeIcon={Layers} tone="blue" size="md" />
                 <div>
                   <h2 className="text-base sm:text-lg font-bold text-tx tracking-tight">Sơ Đồ Phòng Trực Quan (Heatmap)</h2>
                   <p className="text-xs text-mu mt-0.5">
@@ -1497,48 +1529,17 @@ export default function OccupancyDashboardPage() {
               </div>
 
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5 flex-wrap">
-                {/* Status Filter Tabs */}
-                <div className="flex items-center gap-1 bg-act p-1 rounded-xl border border-bdr">
-                  <button
-                    onClick={() => setRoomFilterMode('all')}
-                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                      roomFilterMode === 'all'
-                        ? 'bg-pri text-white shadow-sm'
-                        : 'text-mu hover:text-tx'
-                    }`}
-                  >
-                    Tất cả ({systemMetrics.roomCount})
-                  </button>
-                  <button
-                    onClick={() => setRoomFilterMode('overloaded')}
-                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                      roomFilterMode === 'overloaded'
-                        ? 'bg-rose-600 text-white shadow-sm'
-                        : overloadedRooms > 0
-                        ? 'text-dgr hover:bg-rose-500/10'
-                        : 'text-mu hover:text-tx'
-                    }`}
-                  >
-                    <span>Quá tải</span>
-                    {overloadedRooms > 0 && (
-                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
-                        roomFilterMode === 'overloaded' ? 'bg-white/20 text-white' : 'tint-dgr text-dgr border border-dgr'
-                      }`}>
-                        {overloadedRooms}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setRoomFilterMode('empty')}
-                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                      roomFilterMode === 'empty'
-                        ? 'bg-mu text-white shadow-sm'
-                        : 'text-mu hover:text-tx'
-                    }`}
-                  >
-                    Trống ({systemMetrics.emptyRooms})
-                  </button>
-                </div>
+                <SlidingTabs
+                  layoutId="dashboard-heatmap-filter"
+                  compact
+                  value={roomFilterMode}
+                  onChange={setRoomFilterMode}
+                  tabs={[
+                    { id: 'all', label: 'Tất cả', count: systemMetrics.roomCount, tone: 'default' },
+                    { id: 'overloaded', label: 'Quá tải', count: overloadedRooms > 0 ? overloadedRooms : undefined, tone: 'danger' },
+                    { id: 'empty', label: 'Trống', count: systemMetrics.emptyRooms, tone: 'muted' },
+                  ]}
+                />
 
                 {/* Building Filters */}
                 {!isEmpty && allBuildings.length > 0 && (
@@ -1547,8 +1548,8 @@ export default function OccupancyDashboardPage() {
                       onClick={() => setSelectedBuilding(null)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
                         selectedBuilding === null
-                          ? 'bg-pri text-white border-pri2 shadow-md shadow-blue-500/20'
-                          : 'bg-act text-mu border-bdr hover:bg-act'
+                          ? 'bg-pri text-white border-pri2 shadow-sm'
+                          : 'bg-act text-mu border-bdr hover:text-tx'
                       }`}
                     >
                       Tất cả dãy
@@ -1559,8 +1560,8 @@ export default function OccupancyDashboardPage() {
                         onClick={() => setSelectedBuilding(b)}
                         className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
                           selectedBuilding === b
-                            ? 'bg-pri text-white border-pri2 shadow-md shadow-blue-500/20'
-                            : 'bg-act text-mu border-bdr hover:bg-act'
+                            ? 'bg-pri text-white border-pri2 shadow-sm'
+                            : 'bg-act text-mu border-bdr hover:text-tx'
                         }`}
                       >
                         {b}
@@ -1571,15 +1572,14 @@ export default function OccupancyDashboardPage() {
               </div>
             </div>
 
-            {/* Heatmap Legend: Room Gender Function & Occupancy */}
+            {/* Heatmap Legend */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-4 mb-4 border-b border-bdr">
-              {/* Legend 1: Room Gender Function */}
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-semibold text-mu uppercase tracking-wider">Công năng:</span>
                 <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-lg bg-bdg text-lnk border border-pri2/35">
                   <span>♂ Phòng Nam</span>
                 </span>
-                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-lg bg-pink-500/20 text-pink-300 border border-pink-500/40">
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-lg tint-pink text-pink-tone border border-pink-tint">
                   <span>♀ Phòng Nữ</span>
                 </span>
                 <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-lg tint-wn text-wn border border-wn">
@@ -1650,9 +1650,7 @@ export default function OccupancyDashboardPage() {
             {/* Heatmap Grid */}
             {!loading && ktxListForGrid.length === 0 && !isEmpty && (
               <div className="p-8 sm:p-12 rounded-2xl bg-act/40 border border-bdr text-center space-y-3">
-                <div className="w-12 h-12 rounded-2xl bg-bdg text-lnk flex items-center justify-center mx-auto">
-                  <Building size={24} />
-                </div>
+                <CraftIconBadge icon={Building2} tone="blue" size="lg" className="mx-auto" />
                 <h3 className="text-base font-bold text-tx">Sơ đồ phòng đang trống (0 phòng)</h3>
                 <p className="text-sm text-mu max-w-md mx-auto">
                   Hiện tại chưa có phòng ở nào trong Cơ sở vật chất hoặc danh sách công nhân.
@@ -1735,7 +1733,7 @@ export default function OccupancyDashboardPage() {
                                     key={s.id}
                                     className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-bold bg-okbg text-ok border border-bdr2"
                                   >
-                                    <span className="w-1.5 h-1.5 rounded-full bg-ok2 animate-pulse" />
+                                    <span className="w-1.5 h-1.5 rounded-full bg-ok2" />
                                     <span>{s.name}</span>
                                     {(s.role === 'super_admin' || s.role === 'admin') && (
                                       <span className="text-[9px] px-1 py-0.2 rounded bg-bdg text-lnk border border-bdr2 font-medium">
@@ -1934,7 +1932,7 @@ export default function OccupancyDashboardPage() {
                       return (
                         <div
                           key={`${item.ktx}-${item.building}-${item.room}-${idx}`}
-                          className="rounded-xl border border-rose-500/30 bg-rose-950/20 p-3.5 flex flex-col justify-between gap-3 hover:border-rose-500/60 transition-all"
+                          className="rounded-xl border border-dgr/40 tint-dgr p-3.5 flex flex-col justify-between gap-3 hover:border-dgr transition-all"
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div>

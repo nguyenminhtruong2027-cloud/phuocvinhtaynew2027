@@ -9,6 +9,7 @@ import BedInspectClient from './BedInspectClient';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
 import { QrCode, ClipboardList, LogOut, UserCheck, ScanLine } from 'lucide-react';
+import { SlidingTabs } from '@/components/ui/MotionPrimitives';
 
 type PortalTab = 'attendance' | 'registration' | 'checkout_approval' | 'checkout' | 'bed_inspect';
 
@@ -72,49 +73,32 @@ export default function QRPortalTabsWrapper() {
 
   return (
     <div className="min-h-screen bg-page text-tx font-sans" suppressHydrationWarning>
-      {/* Top-level Operations Console Nav Bar (Navy #1b2430) */}
-      <header className="bg-side border-b border-bdr sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 md:px-6 flex items-center justify-between gap-4 overflow-x-auto">
-          <div className="flex items-center gap-1 py-1.5 overflow-x-auto max-w-full">
-            {[
-              { key: 'attendance', label: 'QR Điểm Danh', icon: <ClipboardList size={15} /> },
-              { key: 'registration', label: 'Đăng ký cư trú', icon: <QrCode size={15} /> },
-              { key: 'bed_inspect', label: 'Kiểm Tra Giường', icon: <ScanLine size={15} /> },
+      {/* Main Nav Header */}
+      <header className="bg-side/90 border-b border-bdr sticky top-0 z-40 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-4 md:px-6 py-2 flex items-center justify-between gap-4 overflow-x-auto">
+          <SlidingTabs<PortalTab>
+            layoutId="qr-portal-tabs"
+            compact
+            value={activeTab}
+            onChange={setActiveTab}
+            tabs={[
+              { id: 'attendance', label: 'QR Điểm Danh', icon: ClipboardList },
+              { id: 'registration', label: 'Đăng ký cư trú', icon: QrCode },
+              { id: 'bed_inspect', label: 'Kiểm Tra Giường', icon: ScanLine },
               {
-                key: 'checkout_approval',
+                id: 'checkout_approval',
                 label: 'Duyệt Check-out',
-                icon: <UserCheck size={15} />,
-                badge: pendingCheckoutCount,
+                icon: UserCheck,
+                count: pendingCheckoutCount > 0 ? pendingCheckoutCount : undefined,
+                tone: pendingCheckoutCount > 0 ? 'danger' : 'default',
               },
-              { key: 'checkout', label: 'Mã QR Check-out', icon: <LogOut size={15} /> },
-            ].map(t => {
-              const isActive = activeTab === t.key;
-              return (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => setActiveTab(t.key as any)}
-                  className={`flex items-center gap-2 px-3.5 py-2 text-xs md:text-sm font-medium transition-colors whitespace-nowrap cursor-pointer rounded-t border-b-2 ${
-                    isActive
-                      ? 'bg-act text-tx font-semibold border-pri2'
-                      : 'border-transparent text-nav hover:text-tx hover:bg-act'
-                  }`}
-                >
-                  {t.icon}
-                  <span>{t.label}</span>
-                  {t.badge !== undefined && t.badge > 0 && (
-                    <span className="ml-1 px-1.5 py-0.5 rounded text-[11px] font-bold bg-dgr text-white">
-                      {t.badge}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+              { id: 'checkout', label: 'Mã QR Check-out', icon: LogOut },
+            ]}
+          />
 
           <div className="hidden lg:flex items-center gap-2 text-xs text-mu font-mono shrink-0 pl-4 border-l border-bdr">
             <span className="w-2 h-2 rounded-full bg-ok2" />
-            <span>CONSOLE VẬN HÀNH KTX</span>
+            <span>QR PORTAL KTX</span>
           </div>
         </div>
       </header>

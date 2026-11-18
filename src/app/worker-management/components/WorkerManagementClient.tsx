@@ -11,6 +11,7 @@ import BulkActionBar from './BulkActionBar';
 import { Plus, Download, Upload, X, FileText, AlertCircle, AlertTriangle, FileCheck, ChevronLeft, ChevronRight, Trash2, Building2, CheckSquare, Filter, Users, ArrowRightLeft } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { exportToExcel } from '@/lib/exportExcel';
+import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
 import { useWorkers } from '@/context/WorkerContext';
@@ -2035,14 +2036,12 @@ export function WorkerManagementClient() {
   }
 
   return (
-    <div className="min-h-screen bg-page text-tx">
+    <div className="min-h-screen bg-transparent text-tx">
       <div className="px-3 sm:px-6 lg:px-8 xl:px-10 py-4 sm:py-5 max-w-screen-2xl mx-auto space-y-4">
         {/* ── Compact Module Header ── */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-bdr">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3.5 border-b border-bdr">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-bdg border border-bdr2 flex items-center justify-center flex-shrink-0">
-              <Users size={18} className="text-pri2" />
-            </div>
+            <CraftIconBadge icon={Users} badgeIcon={FileCheck} tone="blue" size="md" />
             <div className="flex items-center gap-2.5 flex-wrap">
               <h1 className="text-lg sm:text-xl font-extrabold text-tx tracking-tight">
                 Quản Lý Công Nhân
@@ -2125,7 +2124,7 @@ export function WorkerManagementClient() {
             {(isAdmin || (currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && (
               <button
                 onClick={() => setShowAddModal(true)}
-                className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-pri hover:opacity-90 text-white text-xs sm:text-sm font-semibold transition-opacity duration-100 active:opacity-85"
+                className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl btn-glow-primary text-xs sm:text-sm font-semibold cursor-pointer"
               >
                 <Plus size={16} />
                 <span>Thêm Công Nhân</span>

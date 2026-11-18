@@ -10,6 +10,7 @@ import {
   Building2, MapPin, Coffee, Layers, Filter, Sparkles,
   ChevronRight, CheckCircle, Tag
 } from 'lucide-react';
+import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { createClient } from '@/lib/supabase/client';
 import {
   DutyKtx,
@@ -573,7 +574,6 @@ export default function ExecutiveSpecialistsCard({
               {/* ── HIGH VISIBILITY PROMINENT KTX DUTY BADGE ── */}
               {isOnDuty ? (
                 <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold border shadow-sm ${theme?.badgeBg}`}>
-                  <span className={`w-2.5 h-2.5 rounded-full ${theme?.dotColor} animate-ping shrink-0`} />
                   <Building2 size={12} className={theme?.accentColor} />
                   <span>ĐANG TRỰC {sp.dutyKtx.toUpperCase()}</span>
                 </span>
@@ -715,17 +715,17 @@ export default function ExecutiveSpecialistsCard({
       )}
 
       {/* ── Main Executive Card on Dashboard (Widget Thu Gọn Bên Ngoài) ── */}
-      <div className="rounded-2xl border border-bdr2/60 bg-surf p-3.5 sm:p-5 shadow-xl transition-all duration-200 hover:border-bdr2 hover:shadow-2xl flex flex-col justify-between group w-full">
+      <div className="rounded-2xl surface-elevated p-3.5 sm:p-5 flex flex-col justify-between group w-full">
         <div>
           {/* Card Header */}
           <div className="flex items-start justify-between gap-3 mb-3">
             <div className="space-y-1 min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-bold uppercase tracking-wider text-mu group-hover:text-lnk transition-colors block">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-mu group-hover:text-lnk transition-colors block">
                   Danh Sách Các Chuyên Viên
                 </span>
-                <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.2 rounded bg-bdg text-lnk border border-bdr2 font-medium">
-                  <Radio size={10} className="text-ok animate-pulse" />
+                <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-bdg text-lnk border border-bdr2 font-semibold">
+                  <Radio size={10} className="text-ok" />
                   Realtime
                 </span>
                 {isTableMissing && isAdmin && (
@@ -746,7 +746,7 @@ export default function ExecutiveSpecialistsCard({
                 </p>
                 <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-okbg text-ok border border-bdr2 shadow-sm">
-                    <span className="w-2 h-2 rounded-full bg-ok2 animate-pulse shrink-0" />
+                    <CheckCircle2 size={12} className="text-ok2 shrink-0" />
                     {onDutyList.length} trực ban hôm nay
                   </span>
                   {offDutyList.length > 0 && (
@@ -796,9 +796,9 @@ export default function ExecutiveSpecialistsCard({
               <button
                 onClick={() => setShowModal(true)}
                 title="Mở bảng phân công trực ban theo ngày"
-                className="w-11 h-11 sm:w-13 sm:h-13 rounded-2xl flex items-center justify-center flex-shrink-0 border bg-gradient-to-tr from-indigo-500/15 to-blue-500/10 text-lnk border-bdr2 hover:bg-bdg hover:border-pri2 transition-all cursor-pointer shadow-md"
+                className="cursor-pointer focus:outline-none"
               >
-                <UserCheck size={22} className="sm:w-[26px] sm:h-[26px]" />
+                <CraftIconBadge icon={UserCheck} badgeIcon={Sparkles} tone="blue" size="lg" />
               </button>
             </div>
           </div>

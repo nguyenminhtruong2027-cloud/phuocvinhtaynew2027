@@ -6,6 +6,7 @@ import {
 import { calcSoNgay } from '@/data/workers';
 import { useWorkers } from '@/context/WorkerContext';
 import { Clock } from 'lucide-react';
+import { CraftIconBadge } from '@/components/ui/CraftIcon';
 
 const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: { value: number }[]; label?: string }) => {
   if (active && payload && payload.length) {
@@ -40,11 +41,9 @@ export default function DaysHistogram() {
   }));
 
   return (
-    <div className="bg-surf border border-bdr rounded-2xl shadow-xl p-5 transition-all duration-200 hover:border-bdr2">
-      <div className="flex items-center gap-2.5 mb-4">
-        <div className="w-9 h-9 rounded-xl bg-okbg border border-bdr2 flex items-center justify-center text-ok">
-          <Clock size={18} />
-        </div>
+    <div className="surface-elevated rounded-2xl p-5">
+      <div className="flex items-center gap-3 mb-4">
+        <CraftIconBadge icon={Clock} tone="teal" size="sm" />
         <div>
           <h2 className="text-base font-bold text-tx tracking-tight">Số Ngày Lưu Trú</h2>
           <p className="text-xs text-mu">Phân bổ công nhân theo số ngày đã ở KTX</p>

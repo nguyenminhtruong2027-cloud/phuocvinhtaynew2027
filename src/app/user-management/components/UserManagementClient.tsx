@@ -5,8 +5,10 @@ import { useRouter } from 'next/navigation';
 import { useAuth, UserRole } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
 import { createClient, getSupabaseConfig } from '@/lib/supabase/client';
-import { UserPlus, Pencil, Trash2, Shield, ShieldCheck, Crown, Lock, RefreshCw, AlertCircle, CheckCircle, Building2, Search, Database, Check, Copy, KeyRound } from 'lucide-react';
+import { UserPlus, Pencil, Trash2, Shield, ShieldCheck, Crown, Lock, RefreshCw, AlertCircle, CheckCircle, Building2, Search, Database, Check, Copy, KeyRound, UserCog } from 'lucide-react';
 import { useKtxStructure, KtxBlockGroup } from '@/lib/ktxStructure';
+import { CraftIconBadge } from '@/components/ui/CraftIcon';
+import { SlidingTabs } from '@/components/ui/MotionPrimitives';
 
 interface ProfileRecord {
   id: string;
@@ -776,10 +778,13 @@ export default function UserManagementClient() {
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground tracking-tight">Quản lý Tài khoản</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Tạo tài khoản, gán vai trò và phân quyền phụ trách KTX + Dãy</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-bdr">
+        <div className="flex items-center gap-3">
+          <CraftIconBadge icon={UserCog} badgeIcon={ShieldCheck} tone="blue" size="md" />
+          <div>
+            <h1 className="text-xl sm:text-2xl font-extrabold text-tx tracking-tight">Quản lý Tài khoản</h1>
+            <p className="text-xs sm:text-sm text-mu mt-0.5">Tạo tài khoản, gán vai trò và phân quyền phụ trách KTX + Dãy</p>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -788,15 +793,15 @@ export default function UserManagementClient() {
               reloadKtxStructure();
             }}
             disabled={loading}
-            className="btn-secondary text-sm flex items-center gap-1.5 cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-surf border border-bdr2 text-tx text-xs sm:text-sm font-semibold hover:bg-act shadow-sm cursor-pointer transition-colors"
             title="Tải lại danh sách"
           >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            <RefreshCw size={14} className={loading ? 'animate-spin text-pri2' : 'text-mu'} />
             <span>Làm mới</span>
           </button>
           <button
             onClick={openAdd}
-            className="btn-primary text-sm flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+            className="btn-glow-primary px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
           >
             <UserPlus size={15} />
             <span>Tạo tài khoản mới</span>
@@ -806,21 +811,17 @@ export default function UserManagementClient() {
 
       {/* Tier Authority Summary Banner */}
       <div className={`rounded-2xl border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-        isSuperAdmin ? 'tint-wn border-wn/50' : 'bg-bdg/60 border-bdr2'
+        isSuperAdmin ? 'tint-wn border-wn/40' : 'surface-elevated'
       }`}>
         <div className="flex items-start gap-3">
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-            isSuperAdmin ? 'bg-amber-500/20 text-wn' : 'bg-pri/20 text-lnk'
-          }`}>
-            {isSuperAdmin ? <Crown size={20} /> : <ShieldCheck size={20} />}
-          </div>
+          <CraftIconBadge icon={isSuperAdmin ? Crown : ShieldCheck} tone={isSuperAdmin ? 'amber' : 'blue'} size="md" interactive={false} />
           <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-foreground">
+            <p className="text-xs font-bold uppercase tracking-wider text-tx">
               {isSuperAdmin
                 ? 'Cấp 1 — Quản trị tối cao (Super Admin)'
                 : 'Cấp 2 — Quản trị viên vận hành (Admin)'}
             </p>
-            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+            <p className="text-xs text-mu mt-0.5 leading-relaxed">
               {isSuperAdmin
                 ? 'Toàn quyền hệ thống: tạo/sửa/xóa tài khoản Admin và Staff, thực hiện thao tác xóa toàn bộ dữ liệu lớn, và được bảo vệ tuyệt đối trước các cấp thấp hơn.'
                 : 'Toàn quyền vận hành KTX và quản lý tài khoản Staff. Tài khoản Super Admin và các Admin khác được bảo vệ, không thể chỉnh sửa hoặc xóa từ cấp này.'}
@@ -828,50 +829,28 @@ export default function UserManagementClient() {
           </div>
         </div>
         <span className={`px-3 py-1 rounded-full text-[11px] font-bold border shrink-0 self-start sm:self-center ${
-          isSuperAdmin ? 'tint-wn text-wn border-wn' : 'bg-card text-lnk border-bdr2'
+          isSuperAdmin ? 'tint-wn text-wn border-wn' : 'bg-act text-lnk border-bdr2'
         }`}>
           {isSuperAdmin ? 'Quản lý Admin + Staff' : 'Chỉ quản lý Staff'}
         </span>
       </div>
 
       {/* Main Card */}
-      <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
+      <div className="surface-elevated rounded-2xl overflow-hidden">
         {/* Filter Tabs and Search Bar */}
-        <div className="px-6 pt-3 pb-2 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3 overflow-x-auto">
-            <button
-              onClick={() => setActiveTab('all')}
-              className={`pb-2.5 text-xs font-bold border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
-                activeTab === 'all' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Tất cả ({profiles.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('super_admin')}
-              className={`pb-2.5 text-xs font-bold border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
-                activeTab === 'super_admin' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Chủ HT ({profiles.filter(p => p.role === 'super_admin').length})
-            </button>
-            <button
-              onClick={() => setActiveTab('admin')}
-              className={`pb-2.5 text-xs font-bold border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
-                activeTab === 'admin' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Admin ({profiles.filter(p => p.role === 'admin').length})
-            </button>
-            <button
-              onClick={() => setActiveTab('staff')}
-              className={`pb-2.5 text-xs font-bold border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
-                activeTab === 'staff' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Staff ({profiles.filter(p => p.role === 'staff').length})
-            </button>
-          </div>
+        <div className="px-4 sm:px-6 pt-3.5 pb-3 border-b border-bdr flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <SlidingTabs<'all' | 'super_admin' | 'admin' | 'staff'>
+            layoutId="user-mgmt-role-tabs"
+            compact
+            value={activeTab}
+            onChange={setActiveTab}
+            tabs={[
+              { id: 'all', label: 'Tất cả', count: profiles.length },
+              { id: 'super_admin', label: 'Chủ HT', count: profiles.filter(p => p.role === 'super_admin').length },
+              { id: 'admin', label: 'Admin', count: profiles.filter(p => p.role === 'admin').length },
+              { id: 'staff', label: 'Staff', count: profiles.filter(p => p.role === 'staff').length },
+            ]}
+          />
 
           <div className="relative w-full sm:w-64">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />

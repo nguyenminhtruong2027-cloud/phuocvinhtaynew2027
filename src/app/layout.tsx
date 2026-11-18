@@ -1,17 +1,25 @@
 import React from 'react';
 import type { Metadata, Viewport } from 'next';
-import { Inter } from 'next/font/google';
+import { Plus_Jakarta_Sans, JetBrains_Mono } from 'next/font/google';
 import { Toaster } from 'sonner';
 import '../styles/tailwind.css';
 import '@/styles/index.css';
 import { AuthProvider } from '@/context/AuthContext';
 import { AuditProvider } from '@/context/AuditContext';
 import { WorkerProvider } from '@/context/WorkerContext';
+import { MotionProvider } from '@/components/ui/MotionPrimitives';
 
-const inter = Inter({
+const jakartaSans = Plus_Jakarta_Sans({
   subsets: ['latin', 'vietnamese'],
-  weight: ['100', '200', '300', '400', '500', '600', '700', '800', '900'],
+  weight: ['400', '500', '600', '700', '800'],
   variable: '--font-sans',
+  display: 'swap',
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ['latin', 'vietnamese'],
+  weight: ['500', '600', '700'],
+  variable: '--font-mono',
   display: 'swap',
 });
 
@@ -37,16 +45,18 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="vi" className={inter.variable} suppressHydrationWarning>
-      <body className={inter.className} suppressHydrationWarning>
+    <html lang="vi" className={`${jakartaSans.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
+      <body className={jakartaSans.className} suppressHydrationWarning>
         <script dangerouslySetInnerHTML={{ __html: THEME_NO_FLASH_SCRIPT }} />
-        <AuthProvider>
-          <AuditProvider>
-            <WorkerProvider>
-              {children}
-            </WorkerProvider>
-          </AuditProvider>
-        </AuthProvider>
+        <MotionProvider>
+          <AuthProvider>
+            <AuditProvider>
+              <WorkerProvider>
+                {children}
+              </WorkerProvider>
+            </AuditProvider>
+          </AuthProvider>
+        </MotionProvider>
         <Toaster position="bottom-right" richColors closeButton />
       </body>
     </html>

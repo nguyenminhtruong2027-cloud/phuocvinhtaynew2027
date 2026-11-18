@@ -5,8 +5,10 @@ import {
   Users, LayoutGrid, Percent, AlertCircle, VenusAndMars, HardHat,
   Building2, TrendingUp, TrendingDown, UserPlus, UserMinus, ArrowRightLeft,
   Calendar, Clock, RefreshCw, Filter, X, Building, BarChart2, CheckCircle2,
-  ChevronDown, ChevronRight, Download, ShieldCheck,
+  ChevronDown, ChevronRight, Download, ShieldCheck, Radio,
 } from 'lucide-react';
+import { CraftIconBadge } from '@/components/ui/CraftIcon';
+import { SlidingTabs } from '@/components/ui/MotionPrimitives';
 import { toast } from 'sonner';
 import { exportMultiSheetExcel } from '@/lib/exportExcel';
 import { useWorkers } from '@/context/WorkerContext';
@@ -705,22 +707,20 @@ export default function ReportDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-page text-tx">
+    <div className="min-h-screen bg-transparent text-tx">
       <div className="px-3 sm:px-6 lg:px-8 xl:px-10 py-4 sm:py-5 max-w-screen-2xl mx-auto space-y-5">
 
         {/* ── Compact Module Header ── */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-bdr">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-bdr">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-bdg border border-bdr2 flex items-center justify-center flex-shrink-0">
-              <BarChart2 size={18} className="text-pri2" />
-            </div>
+            <CraftIconBadge icon={BarChart2} badgeIcon={TrendingUp} tone="blue" size="md" />
             <div className="flex items-center gap-2.5 flex-wrap">
               <h1 className="text-lg sm:text-xl font-extrabold text-tx tracking-tight">
                 Báo Cáo & Biến Động
               </h1>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-okbg text-ok border border-bdr2">
-                <span className="w-1.5 h-1.5 rounded-full bg-ok2 animate-pulse" />
-                Thời gian thực
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-ok">
+                <Radio size={12} />
+                <span>Thời gian thực</span>
               </span>
             </div>
           </div>
@@ -731,7 +731,7 @@ export default function ReportDashboard() {
               <button
                 onClick={handleExportOverview}
                 disabled={filtered.length === 0}
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-pri hover:bg-pri2 text-xs font-bold text-white transition-all shadow-md disabled:opacity-50"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl btn-glow-primary text-xs font-bold disabled:opacity-50 cursor-pointer"
                 title="Xuất Excel gồm 2 sheet: Tổng hợp theo KTX và Chi tiết công nhân theo bộ lọc"
               >
                 <Download size={13} />
@@ -742,7 +742,7 @@ export default function ReportDashboard() {
               <button
                 onClick={handleExportFluctuation}
                 disabled={flLoading || filteredDailyData.length === 0}
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-pri hover:bg-pri2 text-xs font-bold text-white transition-all shadow-md disabled:opacity-50"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl btn-glow-primary text-xs font-bold disabled:opacity-50 cursor-pointer"
                 title="Xuất Excel gồm 2 sheet: Tổng hợp theo ngày và Chi tiết từng công nhân vào/ra"
               >
                 <Download size={13} />
@@ -759,7 +759,7 @@ export default function ReportDashboard() {
                 }
               }}
               disabled={flLoading || workersRefreshing}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-act border border-bdr hover:bg-surf text-xs font-semibold text-tx transition-colors disabled:opacity-60"
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-surf border border-bdr2 hover:bg-act text-xs font-semibold text-tx shadow-sm transition-colors disabled:opacity-60 cursor-pointer"
             >
               <RefreshCw size={13} className={flLoading || workersRefreshing ? 'animate-spin text-pri2' : 'text-mu'} />
               <span>Làm mới số liệu</span>
@@ -767,29 +767,16 @@ export default function ReportDashboard() {
           </div>
         </div>
 
-        {/* ── Sub-Navigation Tabs ── */}
-        <div className="flex items-center gap-2 p-1.5 bg-act rounded-2xl border border-bdr w-fit">
-          <button
-            onClick={() => setActiveTab('tong-quan')}
-            className={`flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-bold rounded-xl transition-all ${
-              activeTab === 'tong-quan'
-                ? 'bg-pri text-white shadow-md'
-                : 'text-mu hover:text-tx hover:bg-act'
-            }`}
-          >
-            <span>📊 Tổng quan đa chiều</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('bien-dong')}
-            className={`flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-bold rounded-xl transition-all ${
-              activeTab === 'bien-dong'
-                ? 'bg-pri text-white shadow-md'
-                : 'text-mu hover:text-tx hover:bg-act'
-            }`}
-          >
-            <span>🔄 Biến động vào / ra</span>
-          </button>
-        </div>
+        {/* ── Sub-Navigation Tabs (Sliding motion indicator) ── */}
+        <SlidingTabs
+          layoutId="report-dashboard-tabs"
+          value={activeTab}
+          onChange={setActiveTab}
+          tabs={[
+            { id: 'tong-quan', label: 'Tổng quan đa chiều', icon: BarChart2 },
+            { id: 'bien-dong', label: 'Biến động vào / ra', icon: ArrowRightLeft },
+          ]}
+        />
 
         {/* ══════════════════════════════════════════════════════════════════════ */}
         {/* TAB 1: TỔNG QUAN                                                      */}

@@ -3,7 +3,8 @@ import React, { useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { useWorkers } from '@/context/WorkerContext';
 import { getUniquePlatoons, getUniqueBuildings } from '@/data/workers';
-import { Building2 } from 'lucide-react';
+import { Building2, Layers } from 'lucide-react';
+import { CraftIconBadge } from '@/components/ui/CraftIcon';
 
 const COLORS = [
   'var(--pri2)',
@@ -57,12 +58,10 @@ export default function PlatoonBarChart() {
   const displayBuildings = buildings || [];
 
   return (
-    <div className="bg-surf border border-bdr rounded-2xl shadow-xl p-5 transition-all duration-200 hover:border-bdr2">
+    <div className="surface-elevated rounded-2xl p-5">
       <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-bdg border border-bdr2 flex items-center justify-center text-lnk">
-            <Building2 size={18} />
-          </div>
+        <div className="flex items-center gap-3">
+          <CraftIconBadge icon={Building2} badgeIcon={Layers} tone="blue" size="sm" />
           <div>
             <h2 className="text-base font-bold text-tx tracking-tight">Phân Bổ Theo Tiểu Đoàn</h2>
             <p className="text-xs text-mu">Số công nhân mỗi tiểu đoàn theo dãy nhà</p>
