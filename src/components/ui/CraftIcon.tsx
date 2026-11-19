@@ -50,13 +50,15 @@ export function CraftIconBadge({
   return (
     <div
       className={`relative inline-flex items-center justify-center flex-shrink-0 select-none ${s.box} ${s.radius} ${TONE_CLASS[tone]} ${
-        interactive ? 'transition-transform duration-150 hover:scale-105 active:scale-95' : ''
+        interactive
+          ? 'transition-transform duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] hover:scale-[1.07] hover:-rotate-3 active:scale-95'
+          : ''
       } ${className}`}
     >
       {/* Top specular inner highlight */}
       <span
         aria-hidden="true"
-        className={`pointer-events-none absolute inset-x-1 top-[1px] h-[40%] ${s.radius} bg-gradient-to-b from-white/25 to-transparent opacity-80`}
+        className={`pointer-events-none absolute inset-x-1 top-[1px] h-[42%] ${s.radius} bg-gradient-to-b from-white/30 to-transparent opacity-85`}
       />
       <Icon size={s.icon} strokeWidth={2.15} className="relative z-10 drop-shadow-sm" />
       {BadgeIcon && (

@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
-import { motion } from 'motion/react';
 import { X, Loader2, CheckCircle2, AlertCircle, ArrowRightLeft } from 'lucide-react';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
@@ -289,12 +288,9 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 14 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-        className="surface-elevated border border-bdr2 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg flex flex-col max-h-[90vh] overflow-hidden"
+    <div className="fixed inset-0 z-50 modal-backdrop-scrim fade-in flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
+      <div
+        className="surface-elevated border border-bdr2 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg flex flex-col max-h-[90vh] overflow-hidden modal-enter"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-bdr bg-act/50">
@@ -400,7 +396,7 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
             )}
           </div>
         )}
-      </motion.div>
+      </div>
     </div>
   );
 }

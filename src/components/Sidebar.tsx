@@ -2,7 +2,6 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { AnimatePresence, motion } from 'motion/react';
 import {
   LayoutDashboard, Users, ChevronLeft, ChevronRight, LogOut, BarChart2,
   ClipboardList, UserCog, RefreshCw, Building2, QrCode, Menu, X, BedDouble, ShieldCheck, Search
@@ -382,27 +381,18 @@ export default function Sidebar() {
         </div>
       </header>
 
-      {/* ── Mobile Slide-Over Drawer (Animated) ── */}
-      <AnimatePresence>
-        {mobileOpen && (
-          <div className="lg:hidden fixed inset-0 z-50 overflow-hidden">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.16 }}
-              className="fixed inset-0 bg-black/70"
-              onClick={() => setMobileOpen(false)}
-              aria-hidden="true"
-            />
+      {/* ── Mobile Slide-Over Drawer (Zero-lag CSS animated) ── */}
+      {mobileOpen && (
+        <div className="lg:hidden fixed inset-0 z-50 overflow-hidden">
+          <div
+            className="fixed inset-0 modal-backdrop-scrim fade-in"
+            onClick={() => setMobileOpen(false)}
+            aria-hidden="true"
+          />
 
-            <motion.div
-              initial={{ x: '-100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '-100%' }}
-              transition={{ type: 'spring', stiffness: 400, damping: 36 }}
-              className="fixed inset-y-0 left-0 w-80 max-w-[85vw] bg-side border-r border-bdr shadow-2xl flex flex-col z-50"
-            >
+          <div
+            className="fixed inset-y-0 left-0 w-80 max-w-[85vw] bg-side border-r border-bdr shadow-2xl flex flex-col z-50 animate-slide-in-left"
+          >
               <div className="flex items-center justify-between px-4 py-4 border-b border-bdr bg-surf/60">
                 <div className="flex items-center gap-2.5">
                   <CraftIconBadge icon={Building2} badgeIcon={ShieldCheck} tone="blue" size="sm" interactive={false} />
@@ -486,10 +476,9 @@ export default function Sidebar() {
                   <span>Đăng xuất tài khoản</span>
                 </button>
               </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+            </div>
+        </div>
+      )}
     </>
   );
 }

@@ -1,6 +1,5 @@
 'use client';
 import React from 'react';
-import { motion } from 'motion/react';
 import { Worker } from '@/data/workers';
 import { AlertTriangle, Trash2, X } from 'lucide-react';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
@@ -17,13 +16,10 @@ export default function DeleteConfirmModal({ target, onConfirm, onClose }: Props
   const name = !isBulk ? (target as Worker).hoVaTen : '';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65" onClick={onClose}>
-      <motion.div
-        initial={{ opacity: 0, scale: 0.94, y: 8 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop-scrim fade-in" onClick={onClose}>
+      <div
         onClick={e => e.stopPropagation()}
-        className="surface-elevated rounded-2xl shadow-2xl w-full max-w-md border border-dgr/40 overflow-hidden"
+        className="surface-elevated rounded-2xl shadow-2xl w-full max-w-md border border-dgr/40 overflow-hidden modal-enter"
       >
         <div className="p-6 space-y-4">
           <div className="flex items-start justify-between gap-3">
@@ -63,7 +59,7 @@ export default function DeleteConfirmModal({ target, onConfirm, onClose }: Props
             </button>
           </div>
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 }

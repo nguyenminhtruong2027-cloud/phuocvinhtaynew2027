@@ -64,10 +64,14 @@ export function AnimatedNumber({
 }
 
 /**
- * PageReveal — Hiển thị tức thì vùng nội dung chính (không unmount theo routeKey).
+ * PageReveal — Hiển thị tức thì với chuyển động nhẹ GPU-composited khi chuyển trang.
  */
-export function PageReveal({ children }: { children: React.ReactNode; routeKey?: string }) {
-  return <div className="min-h-full">{children}</div>;
+export function PageReveal({ children, routeKey }: { children: React.ReactNode; routeKey?: string }) {
+  return (
+    <div key={routeKey} className="min-h-full page-reveal-in">
+      {children}
+    </div>
+  );
 }
 
 /**
@@ -90,7 +94,7 @@ export interface SlidingTabItem<T extends string = string> {
 }
 
 /**
- * SlidingTabs — Bộ chuyển tab tức thì bằng CSS, không gây đo đạc layout lại mỗi lần chuyển route/tab.
+ * SlidingTabs — Bộ chuyển tab tức thì bằng CSS (specular rim + zero layout thrash).
  */
 export function SlidingTabs<T extends string = string>({
   tabs,
@@ -108,7 +112,7 @@ export function SlidingTabs<T extends string = string>({
 }) {
   return (
     <div
-      className={`inline-flex items-center gap-1 bg-act/85 p-1 rounded-xl border border-bdr2 shadow-inner overflow-x-auto max-w-full scrollbar-thin ${className}`}
+      className={`inline-flex items-center gap-1 bg-act/90 p-1 rounded-xl border border-bdr2 shadow-inner overflow-x-auto max-w-full scrollbar-thin ${className}`}
       role="tablist"
     >
       {tabs.map((tab) => {
@@ -116,12 +120,12 @@ export function SlidingTabs<T extends string = string>({
         const Icon = tab.icon;
         const activeBg =
           tab.tone === 'danger'
-            ? 'bg-dgr shadow-sm shadow-rose-500/25'
+            ? 'bg-dgr shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_4px_12px_-2px_rgba(220,38,38,0.4)]'
             : tab.tone === 'success'
-            ? 'bg-ok2 shadow-sm'
+            ? 'bg-ok2 shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_4px_12px_-2px_rgba(45,212,191,0.35)]'
             : tab.tone === 'muted'
-            ? 'bg-mu shadow-sm'
-            : 'bg-pri shadow-sm shadow-blue-500/25';
+            ? 'bg-mu shadow-[inset_0_1px_0_rgba(255,255,255,0.22)]'
+            : 'bg-pri shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_4px_14px_-2px_rgba(59,102,240,0.45)]';
 
         const activeText =
           tab.tone === 'success' ? 'text-ok2-fg' : 'text-white';
@@ -133,14 +137,14 @@ export function SlidingTabs<T extends string = string>({
             role="tab"
             aria-selected={isActive}
             onClick={() => onChange(tab.id)}
-            className={`relative flex items-center gap-1.5 rounded-lg font-bold transition-colors whitespace-nowrap select-none cursor-pointer ${
+            className={`relative flex items-center gap-1.5 rounded-lg font-bold transition-all duration-150 active:scale-[0.97] whitespace-nowrap select-none cursor-pointer ${
               compact ? 'px-2.5 py-1 text-xs' : 'px-3.5 py-1.5 text-xs sm:text-[13px]'
             } ${
               isActive
                 ? `${activeBg} ${activeText}`
                 : tab.tone === 'danger' && (tab.count ?? 0) > 0
                 ? 'text-dgr hover:bg-dgrbg/60'
-                : 'text-mu hover:text-tx hover:bg-surf/60'
+                : 'text-mu hover:text-tx hover:bg-surf/65'
             }`}
           >
             {Icon && <Icon size={14} className="shrink-0" />}

@@ -1,6 +1,5 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { motion } from 'motion/react';
 import { Worker, calcSoNgay } from '@/data/workers';
 import {
   X,
@@ -290,13 +289,10 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
     .join(' · ');
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65" onClick={onClose}>
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 12 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop-scrim fade-in" onClick={onClose}>
+      <div
         onClick={e => e.stopPropagation()}
-        className="surface-elevated rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden border border-bdr2"
+        className="surface-elevated rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden border border-bdr2 modal-enter"
       >
         {/* Header */}
         <div className="flex items-center gap-3.5 px-5 py-4 border-b border-bdr bg-act/50">
@@ -567,7 +563,7 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
             </button>
           )}
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 }

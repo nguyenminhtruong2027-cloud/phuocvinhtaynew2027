@@ -148,7 +148,11 @@
   }
 
   .modal-enter {
-    animation: modalEnter 180ms ease forwards;
+    animation: modalEnter 150ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  .page-reveal-in {
+    animation: pageRevealIn 130ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .text-hero {
@@ -233,22 +237,49 @@
   .text-wn-fg { color: var(--wn-fg); }
   .text-ok2-fg { color: var(--ok2-fg); }
 
-  /* Lightweight clean architectural backdrop */
+  /* High-craft architectural blueprint backdrop (zero scroll repaint lock) */
   .bg-architectural {
     background-color: var(--bg);
-    background-image: radial-gradient(ellipse 80% 35% at 50% -10%, color-mix(in srgb, var(--pri2) 10%, transparent), transparent 70%);
+    background-image:
+      radial-gradient(ellipse 76% 36% at 50% -8%, color-mix(in srgb, var(--pri2) 13%, transparent), transparent 72%),
+      linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+    background-size: 100% 100%, 40px 40px, 40px 40px;
   }
 
-  /* Elevated surface with specular rim */
+  /* Elevated surface with specular rim & GPU-friendly hover */
   .surface-elevated {
     background: var(--surf);
     border: 1px solid var(--bdr);
-    box-shadow: inset 0 1px 0 var(--specular), 0 4px 12px -4px var(--sh);
-    transition: border-color 120ms ease;
+    box-shadow: inset 0 1px 0 var(--specular), 0 8px 24px -10px var(--sh);
+    transition: border-color 140ms ease, box-shadow 140ms ease;
   }
 
   .surface-elevated:hover {
     border-color: color-mix(in srgb, var(--pri2) 34%, var(--bdr2));
+    box-shadow: inset 0 1px 0 var(--specular), 0 12px 28px -10px var(--sh);
+  }
+
+  /* Zero-blur radial corner glows for KPI cards */
+  .kpi-glow-blue {
+    background: radial-gradient(circle at 92% 8%, color-mix(in srgb, var(--pri2) 20%, transparent) 0%, transparent 58%);
+  }
+  .kpi-glow-teal {
+    background: radial-gradient(circle at 92% 8%, color-mix(in srgb, var(--ok2) 20%, transparent) 0%, transparent 58%);
+  }
+  .kpi-glow-amber {
+    background: radial-gradient(circle at 92% 8%, color-mix(in srgb, var(--wn) 20%, transparent) 0%, transparent 58%);
+  }
+  .kpi-glow-rose {
+    background: radial-gradient(circle at 92% 8%, color-mix(in srgb, var(--dgr) 22%, transparent) 0%, transparent 58%);
+  }
+  .kpi-glow-slate {
+    background: radial-gradient(circle at 92% 8%, color-mix(in srgb, var(--lnk) 14%, transparent) 0%, transparent 58%);
+  }
+
+  /* Crisp radial-vignette modal backdrop (no expensive GPU backdrop-blur) */
+  .modal-backdrop-scrim {
+    background: radial-gradient(circle at center, rgba(6, 10, 22, 0.58) 0%, rgba(4, 7, 15, 0.78) 100%);
   }
 
   /* Glossy tactile primary button */
@@ -481,6 +512,20 @@
   to { transform: translateX(0); opacity: 1; }
 }
 
+@keyframes slideInLeft {
+  from { transform: translateX(-100%); opacity: 0.9; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes pageRevealIn {
+  from { opacity: 0.85; }
+  to { opacity: 1; }
+}
+
 .animate-slide-in-right {
-  animation: slideInRight 0.25s ease-out forwards;
+  animation: slideInRight 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slide-in-left {
+  animation: slideInLeft 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }

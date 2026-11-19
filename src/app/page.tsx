@@ -159,15 +159,32 @@ function ExecutiveKPICard({
   bottomInfo?: React.ReactNode;
   rightVisual?: React.ReactNode;
 }) {
+  const glowClass =
+    tone === 'teal'
+      ? 'kpi-glow-teal'
+      : tone === 'amber'
+      ? 'kpi-glow-amber'
+      : tone === 'rose'
+      ? 'kpi-glow-rose'
+      : tone === 'slate'
+      ? 'kpi-glow-slate'
+      : 'kpi-glow-blue';
+
   return (
     <div
       className={`rounded-2xl p-4 sm:p-5 flex flex-col justify-between relative overflow-hidden group w-full ${
         alert
           ? 'tint-dgr border border-dgr'
           : 'surface-elevated'
-      } ${onClick ? 'cursor-pointer hover:-translate-y-0.5 transition-transform duration-150' : ''}`}
+      } ${onClick ? 'cursor-pointer hover:-translate-y-0.5 transition-transform duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]' : ''}`}
       onClick={onClick}
     >
+      {!alert && (
+        <span
+          aria-hidden="true"
+          className={`pointer-events-none absolute inset-0 ${glowClass} opacity-75 group-hover:opacity-100 transition-opacity duration-150`}
+        />
+      )}
       <div className="relative z-10">
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1 min-w-0 flex-1">
@@ -222,7 +239,7 @@ function ExecutiveAlertCard({
   return (
     <div
       className={`flex items-center gap-2.5 sm:gap-3 rounded-xl sm:rounded-2xl px-3 sm:px-3.5 py-2.5 sm:py-3 surface-elevated group w-full min-w-0 ${
-        onClick ? 'cursor-pointer hover:-translate-y-0.5 active:scale-[0.98] transition-transform duration-100' : ''
+        onClick ? 'cursor-pointer hover:-translate-y-0.5 active:scale-[0.98] transition-transform duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]' : ''
       }`}
       onClick={onClick}
     >
@@ -336,7 +353,8 @@ function RoomTooltip({
 }) {
   return (
     <div
-      className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 bg-surf border border-bdr2 text-tx rounded-xl shadow-modal p-3 text-xs"
+      className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 bg-surf border border-bdr2 text-tx rounded-xl p-3 text-xs fade-in"
+      style={{ boxShadow: 'inset 0 1px 0 var(--specular), 0 16px 36px -8px var(--sh)' }}
     >
       <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-bdr">
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -444,7 +462,7 @@ const HeatmapRoomCell = React.memo(function HeatmapRoomCell({
   return (
     <div className="relative min-w-0 w-full overflow-visible">
       <div
-        className={`relative border rounded-xl px-2 pt-1.5 pb-2 cursor-pointer flex flex-col justify-between gap-1 min-w-0 w-full overflow-hidden select-none shadow-sm hover:shadow-md transition-transform duration-100 hover:-translate-y-0.5 active:scale-[0.97] ${bg} ${
+        className={`relative border rounded-xl px-2 pt-1.5 pb-2 cursor-pointer flex flex-col justify-between gap-1 min-w-0 w-full overflow-hidden select-none shadow-sm hover:shadow-[inset_0_1px_0_var(--specular),0_8px_18px_-6px_var(--sh)] transition-transform duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 active:scale-[0.97] ${bg} ${
           isFemaleRoom
             ? 'tint-pink border-pink-tint'
             : isMaleRoom
@@ -491,7 +509,7 @@ const HeatmapRoomCell = React.memo(function HeatmapRoomCell({
               <div
                 ref={menuRef}
                 onClick={e => e.stopPropagation()}
-                className="absolute right-0 top-full mt-1 z-50 w-36 rounded-xl bg-surf border border-bdr2 shadow-modal p-1 space-y-1"
+                className="absolute right-0 top-full mt-1 z-50 w-36 rounded-xl bg-surf border border-bdr2 shadow-modal p-1 space-y-1 fade-in"
               >
                 <div className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-mu border-b border-bdr pb-0.5 mb-0.5">
                   Đổi công năng {roomLabel}
@@ -1969,8 +1987,8 @@ export default function OccupancyDashboardPage() {
 
         {/* Overloaded Rooms Modal */}
         {showOverloadedModal && (
-          <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
-            <div className="bg-surf border border-bdr rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          <div className="fixed inset-0 z-50 modal-backdrop-scrim fade-in flex items-center justify-center p-4" onClick={() => setShowOverloadedModal(false)}>
+            <div className="surface-elevated rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden modal-enter" onClick={e => e.stopPropagation()}>
               <div className="p-4 sm:p-5 border-b border-bdr flex items-center justify-between bg-act/50">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl tint-dgr border border-dgr flex items-center justify-center text-dgr">

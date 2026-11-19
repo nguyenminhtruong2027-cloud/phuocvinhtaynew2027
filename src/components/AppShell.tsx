@@ -5,6 +5,7 @@ import { Building2, ShieldCheck } from 'lucide-react';
 import Sidebar from './Sidebar';
 import { useAuth } from '@/context/AuthContext';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
+import { PageReveal } from '@/components/ui/MotionPrimitives';
 import CommandPalette from '@/components/ui/CommandPalette';
 
 const PUBLIC_PATHS = ['/sign-up-login', '/login', '/register', '/checkout', '/attendance'];
@@ -67,7 +68,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <Sidebar />
       <div className="flex-1 min-w-0 flex flex-col">
         <main className="flex-1 min-w-0 overflow-x-hidden pt-14 lg:pt-0" suppressHydrationWarning>
-          {children}
+          <PageReveal routeKey={pathname || '/'}>{children}</PageReveal>
         </main>
       </div>
       <CommandPalette />

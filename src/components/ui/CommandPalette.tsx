@@ -2,7 +2,6 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { AnimatePresence, motion } from 'motion/react';
 import {
   Search,
   LayoutDashboard,
@@ -352,31 +351,23 @@ export default function CommandPalette() {
     );
   };
 
-  return (
-    <AnimatePresence>
-      {open && (
-        <div className="fixed inset-0 z-[70] flex items-start justify-center pt-[10vh] sm:pt-[12vh] px-3 sm:px-4">
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.16 }}
-            onClick={() => setOpen(false)}
-            className="fixed inset-0 bg-black/65"
-            aria-hidden="true"
-          />
+  if (!open) return null;
 
-          {/* Palette Dialog */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: -10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: -10 }}
-            transition={{ type: 'spring', stiffness: 440, damping: 32 }}
-            role="dialog"
-            aria-label="Tìm kiếm nhanh toàn hệ thống"
-            className="relative z-10 w-full max-w-2xl surface-elevated rounded-2xl overflow-hidden shadow-2xl border border-bdr3"
-          >
+  return (
+    <div className="fixed inset-0 z-[70] flex items-start justify-center pt-[10vh] sm:pt-[12vh] px-3 sm:px-4">
+      {/* Backdrop */}
+      <div
+        onClick={() => setOpen(false)}
+        className="fixed inset-0 modal-backdrop-scrim fade-in"
+        aria-hidden="true"
+      />
+
+      {/* Palette Dialog */}
+      <div
+        role="dialog"
+        aria-label="Tìm kiếm nhanh toàn hệ thống"
+        className="relative z-10 w-full max-w-2xl surface-elevated rounded-2xl overflow-hidden shadow-2xl border border-bdr3 modal-enter"
+      >
             {/* Search Input Bar */}
             <div className="flex items-center gap-3 px-4 py-3.5 border-b border-bdr bg-surf/95">
               <Search size={18} className="text-lnk shrink-0" />
@@ -439,9 +430,7 @@ export default function CommandPalette() {
                 <span>{pathname === '/' ? 'Tổng quan' : pathname}</span>
               </span>
             </div>
-          </motion.div>
+          </div>
         </div>
-      )}
-    </AnimatePresence>
   );
 }

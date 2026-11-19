@@ -1,6 +1,5 @@
 'use client';
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { motion } from 'motion/react';
 import { Worker, calcSoNgay, getProfileStatus } from '@/data/workers';
 import {
   X,
@@ -332,23 +331,15 @@ export default function RoomDrawer({
         </div>
       )}
 
-      {/* Animated Backdrop */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.18 }}
-        className="fixed inset-0 z-40 bg-black/65"
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-40 modal-backdrop-scrim fade-in"
         onClick={onClose}
       />
 
-      {/* Animated Drawer / Bottom Sheet */}
-      <motion.div
-        initial={{ x: '100%', opacity: 0.9 }}
-        animate={{ x: 0, opacity: 1 }}
-        exit={{ x: '100%', opacity: 0.9 }}
-        transition={{ type: 'spring', stiffness: 390, damping: 36 }}
-        className="fixed inset-x-0 bottom-0 max-h-[88vh] sm:max-h-full sm:top-0 sm:right-0 sm:left-auto sm:inset-x-auto sm:h-full z-50 w-full sm:max-w-md bg-surf border-t sm:border-t-0 sm:border-l border-bdr2 text-tx shadow-2xl flex flex-col rounded-t-2xl sm:rounded-none overflow-hidden"
+      {/* Drawer / Bottom Sheet */}
+      <div
+        className="fixed inset-x-0 bottom-0 max-h-[88vh] sm:max-h-full sm:top-0 sm:right-0 sm:left-auto sm:inset-x-auto sm:h-full z-50 w-full sm:max-w-md bg-surf border-t sm:border-t-0 sm:border-l border-bdr2 text-tx shadow-2xl flex flex-col rounded-t-2xl sm:rounded-none overflow-hidden animate-slide-in-right"
       >
         {/* Header */}
         <div className="px-5 py-4 border-b border-bdr bg-act/55 space-y-2.5">
@@ -414,11 +405,9 @@ export default function RoomDrawer({
                 </span>
               </div>
               <div className="h-1.5 w-full rounded-full bg-surf border border-bdr overflow-hidden">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${occPct}%` }}
-                  transition={{ duration: 0.45, ease: 'easeOut' }}
-                  className={`h-full rounded-full ${isOver ? 'bg-dgr' : isFull ? 'bg-wn' : 'bg-ok2'}`}
+                <div
+                  style={{ width: `${occPct}%` }}
+                  className={`h-full rounded-full transition-[width] duration-300 ease-out ${isOver ? 'bg-dgr' : isFull ? 'bg-wn' : 'bg-ok2'}`}
                 />
               </div>
             </div>
@@ -632,7 +621,7 @@ export default function RoomDrawer({
             </div>
           )}
         </div>
-      </motion.div>
+      </div>
     </>
   );
 }
