@@ -427,8 +427,8 @@ function DetailModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-surf border border-bdr rounded-md w-full max-w-2xl max-h-[92vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop-scrim fade-in p-4">
+      <div className="modal-enter bg-surf border border-bdr rounded-md w-full max-w-2xl max-h-[92vh] overflow-y-auto shadow-2xl">
         {/* Navy Header */}
         <div className="flex items-center justify-between p-4 bg-side text-tx border-b border-bdr">
           <div>
@@ -895,8 +895,8 @@ function DeleteConfirmModal({
   deleting: boolean;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-surf border border-bdr rounded-md w-full max-w-sm p-5 space-y-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop-scrim fade-in p-4">
+      <div className="modal-enter bg-surf border border-bdr rounded-md w-full max-w-sm p-5 space-y-4 shadow-2xl">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded bg-dgrbg text-dgr flex items-center justify-center shrink-0">
             <Trash2 size={16} />

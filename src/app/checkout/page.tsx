@@ -171,12 +171,13 @@ export default function CheckoutPage() {
           rows = rpcData;
         } else {
           // Backwards-compatible fallback if RPC migration has not been executed yet
+          const normTargetRoom = phong.replace(/^(?:phòng|phong|p[.\s]*)\s*/i, '').trim().toLowerCase();
           const { data, error: fetchErr } = await supabase
             .from('workers')
             .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, don_vi, ngay_ra_ktx')
-            .eq('ktx', ktx)
+            .ilike('ktx', ktx)
             .eq('day', day)
-            .eq('phong_so', phong);
+            .range(0, 999);
 
           if (!active) return;
           if (fetchErr) {
@@ -184,7 +185,10 @@ export default function CheckoutPage() {
             setResidents([]);
             return;
           }
-          rows = data || [];
+          rows = (data || []).filter((r: any) => {
+            const nr = String(r?.phong_so || '').replace(/^(?:phòng|phong|p[.\s]*)\s*/i, '').trim().toLowerCase();
+            return nr === normTargetRoom;
+          });
         }
 
         // Prioritize active residents who have not checked out
@@ -306,7 +310,10 @@ export default function CheckoutPage() {
       const codeValue = (cleanMa && cleanMa !== 'Chờ mã' && cleanMa !== '-') ? cleanMa : cleanCccd;
       const phoneValue = (resident.so_dien_thoai && resident.so_dien_thoai !== '-') ? resident.so_dien_thoai : '';
       const bedValue = resident.giuong
-        ? (resident.giuong.startsWith('Giường') ? resident.giuong : `Giường ${resident.giuong}`)
+        ? resident.giuong
+            .trim()
+            .replace(/^(?:giường|giuong|g[.\s]*)\s*/i, '')
+            .trim() || resident.giuong.trim()
         : '';
 
       setForm(prev => ({
@@ -470,7 +477,7 @@ export default function CheckoutPage() {
               <p className="font-semibold text-ok border-b border-border pb-1">
                 Chi tiết xác nhận:
               </p>
-              <p>• <strong>Khu vực phòng:</strong> {form.ktx} - {form.day} - Phòng {form.phong_so} {form.giuong ? `(${form.giuong})` : ''}</p>
+              <p>• <strong>Khu vực phòng:</strong> {form.ktx} - {form.day} - Phòng {form.phong_so} {form.giuong ? `(${/^giường/i.test(form.giuong) ? form.giuong : `Giường ${form.giuong}`})` : ''}</p>
               <p>• <strong>Lý do dọn ra:</strong> {form.ly_do === 'Khác' ? form.ly_do_chi_tiet : form.ly_do}</p>
               <p>• <strong>Ngày dự kiến trả phòng:</strong> {form.ngay_ra}</p>
               <div className="mt-2 pt-2 border-t border-border text-muted-foreground space-y-1">

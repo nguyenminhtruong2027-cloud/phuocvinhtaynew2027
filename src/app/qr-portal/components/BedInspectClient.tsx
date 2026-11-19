@@ -167,20 +167,30 @@ export default function BedInspectClient() {
               if (data && data[0]) w = mapWorker(data[0]);
             }
             if (!w && found.ktx) {
-              const { data: ktxWorkers } = await supabase
-                .from('workers')
-                .select('*')
-                .eq('ktx', found.ktx.trim());
               const normRoom = normalizeRoomLabel(found.phong_so);
               const normBed = normalizeBedLabel(found.giuong);
-              const normName = (found.ho_va_ten || '').trim().toLowerCase().replace(/\s+/g, ' ');
-              const matched = (ktxWorkers || []).find((row: any) => {
-                const sameDay = !found.day || !row?.day || String(row.day).trim() === found.day.trim();
-                const sameRoom = normalizeRoomLabel(String(row?.phong_so || '')) === normRoom;
-                const sameBed = normBed && normalizeBedLabel(String(row?.giuong || '')) === normBed;
-                const sameName = normName && String(row?.ho_va_ten || '').trim().toLowerCase().replace(/\s+/g, ' ') === normName;
-                return sameDay && sameRoom && (sameBed || sameName);
-              });
+              const normName = (found.ho_va_ten || '').normalize('NFC').trim().toLowerCase().replace(/\s+/g, ' ');
+              const PAGE = 1000;
+              let from = 0;
+              let matched: any = null;
+              while (!matched) {
+                const { data: ktxWorkers, error: kwErr } = await supabase
+                  .from('workers')
+                  .select('*')
+                  .ilike('ktx', found.ktx.trim())
+                  .order('id', { ascending: true })
+                  .range(from, from + PAGE - 1);
+                if (kwErr || !ktxWorkers || ktxWorkers.length === 0) break;
+                matched = ktxWorkers.find((row: any) => {
+                  const sameDay = !found.day || !row?.day || String(row.day).trim().toLowerCase() === found.day.trim().toLowerCase();
+                  const sameRoom = normalizeRoomLabel(String(row?.phong_so || '')) === normRoom;
+                  const sameBed = normBed && normalizeBedLabel(String(row?.giuong || '')) === normBed;
+                  const sameName = normName && String(row?.ho_va_ten || '').normalize('NFC').trim().toLowerCase().replace(/\s+/g, ' ') === normName;
+                  return sameDay && sameRoom && (sameBed || sameName);
+                });
+                if (matched || ktxWorkers.length < PAGE) break;
+                from += PAGE;
+              }
               if (matched) w = mapWorker(matched);
             }
           } catch (err) {
@@ -396,6 +406,10 @@ export default function BedInspectClient() {
       invalidateWorkerHierarchyCache();
       invalidateKtxStructureCache();
       invalidateFacilitiesCache();
+      if (typeof window !== 'undefined' && targetWorkerId) {
+        window.dispatchEvent(new CustomEvent('ktx_workers_deleted', { detail: { ids: [targetWorkerId] } }));
+        window.dispatchEvent(new CustomEvent('ktx_workers_updated'));
+      }
 
       setMessage(`✓ Đã check-out "${targetName || 'công nhân'}" và giải phóng Giường ${bed.giuong} tức thì!`);
       toast.success(`Đã giải phóng Giường ${bed.giuong}!`);

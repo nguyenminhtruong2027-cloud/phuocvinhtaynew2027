@@ -115,12 +115,14 @@ interface WorkerContextValue {
     }
   ) => Promise<void>;
   refreshWorkers: () => Promise<void>;
+  markWorkersDeleted: (ids: string[]) => void;
   setWorkers: React.Dispatch<React.SetStateAction<Worker[]>>;
 }
 
 const WorkerContext = createContext<WorkerContextValue | null>(null);
 
 const FETCH_PAGE_SIZE = 1000;
+const RECENTLY_DELETED_TTL_MS = 30_000;
 
 export function WorkerProvider({ children }: { children: React.ReactNode }) {
   const { currentUser, isAdmin, canWriteBlock, loading: authLoading } = useAuth();
@@ -136,8 +138,51 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const workerMetaByIdRef = useRef<Map<string, Worker>>(new Map());
   const lastFetchedAtRef = useRef<number>(0);
+  const fetchSeqRef = useRef<number>(0);
+  const recentlyDeletedIdsRef = useRef<Map<string, number>>(new Map());
+
+  const pruneRecentlyDeleted = useCallback(() => {
+    const now = Date.now();
+    for (const [id, deletedAt] of recentlyDeletedIdsRef.current.entries()) {
+      if (now - deletedAt > RECENTLY_DELETED_TTL_MS) {
+        recentlyDeletedIdsRef.current.delete(id);
+      }
+    }
+  }, []);
+
+  const isRecentlyDeleted = useCallback((id?: string | null): boolean => {
+    if (!id) return false;
+    const deletedAt = recentlyDeletedIdsRef.current.get(id);
+    if (!deletedAt) return false;
+    if (Date.now() - deletedAt > RECENTLY_DELETED_TTL_MS) {
+      recentlyDeletedIdsRef.current.delete(id);
+      return false;
+    }
+    return true;
+  }, []);
+
+  const markWorkersDeleted = useCallback((ids: string[]) => {
+    const cleanIds = ids.map(id => String(id || '').trim()).filter(Boolean);
+    if (cleanIds.length === 0) return;
+
+    const now = Date.now();
+    const idSet = new Set(cleanIds);
+    // Bump fetchSeqRef so any earlier in-flight fetchWorkers resolves as stale and cannot restore these workers.
+    fetchSeqRef.current += 1;
+    cleanIds.forEach(id => {
+      recentlyDeletedIdsRef.current.set(id, now);
+      workerMetaByIdRef.current.delete(id);
+    });
+
+    setWorkers(prev => {
+      const next = prev.filter(w => !idSet.has(w.id));
+      setTotalWorkerCount(next.length);
+      return next;
+    });
+  }, []);
 
   const fetchWorkers = useCallback(async (isRefresh = false) => {
+    const seq = ++fetchSeqRef.current;
     if (isRefresh) setRefreshing(true);
     try {
       const allRows: Worker[] = [];
@@ -166,11 +211,19 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
+      // Discard stale fetch if another mutation / newer fetch happened while this request was in-flight
+      if (seq !== fetchSeqRef.current) return;
+
+      pruneRecentlyDeleted();
       const metaMap = new Map<string, Worker>();
       const noIdRows: Worker[] = [];
       allRows.forEach(w => {
-        if (w.id) metaMap.set(w.id, w);
-        else noIdRows.push(w);
+        if (w.id) {
+          if (isRecentlyDeleted(w.id)) return;
+          metaMap.set(w.id, w);
+        } else {
+          noIdRows.push(w);
+        }
       });
       const uniqueRows = [...Array.from(metaMap.values()), ...noIdRows];
       uniqueRows.sort((a, b) => (a.stt ?? 0) - (b.stt ?? 0) || a.hoVaTen.localeCompare(b.hoVaTen));
@@ -180,15 +233,19 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       setTotalWorkerCount(uniqueRows.length);
     } catch (err: any) {
       console.warn('Load workers warning:', err?.message || err);
-      if (!isRefresh) {
+      if (seq === fetchSeqRef.current && !isRefresh) {
         setWorkers([]);
         setTotalWorkerCount(0);
       }
     } finally {
-      if (isRefresh) setRefreshing(false);
-      else setLoading(false);
+      if (seq === fetchSeqRef.current) {
+        if (isRefresh) setRefreshing(false);
+        else setLoading(false);
+      } else {
+        setRefreshing(false);
+      }
     }
-  }, [supabase]);
+  }, [supabase, pruneRecentlyDeleted, isRecentlyDeleted]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -214,6 +271,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
         (payload) => {
           if (payload.eventType === 'INSERT') {
             const newWorker = dbRowToWorker(payload.new as Record<string, unknown>);
+            if (newWorker.id && isRecentlyDeleted(newWorker.id)) return;
             if (newWorker.id) workerMetaByIdRef.current.set(newWorker.id, newWorker);
             setWorkers(prev => {
               if (prev.some(w => w.id === newWorker.id)) return prev;
@@ -227,6 +285,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
             });
           } else if (payload.eventType === 'UPDATE') {
             const updated = dbRowToWorker(payload.new as Record<string, unknown>);
+            if (updated.id && isRecentlyDeleted(updated.id)) return;
             if (updated.id) workerMetaByIdRef.current.set(updated.id, updated);
             setWorkers(prev => prev.map(w => w.id === updated.id ? updated : w));
           } else if (payload.eventType === 'DELETE') {
@@ -234,13 +293,8 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
             const prevMeta = workerMetaByIdRef.current.get(deletedId);
             if (prevMeta) {
               preserveDeletedWorkerEntries([prevMeta]);
-              workerMetaByIdRef.current.delete(deletedId);
             }
-            setWorkers(prev => {
-              const next = prev.filter(w => w.id !== deletedId);
-              setTotalWorkerCount(next.length);
-              return next;
-            });
+            markWorkersDeleted([deletedId]);
           }
         }
       )
@@ -253,13 +307,21 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
         fetchWorkers(true);
       }
     };
+    const handleExternalDeleted = (e: Event) => {
+      const detail = (e as CustomEvent<{ ids?: string[] }>).detail;
+      if (Array.isArray(detail?.ids) && detail.ids.length > 0) {
+        markWorkersDeleted(detail.ids);
+      }
+    };
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('ktx_workers_deleted', handleExternalDeleted);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('ktx_workers_deleted', handleExternalDeleted);
       supabase.removeChannel(workersChannel);
     };
-  }, [shouldLoadWorkers, supabase, fetchWorkers]);
+  }, [shouldLoadWorkers, supabase, fetchWorkers, isRecentlyDeleted, markWorkersDeleted]);
 
   const refreshWorkers = useCallback(async () => {
     await fetchWorkers(true);
@@ -330,13 +392,8 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       .eq('id', id);
     if (error) throw new Error(error.message);
     await releaseBedsForWorkers(supabase, [id]);
-    workerMetaByIdRef.current.delete(id);
-    setWorkers(prev => {
-      const next = prev.filter(w => w.id !== id);
-      setTotalWorkerCount(next.length);
-      return next;
-    });
-  }, [workers, supabase]);
+    markWorkersDeleted([id]);
+  }, [workers, supabase, markWorkersDeleted]);
 
   const deleteWorkers = useCallback(async (ids: string[]) => {
     if (ids.length === 0) return;
@@ -367,14 +424,8 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       .in('id', ids);
     if (error) throw new Error(error.message);
     await releaseBedsForWorkers(supabase, ids);
-    const idSet = new Set(ids);
-    ids.forEach(id => workerMetaByIdRef.current.delete(id));
-    setWorkers(prev => {
-      const next = prev.filter(w => !idSet.has(w.id));
-      setTotalWorkerCount(next.length);
-      return next;
-    });
-  }, [workers, supabase]);
+    markWorkersDeleted(ids);
+  }, [workers, supabase, markWorkersDeleted]);
 
   const deleteAllWorkers = useCallback(async () => {
     const now = new Date().toISOString();
@@ -423,9 +474,8 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
     }
 
     await releaseAllOccupiedBeds(supabase);
-    setWorkers([]);
-    setTotalWorkerCount(0);
-  }, [workers, supabase]);
+    markWorkersDeleted(ids);
+  }, [workers, supabase, markWorkersDeleted]);
 
   const importWorkers = useCallback(async (rows: Worker[]) => {
     if (rows.length === 0) return;
@@ -577,6 +627,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       bulkUpdateKtx,
       bulkUpdateWorkers,
       refreshWorkers,
+      markWorkersDeleted,
       setWorkers,
     }}>
       {children}

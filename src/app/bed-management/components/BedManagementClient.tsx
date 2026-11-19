@@ -99,12 +99,25 @@ function shortName(full?: string | null): string {
   return parts[parts.length - 1] || s;
 }
 
+function normNfcLower(v?: string | null): string {
+  return String(v || '').normalize('NFC').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function normDayValue(v?: string | null): string {
+  return normNfcLower(v).replace(/^(?:dãy|day|d[.\s]*)\s*/i, '');
+}
+
 export default function BedManagementClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isAdmin, canWriteBlock, currentUser } = useAuth();
   const { addLog } = useAudit();
-  const { workers: contextWorkers, setWorkers: setContextWorkers, refreshWorkers } = useWorkers();
+  const {
+    workers: contextWorkers,
+    setWorkers: setContextWorkers,
+    markWorkersDeleted: markContextWorkersDeleted,
+    refreshWorkers,
+  } = useWorkers();
   const [beds, setBeds] = useState<BedRow[]>([]);
   const [hoveredBedId, setHoveredBedId] = useState<string | null>(null);
   const workers = useMemo<WorkerLite[]>(
@@ -420,6 +433,8 @@ export default function BedManagementClient() {
     beds: BedRow[];
     cap: number;
     occupied: number;
+    maleCount: number;
+    femaleCount: number;
     maintenance: number;
     empty: number;
     overloaded: boolean;
@@ -440,6 +455,8 @@ export default function BedManagementClient() {
           beds: [],
           cap: roomCap(ktx, day, room),
           occupied: 0,
+          maleCount: 0,
+          femaleCount: 0,
           maintenance: 0,
           empty: 0,
           overloaded: false,
@@ -447,9 +464,20 @@ export default function BedManagementClient() {
       }
       const g = map.get(key)!;
       g.beds.push(b);
-      if (b?.status === 'occupied') g.occupied++;
-      else if (b?.status === 'maintenance') g.maintenance++;
-      else g.empty++;
+      if (b?.status === 'occupied') {
+        g.occupied++;
+        const w = getWorkerForBed(b);
+        const gender = (w?.gioiTinh || '').trim().toLowerCase();
+        if (gender === 'nữ' || gender === 'nu' || gender === 'female' || gender.includes('nữ')) {
+          g.femaleCount++;
+        } else {
+          g.maleCount++;
+        }
+      } else if (b?.status === 'maintenance') {
+        g.maintenance++;
+      } else {
+        g.empty++;
+      }
     });
     const list = [...map.values()];
     list.forEach(g => {
@@ -468,7 +496,7 @@ export default function BedManagementClient() {
       return a.room.localeCompare(b.room, 'vi', { numeric: true });
     });
     return list;
-  }, [bedsFiltered, roomCap]);
+  }, [bedsFiltered, roomCap, getWorkerForBed]);
 
   const occupiedCount = useMemo(() => bedsFiltered.filter(b => b?.status === 'occupied').length, [bedsFiltered]);
   const emptyCount = useMemo(() => bedsFiltered.filter(b => b?.status === 'empty').length, [bedsFiltered]);
@@ -808,16 +836,29 @@ export default function BedManagementClient() {
       if (bed.ktx) {
         const normRoom = normalizeRoomLabel(bed.phong_so || '');
         const normBed = normalizeBedLabel(bed.giuong || '');
-        const normName = (bed.ho_va_ten || '').trim().toLowerCase().replace(/\s+/g, ' ');
-        const { data: ktxWorkers } = await supabase
-          .from('workers')
-          .select('id, ho_va_ten, ma_nv, cccd, don_vi, gioi_tinh, so_dien_thoai, ngay_vao_ktx, ktx, day, phong_so, giuong')
-          .eq('ktx', bed.ktx);
-        const found = (ktxWorkers || []).find((w: any) => {
+        const normBedDay = normDayValue(bed.day);
+        const normName = normNfcLower(bed.ho_va_ten);
+
+        const ktxWorkers: any[] = [];
+        for (let page = 0; page < 15; page++) {
+          const from = page * PAGE;
+          const { data, error: pageErr } = await supabase
+            .from('workers')
+            .select('id, ho_va_ten, ma_nv, cccd, don_vi, gioi_tinh, so_dien_thoai, ngay_vao_ktx, ktx, day, phong_so, giuong')
+            .ilike('ktx', bed.ktx.trim())
+            .order('id', { ascending: true })
+            .range(from, from + PAGE - 1);
+          if (pageErr || !data || data.length === 0) break;
+          ktxWorkers.push(...data);
+          if (data.length < PAGE) break;
+        }
+
+        const found = ktxWorkers.find((w: any) => {
           const sameRoom = normalizeRoomLabel(String(w?.phong_so || '')) === normRoom;
-          const sameDay = !bed.day || !w?.day || String(w.day).trim() === bed.day.trim();
-          const sameBed = normBed && normalizeBedLabel(String(w?.giuong || '')) === normBed;
-          const sameName = normName && String(w?.ho_va_ten || '').trim().toLowerCase().replace(/\s+/g, ' ') === normName;
+          const normWorkerDay = normDayValue(w?.day);
+          const sameDay = !normBedDay || !normWorkerDay || normWorkerDay === normBedDay;
+          const sameBed = Boolean(normBed && normalizeBedLabel(String(w?.giuong || '')) === normBed);
+          const sameName = Boolean(normName && normNfcLower(w?.ho_va_ten) === normName);
           return sameDay && sameRoom && (sameBed || sameName);
         });
         if (found?.id) {
@@ -993,7 +1034,12 @@ export default function BedManagementClient() {
       } catch {}
 
       if (deletedWorkerId) {
+        markContextWorkersDeleted([deletedWorkerId]);
         setContextWorkers(prev => prev.filter(w => w.id !== deletedWorkerId));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('ktx_workers_deleted', { detail: { ids: [deletedWorkerId] } }));
+          window.dispatchEvent(new Event('ktx_workers_updated'));
+        }
       }
 
       setBeds(prev =>
@@ -1026,7 +1072,7 @@ export default function BedManagementClient() {
     } finally {
       setBusy(false);
     }
-  }, [drawerBed, canWriteBed, resolveLiveWorkerForBed, supabase, currentUser, setContextWorkers, addLog, refreshWorkers]);
+  }, [drawerBed, canWriteBed, resolveLiveWorkerForBed, supabase, currentUser, markContextWorkersDeleted, setContextWorkers, addLog, refreshWorkers]);
 
   const setBedStatus = useCallback(
     async (bed: BedRow, status: BedStatus) => {
@@ -1107,29 +1153,50 @@ export default function BedManagementClient() {
     });
   }, [workers, occupiedIds, candidateSearch]);
 
-  const isFemale = (worker?: WorkerLite | null, fallbackName?: string | null) => {
-    const g = (worker?.gioiTinh || fallbackName || '').toLowerCase();
-    return g.includes('nữ') || g === 'nu' || g === 'female';
+  const isFemale = (worker?: WorkerLite | null) => {
+    const g = (worker?.gioiTinh || '').trim().toLowerCase();
+    return g === 'nữ' || g === 'nu' || g === 'female' || g.includes('nữ');
   };
 
-  // ─── Small building blocks ─────────────────────────────────────────────────
+  // ─── Small building blocks (Sơ Đồ Giường Tầng Trực Quan) ──────────────────
   const statusBadge = (status: BedStatus, female: boolean) => {
-    if (status === 'occupied')
-      return <span className={`inline-flex items-center gap-1 text-[10px] font-extrabold ${female ? 'text-pri2' : 'text-ok'}`}><UserCheck size={10} /> Đã ở</span>;
-    if (status === 'maintenance')
-      return <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-wn"><Wrench size={10} /> Đang bảo trì</span>;
-    return <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-lnk"><UserX size={10} /> Còn trống</span>;
+    if (status === 'occupied') {
+      return female ? (
+        <span className="text-[11px] font-bold text-pink-tone tracking-tight">♀ Nữ</span>
+      ) : (
+        <span className="text-[11px] font-bold text-lnk tracking-tight">♂ Nam</span>
+      );
+    }
+    if (status === 'maintenance') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-wn">
+          <Wrench size={10} /> Bảo trì
+        </span>
+      );
+    }
+    return <span className="text-[11px] font-semibold text-ok">Còn trống</span>;
   };
 
   const bedCellClasses = (status: BedStatus, female: boolean) => {
-    // Base: viền sáng nét + nền tối tương phản cao (bg-surf)
-    if (status === 'occupied')
+    if (status === 'occupied') {
       return female
-        ? 'bg-surf border border-bdr2 hover:border-bdr2 hover:bg-dgrbg'
-        : 'bg-surf border border-ok2 hover:border-ok hover:bg-okbg';
-    if (status === 'maintenance')
-      return 'bg-surf border border-wn hover:border-wn hover:bg-okbg';
-    return 'bg-surf border border-dashed border-pri2 hover:border-pri2 hover:bg-bdg';
+        ? 'bg-surf border border-pink-tint hover:border-[var(--pink-fg)] hover:tint-pink'
+        : 'bg-surf border border-pri2/55 hover:border-pri2 hover:bg-bdg/45';
+    }
+    if (status === 'maintenance') {
+      return 'tint-wn border border-wn/65 hover:border-wn';
+    }
+    return 'bg-page/60 border border-dashed border-ok/45 hover:border-ok2 hover:bg-okbg/40';
+  };
+
+  const bedHeadboardClass = (status: BedStatus, female: boolean) => {
+    if (status === 'occupied') {
+      return female ? 'bg-[var(--pink-fg)]' : 'bg-pri2';
+    }
+    if (status === 'maintenance') {
+      return 'bg-wn';
+    }
+    return 'bg-ok2/45';
   };
 
   const BedTooltip = ({ bed, worker }: { bed: BedRow; worker?: WorkerLite | null }) => (
@@ -1141,11 +1208,11 @@ export default function BedManagementClient() {
         {(() => {
           const w = bed?.worker_id ? (workerById.get(bed.worker_id) || worker) : worker;
           const name = bed?.ho_va_ten || w?.hoVaTen || null;
-          const female = isFemale(w, bed?.ho_va_ten);
+          const female = isFemale(w);
           return (
             <>
               <div className="flex items-center gap-2.5 mb-2">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${name ? (female ? 'bg-bdg text-pri2' : 'bg-okbg text-ok') : 'bg-act text-mu'}`}>
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${name ? (female ? 'tint-pink text-pink-tone border border-pink-tint' : 'bg-bdg text-lnk border border-pri2/40') : 'bg-act text-mu'}`}>
                   {name ? name.charAt(0).toUpperCase() : <BedDouble size={16} />}
                 </div>
                 <div className="min-w-0">
@@ -1350,17 +1417,32 @@ export default function BedManagementClient() {
           ))}
         </div>
 
-        {/* Legend */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1 border-t border-bdr">
-          <span className="text-[11px] font-extrabold text-tx uppercase tracking-wider">Chú thích:</span>
+        {/* Legend — Sơ Đồ Giường Tầng Trực Quan */}
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-2 border-t border-bdr">
+          <span className="text-[11px] font-extrabold text-tx uppercase tracking-wider">Sơ đồ màu giường:</span>
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-tx">
-            <span className="w-3.5 h-3.5 rounded bg-ok2/40 border border-ok2" /> Đã ở (Occupied)
+            <span className="w-4 h-3.5 rounded border border-pri2/60 bg-surf relative overflow-hidden inline-block">
+              <span className="absolute inset-x-0 top-0 h-1 bg-pri2" />
+            </span>
+            Nam (Đã ở)
           </span>
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-tx">
-            <span className="w-3.5 h-3.5 rounded border border-dashed border-pri2 bg-bdg" /> Còn trống (Available)
+            <span className="w-4 h-3.5 rounded border border-pink-tint bg-surf relative overflow-hidden inline-block">
+              <span className="absolute inset-x-0 top-0 h-1 bg-[var(--pink-fg)]" />
+            </span>
+            Nữ (Đã ở)
           </span>
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-tx">
-            <span className="w-3.5 h-3.5 rounded tint-wn border border-wn" /> Bảo trì (Maintenance)
+            <span className="w-4 h-3.5 rounded border border-dashed border-ok/60 bg-page relative overflow-hidden inline-block">
+              <span className="absolute inset-x-0 top-0 h-1 bg-ok2/50" />
+            </span>
+            Còn trống
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-tx">
+            <span className="w-4 h-3.5 rounded border border-wn/70 tint-wn relative overflow-hidden inline-block">
+              <span className="absolute inset-x-0 top-0 h-1 bg-wn" />
+            </span>
+            Bảo trì
           </span>
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-tx">
             <span className="w-3.5 h-3.5 rounded tint-dgr border border-dgr" /> Phòng quá tải
@@ -1431,17 +1513,28 @@ export default function BedManagementClient() {
                         g.overloaded ? 'border-dgr tint-dgr' : 'border-bdr bg-surf'
                       }`}>
                         <div className="flex items-center justify-between gap-2 mb-2.5">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="text-sm font-extrabold text-tx bg-act border border-bdr px-2.5 py-1 rounded-xl">
+                          <div className="flex items-center gap-2.5 min-w-0 flex-wrap">
+                            <span className="text-sm font-extrabold text-tx bg-act border border-bdr px-2.5 py-1 rounded-xl shrink-0">
                               {formatRoomDisplay(g.room)}
                             </span>
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-tabular text-mu truncate">
+                              {g.occupied > 0 && (
+                                <>
+                                  {g.maleCount > 0 && <span className="text-lnk font-semibold">♂ {g.maleCount} Nam</span>}
+                                  {g.maleCount > 0 && g.femaleCount > 0 && <span className="text-ic">·</span>}
+                                  {g.femaleCount > 0 && <span className="text-pink-tone font-semibold">♀ {g.femaleCount} Nữ</span>}
+                                  <span className="text-ic">·</span>
+                                </>
+                              )}
+                              <span className={g.empty > 0 ? 'text-ok font-medium' : 'text-mu'}>{g.empty} trống</span>
+                            </span>
                             {g.overloaded && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full tint-dgr text-dgr border border-dgr">
+                              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-md tint-dgr text-dgr border border-dgr">
                                 <AlertCircle size={9} /> Quá tải
                               </span>
                             )}
                             {g.maintenance > 0 && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full tint-wn text-wn border border-wn">
+                              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-md tint-wn text-wn border border-wn">
                                 <Wrench size={9} /> {g.maintenance} bảo trì
                               </span>
                             )}
@@ -1453,12 +1546,12 @@ export default function BedManagementClient() {
                         <div className="w-full h-1.5 bg-bdr2 rounded-full overflow-hidden mb-3">
                           <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(pct * 100, 100)}%` }} />
                         </div>
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
                           {g.beds.map(bed => {
                             const worker = getWorkerForBed(bed);
                             const occupied = bed?.status === 'occupied';
                             const maintenance = bed?.status === 'maintenance';
-                            const female = occupied && isFemale(worker, bed?.ho_va_ten);
+                            const female = occupied && isFemale(worker);
                             const unit = worker?.donVi || '';
                             const bedLabel = `G${bed?.giuong || '?'}`;
                             const isHovered = occupied && hoveredBedId === bed?.id;
@@ -1480,28 +1573,39 @@ export default function BedManagementClient() {
                                     setCandidateSearch('');
                                   }
                                 }}
-                                className={`relative text-left rounded-xl border p-2.5 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-pri2 overflow-visible ${bedCellClasses(bed?.status ?? 'empty', female)}`}
+                                className={`relative text-left rounded-xl p-2.5 pt-3 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-pri2 overflow-visible ${bedCellClasses(bed?.status ?? 'empty', female)}`}
                               >
-                                <div className="flex items-center justify-between mb-1">
-                                  <span className="inline-flex items-center gap-1 text-xs font-extrabold text-lnk font-tabular">
-                                    <BedDouble size={12} /> {bedLabel}
+                                {/* Đầu giường trực quan (Headboard accent strip — không clipping Tooltip) */}
+                                <span
+                                  aria-hidden="true"
+                                  className={`pointer-events-none absolute inset-x-0 top-0 h-[3.5px] rounded-t-[11px] ${bedHeadboardClass(bed?.status ?? 'empty', female)}`}
+                                />
+                                <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                                  <span className="inline-flex items-center gap-1 text-xs font-mono font-tabular font-bold text-tx">
+                                    <BedDouble size={12} className={occupied ? (female ? 'text-pink-tone' : 'text-lnk') : maintenance ? 'text-wn' : 'text-ok'} />
+                                    {bedLabel}
                                   </span>
                                   {statusBadge(bed?.status ?? 'empty', female)}
                                 </div>
                                 {occupied ? (
                                   <div className="space-y-0.5 min-w-0">
-                                    <p className="text-sm font-extrabold text-tx truncate">{shortName(bed?.ho_va_ten) || shortName(worker?.hoVaTen) || '?'}</p>
-                                    <p className="text-[10px] font-bold text-tx font-tabular truncate">MNV {bed?.ma_nv || worker?.maNV || '—'}</p>
-                                    {unit && (
-                                      <span className="inline-flex max-w-full items-center px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-act text-lnk border border-pri2/50 truncate">
-                                        {unit}
-                                      </span>
-                                    )}
+                                    <p className="text-sm font-bold text-tx truncate">
+                                      {shortName(bed?.ho_va_ten) || shortName(worker?.hoVaTen) || '?'}
+                                    </p>
+                                    <p className="text-[11px] font-tabular truncate flex items-center gap-1 text-mu">
+                                      <span className="font-mono font-semibold text-tx/85">MNV {bed?.ma_nv || worker?.maNV || '—'}</span>
+                                      {unit && (
+                                        <>
+                                          <span className="text-ic">·</span>
+                                          <span className="truncate text-lnk font-medium">{unit}</span>
+                                        </>
+                                      )}
+                                    </p>
                                   </div>
                                 ) : maintenance ? (
-                                  <p className="text-xs font-bold text-wn">Đang kiểm tra / sửa</p>
+                                  <p className="text-xs font-semibold text-wn">Đang kiểm tra / sửa</p>
                                 ) : (
-                                  <p className="text-[11px] font-bold text-lnk">Bấm để gán…</p>
+                                  <p className="text-[11px] font-medium text-mu">Bấm để gán công nhân…</p>
                                 )}
                                 {isHovered && <BedTooltip bed={bed} worker={worker} />}
                               </button>
@@ -1531,7 +1635,7 @@ export default function BedManagementClient() {
                   <tbody className="divide-y divide-bdr">
                     {bedsFiltered.map(bed => {
                       const worker = bed?.worker_id ? (workerById.get(bed.worker_id) || null) : null;
-                      const female = isFemale(worker, bed?.ho_va_ten);
+                      const female = isFemale(worker);
                       return (
                         <tr key={bed?.id} className="hover:bg-surf transition-colors">
                           <td className="px-3 py-2 text-xs font-bold text-tx whitespace-nowrap">{bed?.ktx || '—'}</td>
@@ -1540,10 +1644,10 @@ export default function BedManagementClient() {
                           <td className="px-3 py-2 text-xs text-tx font-tabular whitespace-nowrap">G{bed?.giuong || '—'}</td>
                           <td className="px-3 py-2 whitespace-nowrap">
                             {bed?.status === 'occupied'
-                              ? <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${female ? 'bg-bdg text-pri2 border-bdr2' : 'bg-okbg text-ok border-bdr2'}`}>Đã ở</span>
+                              ? <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${female ? 'tint-pink text-pink-tone border-pink-tint' : 'bg-bdg text-lnk border-pri2/40'}`}>{female ? '♀ Nữ · Đã ở' : '♂ Nam · Đã ở'}</span>
                               : bed?.status === 'maintenance'
-                              ? <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border tint-wn text-wn border-wn">Bảo trì</span>
-                              : <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border border-dashed bg-bdg text-lnk border-bdr2">Trống</span>}
+                              ? <span className="px-2 py-0.5 rounded-md text-[10px] font-bold border tint-wn text-wn border-wn">Bảo trì</span>
+                              : <span className="px-2 py-0.5 rounded-md text-[10px] font-bold border border-dashed bg-okbg text-ok border-ok/40">Trống</span>}
                           </td>
                           <td className="px-3 py-2 text-xs text-tx font-semibold truncate max-w-[160px]">{bed?.ho_va_ten || worker?.hoVaTen || '—'}</td>
                           <td className="px-3 py-2 text-xs text-mu font-tabular whitespace-nowrap">{bed?.ma_nv || worker?.maNV || '—'}</td>
@@ -1685,8 +1789,8 @@ export default function BedManagementClient() {
 
       {/* ─── Assign Modal ─── */}
       {assignTarget && (
-        <div className="fixed inset-0 z-50 bg-black/65 flex items-center justify-center p-4" onClick={() => setAssignTarget(null)}>
-          <div className="bg-surf border border-bdr rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 modal-backdrop-scrim fade-in flex items-center justify-center p-4" onClick={() => setAssignTarget(null)}>
+          <div className="modal-enter bg-surf border border-bdr rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-bdr">
               <div>
                 <h3 className="font-bold text-tx flex items-center gap-2"><UserCheck size={16} className="text-ok" /> Gán công nhân vào giường</h3>
@@ -1744,7 +1848,7 @@ export default function BedManagementClient() {
       {/* ─── Quick Drawer (right side) ─── */}
       {drawerBed && (
         <>
-          <div className="fixed inset-0 z-40 bg-black/65" onClick={() => { setDrawerBed(null); setShowTransferModal(false); }} />
+          <div className="fixed inset-0 z-40 modal-backdrop-scrim fade-in" onClick={() => { setDrawerBed(null); setShowTransferModal(false); }} />
           <div
             className="fixed z-50 animate-slide-in-right bottom-0 inset-x-0 max-h-[85vh] sm:max-h-full sm:top-0 sm:right-0 sm:left-auto sm:inset-x-auto sm:h-full w-full sm:max-w-md bg-surf border-t sm:border-t-0 sm:border-l border-bdr text-tx shadow-2xl flex flex-col rounded-t-2xl sm:rounded-none overflow-hidden"
           >
@@ -1767,7 +1871,7 @@ export default function BedManagementClient() {
               {(() => {
                 const w = getWorkerForBed(drawerBed);
                 const name = drawerBed?.ho_va_ten || w?.hoVaTen || '';
-                const female = isFemale(w, drawerBed?.ho_va_ten);
+                const female = isFemale(w);
                 if (!name) {
                   return (
                     <div className="rounded-xl border border-bdr2 bg-bdg p-4 text-sm text-lnk">
@@ -1777,13 +1881,13 @@ export default function BedManagementClient() {
                 }
                 return (
                   <div className="flex items-center gap-4 rounded-xl border border-bdr bg-surf p-4">
-                    <div className={`w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold shrink-0 ${female ? 'bg-bdg text-pri2 border border-bdr2' : 'bg-okbg text-ok border border-bdr2'}`}>
+                    <div className={`w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold shrink-0 ${female ? 'tint-pink text-pink-tone border border-pink-tint' : 'bg-bdg text-lnk border border-pri2/40'}`}>
                       {name.charAt(0).toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0 space-y-1">
                       <p className="text-base font-bold text-tx flex items-center gap-2 truncate">
                         {name}
-                        {female && <VenusAndMars size={14} className="text-pri2 shrink-0" />}
+                        {female && <VenusAndMars size={14} className="text-pink-tone shrink-0" />}
                       </p>
                       <p className="text-xs text-mu font-tabular flex items-center gap-1.5"><User size={11} className="shrink-0" /> Mã NV: {drawerBed?.ma_nv || w?.maNV || '—'}</p>
                       <p className="text-xs text-mu flex items-center gap-1.5 truncate"><Briefcase size={11} className="shrink-0" /> Đơn vị: {w?.donVi || '—'}</p>
@@ -1887,8 +1991,8 @@ export default function BedManagementClient() {
 
       {/* ─── Swap Bed Modal (Hoán đổi 2 công nhân A <-> B) ─── */}
       {swapSourceBed && (
-        <div className="fixed inset-0 z-50 bg-black/65 flex items-center justify-center p-4" onClick={() => { setSwapSourceBed(null); setSwapSearch(''); }}>
-          <div className="bg-surf border border-bdr2 rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 modal-backdrop-scrim fade-in flex items-center justify-center p-4" onClick={() => { setSwapSourceBed(null); setSwapSearch(''); }}>
+          <div className="modal-enter bg-surf border border-bdr2 rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-bdr bg-act/50">
               <div>
                 <h3 className="font-bold text-tx flex items-center gap-2">
