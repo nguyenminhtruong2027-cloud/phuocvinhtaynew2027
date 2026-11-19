@@ -600,7 +600,7 @@ function ExcelImportModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65">
       <div className="surface-elevated rounded-2xl shadow-2xl border border-bdr3 w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
           <div>
@@ -934,7 +934,7 @@ function BulkAssignKtxModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65">
       <div className="surface-elevated rounded-2xl shadow-2xl border border-bdr3 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
           <div>
@@ -1076,7 +1076,7 @@ function TamTruExportModal({ workers, onClose }: { workers: Worker[]; onClose: (
   const unregisteredCount = workers.filter(w => w.tamTruStatus !== 'registered').length;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65">
       <div className="surface-elevated rounded-2xl shadow-2xl border border-bdr3 w-full max-w-md overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <h2 className="text-base font-bold text-foreground">Xuất file Tạm Trú (Excel)</h2>
@@ -1113,7 +1113,7 @@ function TamTruExportModal({ workers, onClose }: { workers: Worker[]; onClose: (
 // Delete All Confirm Modal
 function DeleteAllConfirmModal({ onConfirm, onClose, loading }: { onConfirm: () => void; onClose: () => void; loading?: boolean }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65">
       <div className="surface-elevated rounded-2xl shadow-2xl w-full max-w-md border border-dgr/40 overflow-hidden">
         <div className="flex items-center gap-3 px-5 py-4 border-b border-dgr/25 tint-dgr">
           <div className="flex-shrink-0 w-10 h-10 rounded-xl craft-icon-rose flex items-center justify-center">
@@ -1217,7 +1217,7 @@ function BulkDeleteByFilterModal({
     : `${selKtx || '—'} · ${selDay || '—'} · P.${selPhong || '—'}`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65">
       <div className="surface-elevated rounded-2xl shadow-2xl w-full max-w-lg border border-dgr/40 overflow-hidden">
         <div className="flex items-center gap-3 px-5 py-4 border-b border-dgr/25 tint-dgr">
           <div className="flex-shrink-0 w-10 h-10 rounded-xl craft-icon-rose flex items-center justify-center">
@@ -1442,7 +1442,7 @@ function BulkTransferWorkersModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 fade-in">
       <div className="modal-enter bg-card border border-border rounded-2xl shadow-modal w-full max-w-lg overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
           <div className="flex items-center gap-2.5">

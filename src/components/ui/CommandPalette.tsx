@@ -363,7 +363,7 @@ export default function CommandPalette() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.16 }}
             onClick={() => setOpen(false)}
-            className="fixed inset-0 bg-black/65 backdrop-blur-sm"
+            className="fixed inset-0 bg-black/65"
             aria-hidden="true"
           />
 

@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
+import { useAudit } from '@/context/AuditContext';
 import { useWorkers } from '@/context/WorkerContext';
 import {
   buildWorkerHierarchyFromWorkers,
@@ -10,7 +11,7 @@ import {
   WorkerRef,
 } from '@/lib/workerHierarchy';
 import { invalidateKtxStructureCache } from '@/lib/ktxStructure';
-import { releaseBedsForWorkers, normalizeBedLabel } from '@/lib/bedSync';
+import { releaseBedByLocation, normalizeBedLabel } from '@/lib/bedSync';
 import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
 import {
   FacilityItem,
@@ -76,6 +77,18 @@ const STATUS_CONFIG = {
 function parseCheckoutNote(rawNote: string = '') {
   const note = rawNote.replace(/^\[CHECKOUT\]\s*/i, '');
   return note || 'Khai báo dọn ra KTX';
+}
+
+function normalizeNameForMatch(raw?: string | null): string {
+  return String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+function isPlaceholderCode(raw?: string | null): boolean {
+  const s = String(raw || '').trim().toLowerCase();
+  return !s || s === '-' || s === '—' || s === 'chờ mã' || s === 'chưa có' || s === 'n/a' || s === 'null';
 }
 
 /** Detail Modal - Operations console styling */
@@ -229,6 +242,7 @@ export default function CheckoutApprovalPanel({
   const [deleteTarget, setDeleteTarget] = useState<CheckoutRequest | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
+  const [actionErrorMsg, setActionErrorMsg] = useState<string | null>(null);
 
   // Bộ lọc theo KTX / Dãy / Phòng từ WorkerContext + cached facilities (zero duplicate worker fetch)
   const [selectedKtx, setSelectedKtx] = useState<string>('all');
@@ -237,7 +251,8 @@ export default function CheckoutApprovalPanel({
   const [facilities, setFacilities] = useState<FacilityItem[]>([]);
 
   const { currentUser, isAdmin, canWriteBlock } = useAuth();
-  const { workers, refreshWorkers } = useWorkers();
+  const { addLog } = useAudit();
+  const { workers, setWorkers, refreshWorkers } = useWorkers();
   const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
@@ -387,72 +402,187 @@ export default function CheckoutApprovalPanel({
 
   /**
    * Duyệt Check-out:
-   * Giữ nguyên 100% logic: Xóa vĩnh viễn khỏi bảng workers để giải phóng phòng/giường trống
+   * Xác định chính xác công nhân qua worker_id / vị trí giường / mã NV / CCCD / (KTX + Dãy + Phòng + Tên chuẩn hóa),
+   * XÓA hẳn khỏi bảng workers (xác nhận số dòng đã xóa), giải phóng giường, cập nhật state tức thì.
+   * TUYỆT ĐỐI không đánh dấu 'approved' nếu bước xóa hoặc giải phóng giường thất bại.
    */
   const handleApprove = async (req: CheckoutRequest) => {
     setProcessingId(req.id);
     setActionSuccessMsg(null);
+    setActionErrorMsg(null);
     try {
       const nowStr = new Date().toISOString();
-
       const matchedWorkersMap = new Map<string, any>();
 
+      const reqKtx = (req.ktx || '').trim();
+      const reqDay = (req.day || '').trim();
+      const normReqRoom = normalizeRoomLabel(req.phong_so || '');
+      const normReqBed = normalizeBedLabel(req.giuong || '');
+      const normReqName = normalizeNameForMatch(req.ho_va_ten);
+
+      // 1a. Match by explicit worker_id
       if (req.worker_id && req.worker_id.trim()) {
-        const { data: byId } = await supabase
+        const { data: byId, error: byIdErr } = await supabase
           .from('workers')
-          .select('*')
+          .select('id, ho_va_ten, ma_nv, cccd, ktx, day, phong_so, giuong, created_at, ngay_vao_ktx')
           .eq('id', req.worker_id.trim())
           .limit(1);
+        if (byIdErr) throw new Error(byIdErr.message);
         (byId || []).forEach((w: any) => {
-          if (w?.id) matchedWorkersMap.set(w.id, w);
+          if (w?.id) matchedWorkersMap.set(String(w.id), w);
         });
       }
 
-      if (matchedWorkersMap.size === 0 && req.ma_nv && req.ma_nv.trim()) {
+      // 1b. Match via `beds` table at normalized location (catches requests created without worker_id)
+      let targetBedRow: { id: string; worker_id: string | null; ho_va_ten: string | null; status: string } | null = null;
+      if (reqKtx && reqDay && normReqRoom && normReqBed) {
+        const { data: slotBeds } = await supabase
+          .from('beds')
+          .select('id, phong_so, giuong, status, worker_id, ho_va_ten')
+          .eq('ktx', reqKtx)
+          .eq('day', reqDay);
+
+        const matchedSlotBed = (slotBeds || []).find(
+          (b: any) =>
+            normalizeRoomLabel(String(b?.phong_so ?? '')) === normReqRoom &&
+            normalizeBedLabel(String(b?.giuong ?? '')) === normReqBed
+        );
+
+        if (matchedSlotBed) {
+          targetBedRow = {
+            id: String(matchedSlotBed.id),
+            worker_id: matchedSlotBed.worker_id ? String(matchedSlotBed.worker_id) : null,
+            ho_va_ten: matchedSlotBed.ho_va_ten ? String(matchedSlotBed.ho_va_ten) : null,
+            status: String(matchedSlotBed.status || 'empty'),
+          };
+          if (matchedWorkersMap.size === 0 && targetBedRow.worker_id) {
+            const { data: byBedWorker } = await supabase
+              .from('workers')
+              .select('id, ho_va_ten, ma_nv, cccd, ktx, day, phong_so, giuong, created_at, ngay_vao_ktx')
+              .eq('id', targetBedRow.worker_id)
+              .limit(1);
+            (byBedWorker || []).forEach((w: any) => {
+              if (w?.id) matchedWorkersMap.set(String(w.id), w);
+            });
+          }
+        }
+      }
+
+      // 1c. Match by non-placeholder ma_nv
+      if (matchedWorkersMap.size === 0 && !isPlaceholderCode(req.ma_nv)) {
         const { data: byCode } = await supabase
           .from('workers')
-          .select('*')
+          .select('id, ho_va_ten, ma_nv, cccd, ktx, day, phong_so, giuong, created_at, ngay_vao_ktx')
           .eq('ma_nv', req.ma_nv.trim());
         (byCode || []).forEach((w: any) => {
-          if (w?.id) matchedWorkersMap.set(w.id, w);
+          if (w?.id && (!normReqName || normalizeNameForMatch(w.ho_va_ten) === normReqName || w.ktx === reqKtx)) {
+            matchedWorkersMap.set(String(w.id), w);
+          }
         });
       }
 
-      if (req.so_cccd && req.so_cccd.trim()) {
+      // 1d. Match by non-placeholder so_cccd
+      if (matchedWorkersMap.size === 0 && !isPlaceholderCode(req.so_cccd)) {
         const { data: byCccd } = await supabase
           .from('workers')
-          .select('*')
+          .select('id, ho_va_ten, ma_nv, cccd, ktx, day, phong_so, giuong, created_at, ngay_vao_ktx')
           .eq('cccd', req.so_cccd.trim());
         (byCccd || []).forEach((w: any) => {
-          if (w?.id) matchedWorkersMap.set(w.id, w);
+          if (w?.id) matchedWorkersMap.set(String(w.id), w);
         });
       }
 
-      if (matchedWorkersMap.size === 0 && req.ho_va_ten && req.phong_so) {
-        const { data: byLocation } = await supabase
-          .from('workers')
-          .select('*')
-          .eq('ho_va_ten', req.ho_va_ten.trim())
-          .eq('ktx', req.ktx.trim())
-          .eq('phong_so', req.phong_so.trim())
-          .limit(1);
-        (byLocation || []).forEach((w: any) => {
-          if (w?.id) matchedWorkersMap.set(w.id, w);
-        });
+      // 1e. Match in WorkerContext + Supabase by normalized KTX + normalized Room + normalized Name (ignoring "Phòng"/"P." prefix & bed format)
+      if (matchedWorkersMap.size === 0 && normReqName && reqKtx) {
+        const matchCandidate = (w: { id?: string; hoVaTen?: string | null; ktx?: string | null; day?: string | null; phongSo?: string | null; giuong?: string | null }) => {
+          if (!w?.id) return false;
+          if ((w.ktx || '').trim() !== reqKtx) return false;
+          if (normalizeNameForMatch(w.hoVaTen) !== normReqName) return false;
+          if (normReqRoom && normalizeRoomLabel(w.phongSo || '') !== normReqRoom) return false;
+          if (reqDay && (w.day || '').trim() && (w.day || '').trim() !== reqDay) return false;
+          return true;
+        };
+
+        const contextCandidates = (workers || []).filter(w => matchCandidate(w));
+        if (contextCandidates.length > 0) {
+          const exactBedMatch = normReqBed
+            ? contextCandidates.find(w => normalizeBedLabel(w.giuong) === normReqBed)
+            : undefined;
+          const chosen = exactBedMatch || contextCandidates[0];
+          matchedWorkersMap.set(String(chosen.id), {
+            id: chosen.id,
+            ho_va_ten: chosen.hoVaTen,
+            ma_nv: chosen.maNV,
+            cccd: chosen.cccd,
+            ktx: chosen.ktx,
+            day: chosen.day,
+            phong_so: chosen.phongSo,
+            giuong: chosen.giuong,
+            created_at: chosen.createdAt,
+            ngay_vao_ktx: chosen.ngayVaoKTX,
+          });
+        } else {
+          const { data: ktxRows } = await supabase
+            .from('workers')
+            .select('id, ho_va_ten, ma_nv, cccd, ktx, day, phong_so, giuong, created_at, ngay_vao_ktx')
+            .eq('ktx', reqKtx);
+
+          const dbCandidates = (ktxRows || []).filter((w: any) =>
+            matchCandidate({
+              id: w.id,
+              hoVaTen: w.ho_va_ten,
+              ktx: w.ktx,
+              day: w.day,
+              phongSo: w.phong_so,
+              giuong: w.giuong,
+            })
+          );
+          if (dbCandidates.length > 0) {
+            const exactBedMatch = normReqBed
+              ? dbCandidates.find((w: any) => normalizeBedLabel(w.giuong) === normReqBed)
+              : undefined;
+            const chosen = exactBedMatch || dbCandidates[0];
+            matchedWorkersMap.set(String(chosen.id), chosen);
+          }
+        }
       }
 
       const matchedWorkers = Array.from(matchedWorkersMap.values());
       const matchedIds = matchedWorkers.map(w => String(w.id)).filter(Boolean);
+      let actuallyDeletedIds: string[] = [];
 
-      // 1. Delete matched worker(s) & release beds FIRST so request is never marked approved on failure
-      if (matchedWorkers.length > 0) {
-        const { error: deleteErr } = await supabase
+      // 2. Delete matched worker(s) and VERIFY via .select('id') that Postgres actually deleted the row(s)
+      if (matchedIds.length > 0) {
+        try {
+          await supabase.from('worker_deletion_log').insert(
+            matchedWorkers.map(w => ({
+              worker_id: w.id,
+              ho_va_ten: w.ho_va_ten || req.ho_va_ten,
+              ma_nv: w.ma_nv || req.ma_nv,
+              ktx: w.ktx || req.ktx,
+              day: w.day || req.day,
+              deleted_at: nowStr,
+            }))
+          );
+        } catch {
+          // ignore deletion log non-fatal error
+        }
+
+        const { data: deletedRows, error: deleteErr } = await supabase
           .from('workers')
           .delete()
-          .in('id', matchedIds);
+          .in('id', matchedIds)
+          .select('id');
 
         if (deleteErr) {
           throw new Error(`Không thể xóa hồ sơ công nhân (kiểm tra quyền hoặc kết nối): ${deleteErr.message}`);
+        }
+
+        actuallyDeletedIds = (deletedRows || []).map((r: any) => String(r.id)).filter(Boolean);
+        if (actuallyDeletedIds.length === 0) {
+          throw new Error(
+            `Không thể xóa hồ sơ "${req.ho_va_ten}" trên CSDL (có thể tài khoản của bạn không có quyền xóa tại ${req.ktx} · ${req.day}). Yêu cầu chưa được duyệt.`
+          );
         }
 
         preserveDeletedWorkerEntries(
@@ -466,60 +596,29 @@ export default function CheckoutApprovalPanel({
             ngayVaoKTX: w.ngay_vao_ktx || undefined,
           }))
         );
-
-        try {
-          await supabase.from('worker_deletion_log').insert(
-            matchedWorkers.map(w => ({
-              worker_id: w.id,
-              ho_va_ten: w.ho_va_ten || req.ho_va_ten,
-              ma_nv: w.ma_nv || req.ma_nv,
-              ktx: w.ktx || req.ktx,
-              day: w.day || req.day,
-              deleted_at: nowStr,
-            }))
-          );
-        } catch {
-          // ignore log error
-        }
-
-        await releaseBedsForWorkers(supabase, matchedIds);
+      } else if (
+        targetBedRow &&
+        targetBedRow.status === 'occupied' &&
+        targetBedRow.ho_va_ten &&
+        normReqName &&
+        normalizeNameForMatch(targetBedRow.ho_va_ten) !== normReqName
+      ) {
+        throw new Error(
+          `Giường ${req.giuong} (Phòng ${req.phong_so}) hiện đang có người khác ở (${targetBedRow.ho_va_ten}). Không thể giải phóng tự động.`
+        );
       }
 
-      // Fallback: if the bed row was not linked by worker_id, clear matching bed slot cleanly
-      if (req.ktx && req.day && req.phong_so && req.giuong) {
-        try {
-          const normRoom = normalizeRoomLabel(req.phong_so);
-          const normBed = normalizeBedLabel(req.giuong);
-          const { data: roomBeds } = await supabase
-            .from('beds')
-            .select('id, phong_so, giuong, status')
-            .eq('ktx', req.ktx.trim())
-            .eq('day', req.day.trim())
-            .eq('status', 'occupied');
-          const fallbackIds = (roomBeds || [])
-            .filter(
-              (b: any) =>
-                normalizeRoomLabel(String(b?.phong_so ?? '')) === normRoom &&
-                normalizeBedLabel(String(b?.giuong ?? '')) === normBed
-            )
-            .map((b: any) => String(b.id));
-          if (fallbackIds.length > 0) {
-            await supabase
-              .from('beds')
-              .update({
-                status: 'empty',
-                worker_id: null,
-                ma_nv: null,
-                ho_va_ten: null,
-              })
-              .in('id', fallbackIds);
-          }
-        } catch {
-          // ignore fallback bed release error
-        }
-      }
+      // 3. Release any linked beds AND normalized bed slot cleanly (throws on error)
+      await releaseBedByLocation(supabase, {
+        workerIds: matchedIds,
+        bedId: targetBedRow?.id || null,
+        ktx: reqKtx,
+        day: reqDay,
+        phongSo: req.phong_so,
+        giuong: req.giuong,
+      });
 
-      // 2. Mark checkout registration as approved AFTER worker removal & bed release succeed
+      // 4. Mark checkout registration as approved AFTER worker removal & bed release succeed
       const { error: updateErr } = await supabase
         .from('worker_registrations')
         .update({
@@ -531,6 +630,12 @@ export default function CheckoutApprovalPanel({
 
       if (updateErr) throw new Error(updateErr.message);
 
+      // 5. Immediate UI & context synchronization
+      if (actuallyDeletedIds.length > 0) {
+        const deletedSet = new Set(actuallyDeletedIds);
+        setWorkers(prev => prev.filter(w => !deletedSet.has(w.id)));
+      }
+
       setCheckouts(prev =>
         prev.map(c =>
           c.id === req.id ? { ...c, status: 'approved' as const, reviewed_at: nowStr } : c
@@ -541,7 +646,14 @@ export default function CheckoutApprovalPanel({
         setDetailReq(prev => (prev ? { ...prev, status: 'approved', reviewed_at: nowStr } : null));
       }
 
-      // Invalidate caches and refresh WorkerContext
+      const actor = currentUser?.name || currentUser?.email || 'Admin';
+      addLog(
+        actor,
+        'CHECKOUT_APPROVED',
+        `Duyệt check-out: ${req.ho_va_ten} (${!isPlaceholderCode(req.ma_nv) ? req.ma_nv : 'Không mã NV'}) · ${req.ktx} · ${req.day} · P.${req.phong_so}${req.giuong ? ` · G.${req.giuong}` : ''}`
+      );
+
+      // Invalidate caches and trigger background WorkerContext resync
       invalidateWorkerHierarchyCache();
       invalidateKtxStructureCache();
       invalidateFacilitiesCache();
@@ -553,12 +665,17 @@ export default function CheckoutApprovalPanel({
 
       const roomLiberatedText = `${req.ktx} - ${req.day} - Phòng ${req.phong_so}`;
       setActionSuccessMsg(
-        `✓ Đã duyệt check-out cho "${req.ho_va_ten}". Chỗ ở tại ${roomLiberatedText} đã được giải phóng thành công.`
+        actuallyDeletedIds.length > 0
+          ? `✓ Đã duyệt check-out và xóa "${req.ho_va_ten}" khỏi hệ thống. Chỗ ở tại ${roomLiberatedText} đã được giải phóng.`
+          : `✓ Đã duyệt đơn và giải phóng chỗ ở tại ${roomLiberatedText} (hồ sơ công nhân đã được gỡ trước đó).`
       );
+      toast.success(`Đã duyệt check-out cho ${req.ho_va_ten}`);
       if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
       successTimeoutRef.current = setTimeout(() => setActionSuccessMsg(null), 8000);
     } catch (err: any) {
-      toast.error(`Lỗi khi phê duyệt: ${err?.message || 'Không thể cập nhật'}`);
+      const msg = err?.message || 'Không thể phê duyệt check-out';
+      setActionErrorMsg(msg);
+      toast.error(`Lỗi khi phê duyệt: ${msg}`);
     } finally {
       setProcessingId(null);
     }
@@ -700,6 +817,22 @@ export default function CheckoutApprovalPanel({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Error Notification Banner */}
+      {actionErrorMsg && (
+        <div className="p-3 tint-dgr border border-dgr rounded-md text-dgr text-xs font-semibold flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={16} className="shrink-0" />
+            <span>{actionErrorMsg}</span>
+          </div>
+          <button
+            onClick={() => setActionErrorMsg(null)}
+            className="text-dgr hover:opacity-80 cursor-pointer"
+          >
+            <X size={14} />
+          </button>
         </div>
       )}
 

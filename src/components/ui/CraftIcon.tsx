@@ -1,6 +1,5 @@
 'use client';
 import React from 'react';
-import { motion } from 'motion/react';
 import type { LucideIcon } from 'lucide-react';
 
 export type CraftTone = 'blue' | 'teal' | 'amber' | 'rose' | 'pink' | 'slate';
@@ -36,7 +35,7 @@ const TONE_CLASS: Record<CraftTone, string> = {
 
 /**
  * CraftIconBadge — Biểu tượng điêu khắc đa lớp (recessed bezel + specular rim + halo + Lucide icon).
- * Hỗ trợ badgeIcon phụ ở góc và hiệu ứng nghiêng nhẹ khi hover.
+ * Hỗ trợ badgeIcon phụ ở góc và hiệu ứng CSS nhẹ khi hover.
  */
 export function CraftIconBadge({
   icon: Icon,
@@ -49,11 +48,10 @@ export function CraftIconBadge({
   const s = SIZE_MAP[size];
 
   return (
-    <motion.div
-      whileHover={interactive ? { scale: 1.07, rotate: -3 } : undefined}
-      whileTap={interactive ? { scale: 0.96 } : undefined}
-      transition={{ type: 'spring', stiffness: 420, damping: 24 }}
-      className={`relative inline-flex items-center justify-center flex-shrink-0 select-none ${s.box} ${s.radius} ${TONE_CLASS[tone]} ${className}`}
+    <div
+      className={`relative inline-flex items-center justify-center flex-shrink-0 select-none ${s.box} ${s.radius} ${TONE_CLASS[tone]} ${
+        interactive ? 'transition-transform duration-150 hover:scale-105 active:scale-95' : ''
+      } ${className}`}
     >
       {/* Top specular inner highlight */}
       <span
@@ -69,6 +67,7 @@ export function CraftIconBadge({
           <BadgeIcon size={s.badgeIcon} strokeWidth={2.4} />
         </span>
       )}
-    </motion.div>
+    </div>
   );
 }
+

@@ -94,9 +94,7 @@ const SidebarNavLink = React.memo(function SidebarNavLink({
       }`}
     >
       {isActive ? (
-        <motion.span
-          layoutId="sidebar-active-pill"
-          transition={{ type: 'spring', stiffness: 520, damping: 36 }}
+        <span
           aria-hidden="true"
           className="absolute inset-0 rounded-xl bg-act border border-bdr2 shadow-sm"
           style={{ boxShadow: 'inset 0 1px 0 var(--specular)' }}
@@ -109,9 +107,7 @@ const SidebarNavLink = React.memo(function SidebarNavLink({
       )}
 
       {isActive && (
-        <motion.span
-          layoutId="sidebar-active-rail"
-          transition={{ type: 'spring', stiffness: 520, damping: 36 }}
+        <span
           aria-hidden="true"
           className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full z-10"
           style={{ background: 'var(--pri2)', boxShadow: '0 0 10px var(--pri2)' }}
@@ -281,18 +277,17 @@ export default function Sidebar() {
           {/* Data Sync & Theme Tool */}
           <div className="mt-4 pt-3 border-t border-bdr space-y-1">
             {!collapsed && <p className="px-3 mb-1 text-[10px] font-bold text-ic uppercase tracking-widest">TIỆN ÍCH</p>}
-            <motion.button
-              whileTap={{ scale: 0.98 }}
+            <button
               onClick={refreshWorkers}
               disabled={refreshing}
               title="Đồng bộ lại toàn bộ dữ liệu"
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-nav hover:text-tx hover:bg-act/80 border border-transparent hover:border-bdr2 transition-colors duration-150 ${
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-nav hover:text-tx hover:bg-act/80 border border-transparent hover:border-bdr2 transition-colors duration-100 active:scale-[0.98] ${
                 refreshing ? 'opacity-60 cursor-not-allowed' : ''
               }`}
             >
               <RefreshCw size={16} className={`text-ic flex-shrink-0 ${refreshing ? 'animate-spin text-pri2' : ''}`} />
               {!collapsed && <span className="truncate">{refreshing ? 'Đang đồng bộ...' : 'Đồng bộ dữ liệu'}</span>}
-            </motion.button>
+            </button>
             <ThemeSwitcher showLabel={!collapsed} />
           </div>
         </nav>
@@ -308,15 +303,13 @@ export default function Sidebar() {
                 <p className="text-xs font-bold text-tx truncate">{displayName}</p>
                 <p className="text-[11px] text-mu truncate">{roleLabel}</p>
               </div>
-              <motion.button
-                whileHover={{ scale: 1.08 }}
-                whileTap={{ scale: 0.94 }}
-                className="p-1.5 rounded-lg text-mu hover:text-dgr hover:bg-surf transition-colors duration-100"
+              <button
+                className="p-1.5 rounded-lg text-mu hover:text-dgr hover:bg-surf transition-all duration-100 hover:scale-105 active:scale-95"
                 title="Đăng xuất"
                 onClick={handleLogout}
               >
                 <LogOut size={15} />
-              </motion.button>
+              </button>
             </div>
           )}
 

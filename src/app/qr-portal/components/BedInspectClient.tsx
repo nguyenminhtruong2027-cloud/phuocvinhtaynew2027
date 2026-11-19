@@ -8,7 +8,12 @@ import {
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
-import { releaseBedsForWorkers } from '@/lib/bedSync';
+import { useAudit } from '@/context/AuditContext';
+import { releaseBedsForWorkers, releaseBedByLocation, normalizeBedLabel } from '@/lib/bedSync';
+import { normalizeRoomLabel, invalidateFacilitiesCache } from '@/lib/facilityCapacity';
+import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
+import { invalidateWorkerHierarchyCache } from '@/lib/workerHierarchy';
+import { invalidateKtxStructureCache } from '@/lib/ktxStructure';
 import { toast } from 'sonner';
 import BedQrPrintModal from '@/app/bed-management/components/BedQrPrintModal';
 import BedTransferModal from '@/app/bed-management/components/BedTransferModal';
@@ -53,7 +58,8 @@ function renderSkeleton() {
 }
 
 export default function BedInspectClient() {
-  const { isAdmin, canWriteBlock } = useAuth();
+  const { isAdmin, canWriteBlock, currentUser } = useAuth();
+  const { addLog } = useAudit();
   const [isMounted, setIsMounted] = useState(false);
   const [bed, setBed] = useState<BedRow | null>(null);
   const [worker, setWorker] = useState<WorkerLite | null>(null);
@@ -149,16 +155,33 @@ export default function BedInspectClient() {
         } else {
           setNotFound(false);
           setBed(found);
-          // Worker detail: ưu tiên worker_id, fallback theo ma_nv
+          // Worker detail: ưu tiên worker_id, fallback theo ma_nv hoặc vị trí chuẩn hóa (KTX+Dãy+Phòng+Giường/Tên)
           let w: WorkerLite | null = null;
           try {
             if (found.worker_id) {
               const { data } = await supabase.from('workers').select('*').eq('id', found.worker_id).maybeSingle();
               if (data) w = mapWorker(data);
             }
-            if (!w && found.ma_nv) {
-              const { data } = await supabase.from('workers').select('*').eq('ma_nv', found.ma_nv).limit(1);
+            if (!w && found.ma_nv && !['-', '—', 'chờ mã', 'chưa có'].includes(found.ma_nv.trim().toLowerCase())) {
+              const { data } = await supabase.from('workers').select('*').eq('ma_nv', found.ma_nv.trim()).limit(1);
               if (data && data[0]) w = mapWorker(data[0]);
+            }
+            if (!w && found.ktx) {
+              const { data: ktxWorkers } = await supabase
+                .from('workers')
+                .select('*')
+                .eq('ktx', found.ktx.trim());
+              const normRoom = normalizeRoomLabel(found.phong_so);
+              const normBed = normalizeBedLabel(found.giuong);
+              const normName = (found.ho_va_ten || '').trim().toLowerCase().replace(/\s+/g, ' ');
+              const matched = (ktxWorkers || []).find((row: any) => {
+                const sameDay = !found.day || !row?.day || String(row.day).trim() === found.day.trim();
+                const sameRoom = normalizeRoomLabel(String(row?.phong_so || '')) === normRoom;
+                const sameBed = normBed && normalizeBedLabel(String(row?.giuong || '')) === normBed;
+                const sameName = normName && String(row?.ho_va_ten || '').trim().toLowerCase().replace(/\s+/g, ' ') === normName;
+                return sameDay && sameRoom && (sameBed || sameName);
+              });
+              if (matched) w = mapWorker(matched);
             }
           } catch (err) {
             console.warn('[bed-inspector] load worker failed:', err);
@@ -211,17 +234,15 @@ export default function BedInspectClient() {
     }
   }, [supabase]);
 
-  // Realtime — đồng bộ tức thời với /bed-management
+  // Realtime — đồng bộ tức thời với /bed-management (chỉ lazy-load danh sách công nhân khi mở modal Gán nhanh)
   useEffect(() => {
-    if (!isMounted) return;
+    if (!isMounted || !bedLookup) return;
     loadBedData();
-    loadWorkers();
     let channel: ReturnType<typeof supabase.channel> | null = null;
     try {
       channel = supabase
         .channel('bed_inspect_realtime')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'beds' }, () => loadBedData(true))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'workers' }, () => { loadBedData(true); loadWorkers(); })
         .subscribe();
     } catch (err) {
       console.warn('[bed-inspector] realtime failed:', err);
@@ -233,6 +254,12 @@ export default function BedInspectClient() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMounted, bedLookup]);
+
+  useEffect(() => {
+    if (showAssign && workers.length === 0) {
+      loadWorkers();
+    }
+  }, [showAssign, workers.length, loadWorkers]);
 
   const canWriteBed = useMemo(() => {
     if (!bed) return false;
@@ -301,6 +328,87 @@ export default function BedInspectClient() {
       setBusy(false);
     }
   }, [bed, canWriteBed, worker, supabase]);
+
+  const checkoutImmediate = useCallback(async () => {
+    if (!bed) return;
+    if (!canWriteBed) {
+      toast.error(`Bạn không có quyền check-out giường tại ${bed.ktx} - ${bed.day}.`);
+      return;
+    }
+    setBusy(true);
+    setMessage('');
+    try {
+      const targetWorkerId = bed.worker_id || worker?.id || null;
+      const targetName = bed.ho_va_ten || worker?.hoVaTen || '';
+      const targetMaNv = bed.ma_nv || worker?.maNV || '';
+      const now = new Date().toISOString();
+
+      if (targetWorkerId) {
+        try {
+          await supabase.from('worker_deletion_log').insert({
+            worker_id: targetWorkerId,
+            ho_va_ten: targetName || null,
+            ma_nv: targetMaNv || null,
+            ktx: bed.ktx || null,
+            day: bed.day || null,
+            deleted_at: now,
+          });
+        } catch {}
+
+        const { data: deletedRows, error: delErr } = await supabase
+          .from('workers')
+          .delete()
+          .eq('id', targetWorkerId)
+          .select('id');
+
+        if (delErr) throw new Error(delErr.message);
+        if (!deletedRows || deletedRows.length === 0) {
+          throw new Error(`Không thể xóa hồ sơ công nhân khỏi CSDL (kiểm tra quyền RLS tại ${bed.ktx} · ${bed.day}).`);
+        }
+
+        preserveDeletedWorkerEntries([
+          {
+            id: targetWorkerId,
+            hoVaTen: targetName,
+            maNV: targetMaNv,
+            ktx: bed.ktx || '',
+            day: bed.day || '',
+          },
+        ]);
+      }
+
+      await releaseBedByLocation(supabase, {
+        workerIds: targetWorkerId ? [targetWorkerId] : [],
+        bedId: bed.id,
+        ktx: bed.ktx,
+        day: bed.day,
+        phongSo: bed.phong_so,
+        giuong: bed.giuong,
+      });
+
+      const actor = currentUser?.name || currentUser?.email || 'Admin';
+      addLog(
+        actor,
+        'CHECKOUT_APPROVED',
+        `Check-out qua QR Giường: ${targetName || '—'} (${targetMaNv || '—'}) tại ${bed.ktx} · ${bed.day} · P${bed.phong_so} · G${bed.giuong}`
+      );
+
+      invalidateWorkerHierarchyCache();
+      invalidateKtxStructureCache();
+      invalidateFacilitiesCache();
+
+      setMessage(`✓ Đã check-out "${targetName || 'công nhân'}" và giải phóng Giường ${bed.giuong} tức thì!`);
+      toast.success(`Đã giải phóng Giường ${bed.giuong}!`);
+      await loadBedData(true);
+    } catch (err: any) {
+      console.error('[bed-inspector] immediate checkout failed:', err);
+      const msg = err?.message || 'Không thể check-out trực tiếp.';
+      setMessage(msg);
+      toast.error(msg);
+    } finally {
+      setBusy(false);
+    }
+  }, [bed, canWriteBed, worker, supabase, currentUser, addLog, loadBedData]);
 
   const requestCheckout = useCallback(async () => {
     if (!bed) return;
@@ -561,10 +669,18 @@ export default function BedInspectClient() {
                         <button
                           type="button"
                           disabled={busy}
-                          onClick={requestCheckout}
-                          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-dgr hover:opacity-90 text-white text-sm font-extrabold transition-colors disabled:opacity-50"
+                          onClick={checkoutImmediate}
+                          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-dgr hover:opacity-90 text-white text-sm font-extrabold transition-colors disabled:opacity-50 cursor-pointer"
                         >
-                          {busy ? <Loader2 size={15} className="animate-spin" /> : <DoorOpen size={15} />} 🚪 Check-out
+                          {busy ? <Loader2 size={15} className="animate-spin" /> : <UserX size={15} />} Check-out & Trả giường ngay
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={requestCheckout}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-dgr/40 tint-dgr text-dgr hover:opacity-90 text-xs font-extrabold transition-colors disabled:opacity-50 cursor-pointer"
+                        >
+                          {busy ? <Loader2 size={14} className="animate-spin" /> : <DoorOpen size={14} />} Gửi yêu cầu check-out để duyệt
                         </button>
                       </>
                     )}
@@ -630,7 +746,7 @@ export default function BedInspectClient() {
       <BedTransferModal
         open={showTransfer}
         onClose={() => setShowTransfer(false)}
-        workerId={bed?.worker_id ?? null}
+        workerId={bed?.worker_id || worker?.id || null}
         sourceBed={bed
           ? { id: bed.id || '', ktx: bed.ktx || '', day: bed.day || '', phong_so: bed.phong_so || '', giuong: bed.giuong || '' }
           : null}
@@ -642,7 +758,7 @@ export default function BedInspectClient() {
 
       {/* ─── Quick Assign Modal ─── */}
       {showAssign && bed && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setShowAssign(false)}>
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setShowAssign(false)}>
           <div className="bg-surf border border-bdr rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-bdr">
               <div>

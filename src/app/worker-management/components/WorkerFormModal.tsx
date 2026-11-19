@@ -752,7 +752,7 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
   return (
     <>
       {showScanner && <CCCDScanner onScanned={handleScanned} onClose={() => setShowScanner(false)} />}
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm fade-in">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 fade-in">
         <div className="modal-enter bg-card rounded-xl shadow-modal w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-border">
             <h2 className="text-base font-bold text-foreground">

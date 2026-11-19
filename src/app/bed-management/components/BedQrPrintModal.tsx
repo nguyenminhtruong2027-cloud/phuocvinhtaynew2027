@@ -199,7 +199,7 @@ export default function BedQrPrintModal({ open, onClose, lockedBed = null }: Pro
 
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4" onClick={onClose}>
+      <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-0 sm:p-4" onClick={onClose}>
         <div
           className="bg-surf border border-bdr rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-4xl flex flex-col max-h-[92vh]"
           onClick={e => e.stopPropagation()}

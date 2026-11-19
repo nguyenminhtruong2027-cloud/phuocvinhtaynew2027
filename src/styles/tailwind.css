@@ -233,28 +233,22 @@
   .text-wn-fg { color: var(--wn-fg); }
   .text-ok2-fg { color: var(--ok2-fg); }
 
-  /* Architectural precision backdrop */
+  /* Lightweight clean architectural backdrop */
   .bg-architectural {
     background-color: var(--bg);
-    background-image:
-      radial-gradient(ellipse 80% 42% at 50% -12%, color-mix(in srgb, var(--pri2) 13%, transparent), transparent 72%),
-      linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
-      linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
-    background-size: 100% 100%, 36px 36px, 36px 36px;
-    background-attachment: local;
+    background-image: radial-gradient(ellipse 80% 35% at 50% -10%, color-mix(in srgb, var(--pri2) 10%, transparent), transparent 70%);
   }
 
   /* Elevated surface with specular rim */
   .surface-elevated {
     background: var(--surf);
     border: 1px solid var(--bdr);
-    box-shadow: inset 0 1px 0 var(--specular), 0 10px 28px -12px var(--sh);
-    transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+    box-shadow: inset 0 1px 0 var(--specular), 0 4px 12px -4px var(--sh);
+    transition: border-color 120ms ease;
   }
 
   .surface-elevated:hover {
     border-color: color-mix(in srgb, var(--pri2) 34%, var(--bdr2));
-    box-shadow: inset 0 1px 0 var(--specular), 0 14px 32px -12px var(--sh);
   }
 
   /* Glossy tactile primary button */

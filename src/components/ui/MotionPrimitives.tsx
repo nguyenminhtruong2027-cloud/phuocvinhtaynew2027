@@ -1,14 +1,9 @@
 'use client';
 import React, { useEffect, useRef, useState } from 'react';
-import { motion, MotionConfig } from 'motion/react';
 import type { LucideIcon } from 'lucide-react';
 
 export function MotionProvider({ children }: { children: React.ReactNode }) {
-  return (
-    <MotionConfig reducedMotion="user" transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}>
-      {children}
-    </MotionConfig>
-  );
+  return <>{children}</>;
 }
 
 /**
@@ -17,7 +12,7 @@ export function MotionProvider({ children }: { children: React.ReactNode }) {
 export function AnimatedNumber({
   value,
   format = (n: number) => Math.round(n).toLocaleString('vi-VN'),
-  duration = 260,
+  duration = 200,
 }: {
   value: number;
   format?: (n: number) => string;
@@ -76,42 +71,14 @@ export function PageReveal({ children }: { children: React.ReactNode; routeKey?:
 }
 
 /**
- * StaggerGrid & StaggerItem — Lưới xuất hiện nhanh gọn (<= 140ms).
+ * StaggerGrid & StaggerItem — Lưới hiển thị tức thì (zero stagger lag).
  */
 export function StaggerGrid({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return (
-    <motion.div
-      initial="hidden"
-      animate="visible"
-      variants={{
-        hidden: {},
-        visible: {
-          transition: { staggerChildren: 0.015 },
-        },
-      }}
-      className={className}
-    >
-      {children}
-    </motion.div>
-  );
+  return <div className={className}>{children}</div>;
 }
 
 export function StaggerItem({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return (
-    <motion.div
-      variants={{
-        hidden: { opacity: 0, y: 4 },
-        visible: {
-          opacity: 1,
-          y: 0,
-          transition: { duration: 0.14, ease: [0.22, 1, 0.36, 1] },
-        },
-      }}
-      className={className}
-    >
-      {children}
-    </motion.div>
-  );
+  return <div className={className}>{children}</div>;
 }
 
 export interface SlidingTabItem<T extends string = string> {
@@ -123,20 +90,19 @@ export interface SlidingTabItem<T extends string = string> {
 }
 
 /**
- * SlidingTabs — Bộ chuyển tab có thanh nền trượt mượt bằng motion layoutId.
+ * SlidingTabs — Bộ chuyển tab tức thì bằng CSS, không gây đo đạc layout lại mỗi lần chuyển route/tab.
  */
 export function SlidingTabs<T extends string = string>({
   tabs,
   value,
   onChange,
-  layoutId,
   className = '',
   compact = false,
 }: {
   tabs: SlidingTabItem<T>[];
   value: T;
   onChange: (id: T) => void;
-  layoutId: string;
+  layoutId?: string;
   className?: string;
   compact?: boolean;
 }) {
@@ -171,24 +137,17 @@ export function SlidingTabs<T extends string = string>({
               compact ? 'px-2.5 py-1 text-xs' : 'px-3.5 py-1.5 text-xs sm:text-[13px]'
             } ${
               isActive
-                ? activeText
+                ? `${activeBg} ${activeText}`
                 : tab.tone === 'danger' && (tab.count ?? 0) > 0
                 ? 'text-dgr hover:bg-dgrbg/60'
-                : 'text-mu hover:text-tx'
+                : 'text-mu hover:text-tx hover:bg-surf/60'
             }`}
           >
-            {isActive && (
-              <motion.span
-                layoutId={layoutId}
-                transition={{ type: 'spring', stiffness: 460, damping: 34 }}
-                className={`absolute inset-0 rounded-lg ${activeBg}`}
-              />
-            )}
-            {Icon && <Icon size={14} className="relative z-10 shrink-0" />}
-            <span className="relative z-10">{tab.label}</span>
+            {Icon && <Icon size={14} className="shrink-0" />}
+            <span>{tab.label}</span>
             {tab.count !== undefined && (
               <span
-                className={`relative z-10 px-1.5 py-0.2 rounded-full text-[10px] font-tabular font-bold leading-tight ${
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-tabular font-bold leading-tight ${
                   isActive
                     ? 'bg-white/20 text-current'
                     : tab.tone === 'danger' && tab.count > 0
@@ -205,3 +164,4 @@ export function SlidingTabs<T extends string = string>({
     </div>
   );
 }
+

@@ -93,8 +93,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [users, setUsers] = useState<AppUser[]>([]);
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
+  const loadingUserIdRef = useRef<string | null>(null);
+  const loadedUserIdRef = useRef<string | null>(null);
 
-  const loadUserProfile = useCallback(async (userId: string, email: string) => {
+  const loadUserProfile = useCallback(async (userId: string, email: string, force = false) => {
+    if (!force && (loadedUserIdRef.current === userId || loadingUserIdRef.current === userId)) {
+      setLoading(false);
+      return;
+    }
+    loadingUserIdRef.current = userId;
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -110,6 +117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .single();
 
         if (newProfile) {
+          loadedUserIdRef.current = userId;
           setCurrentUserState({
             id: newProfile.id,
             email: newProfile.email ?? email,
@@ -120,6 +128,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           });
         }
       } else {
+        loadedUserIdRef.current = userId;
         setCurrentUserState({
           id: data.id,
           email: data.email ?? email,
@@ -130,6 +139,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
       }
     } catch {
+      loadedUserIdRef.current = userId;
       setCurrentUserState({
         id: userId,
         email,
@@ -139,6 +149,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         assignedBlocks: [],
       });
     } finally {
+      if (loadingUserIdRef.current === userId) {
+        loadingUserIdRef.current = null;
+      }
       setLoading(false);
     }
   }, [supabase]);
@@ -170,10 +183,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     let subscription: { unsubscribe: () => void } | undefined;
     try {
-      const authSubRes = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const authSubRes = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (event === 'TOKEN_REFRESHED') return;
         if (session?.user) {
-          await loadUserProfile(session.user.id, session.user.email ?? '');
+          await loadUserProfile(session.user.id, session.user.email ?? '', event === 'USER_UPDATED');
         } else {
+          loadedUserIdRef.current = null;
+          loadingUserIdRef.current = null;
           setCurrentUserState(null);
           setLoading(false);
         }
@@ -198,7 +214,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${currentUser.id}` },
         () => {
-          loadUserProfile(currentUser.id, currentUser.email ?? '');
+          loadUserProfile(currentUser.id, currentUser.email ?? '', true);
         }
       )
       .subscribe();
@@ -232,11 +248,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (data?.session?.user) {
-      await loadUserProfile(data.session.user.id, data.session.user.email ?? trimmedEmail);
+      await loadUserProfile(data.session.user.id, data.session.user.email ?? trimmedEmail, true);
     }
   }, [supabase, loadUserProfile]);
 
   const signOut = useCallback(async () => {
+    loadedUserIdRef.current = null;
+    loadingUserIdRef.current = null;
     try {
       localStorage.removeItem('ktx_local_user');
     } catch {}

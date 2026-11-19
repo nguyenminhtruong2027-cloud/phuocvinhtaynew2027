@@ -14,8 +14,11 @@ import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
 import { useWorkers } from '@/context/WorkerContext';
 import { compareKtxNames, DEFAULT_ROOM_CAPACITY } from '@/data/workers';
-import { fetchRoomCapacities, getRoomCapacity, RoomCapacityMap, formatRoomDisplay } from '@/lib/facilityCapacity';
-import { reconcileBedsWithWorkers, releaseBedsForWorkers } from '@/lib/bedSync';
+import { fetchRoomCapacities, getRoomCapacity, RoomCapacityMap, formatRoomDisplay, normalizeRoomLabel, invalidateFacilitiesCache } from '@/lib/facilityCapacity';
+import { reconcileBedsWithWorkers, releaseBedsForWorkers, releaseBedByLocation, normalizeBedLabel } from '@/lib/bedSync';
+import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
+import { invalidateWorkerHierarchyCache } from '@/lib/workerHierarchy';
+import { invalidateKtxStructureCache } from '@/lib/ktxStructure';
 import { exportToExcel } from '@/lib/exportExcel';
 import BedQrPrintModal from './BedQrPrintModal';
 import BedTransferModal from './BedTransferModal';
@@ -101,8 +104,9 @@ export default function BedManagementClient() {
   const searchParams = useSearchParams();
   const { isAdmin, canWriteBlock, currentUser } = useAuth();
   const { addLog } = useAudit();
-  const { workers: contextWorkers, refreshWorkers } = useWorkers();
+  const { workers: contextWorkers, setWorkers: setContextWorkers, refreshWorkers } = useWorkers();
   const [beds, setBeds] = useState<BedRow[]>([]);
+  const [hoveredBedId, setHoveredBedId] = useState<string | null>(null);
   const workers = useMemo<WorkerLite[]>(
     () =>
       (contextWorkers || []).map(w => ({
@@ -242,16 +246,46 @@ export default function BedManagementClient() {
 
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null;
+    let facTimer: ReturnType<typeof setTimeout> | null = null;
     try {
       channel = supabase
         .channel('bed_management_realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'beds' }, () => loadBeds(true))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, () => loadCapacities())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'beds' }, (payload) => {
+          if (payload.eventType === 'UPDATE' && payload.new) {
+            const r = payload.new as Record<string, unknown>;
+            const rid = String(r?.id ?? '');
+            if (!rid) return;
+            const mappedRow: BedRow = {
+              id: rid,
+              ktx: String(r?.ktx ?? ''),
+              day: String(r?.day ?? ''),
+              phong_so: String(r?.phong_so ?? '').replace(/^(?:phòng|p[.\s]*)\s*/i, '').trim(),
+              giuong: String(r?.giuong ?? ''),
+              status: r?.status === 'occupied' ? 'occupied' : r?.status === 'maintenance' ? 'maintenance' : 'empty',
+              ma_nv: r?.ma_nv ? String(r.ma_nv) : null,
+              ho_va_ten: r?.ho_va_ten ? String(r.ho_va_ten) : null,
+              worker_id: r?.worker_id ? String(r.worker_id) : null,
+            };
+            setBeds(prev => prev.map(b => (b.id === rid ? mappedRow : b)));
+            setDrawerBed(prev => (prev && prev.id === rid ? mappedRow : prev));
+          } else if (payload.eventType === 'DELETE' && payload.old) {
+            const rid = String((payload.old as Record<string, unknown>)?.id ?? '');
+            if (rid) setBeds(prev => prev.filter(b => b.id !== rid));
+          } else {
+            if (facTimer) clearTimeout(facTimer);
+            facTimer = setTimeout(() => loadBeds(true), 400);
+          }
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, () => {
+          if (facTimer) clearTimeout(facTimer);
+          facTimer = setTimeout(() => loadCapacities(), 350);
+        })
         .subscribe();
     } catch (err) {
       console.warn('[bed-management] realtime subscribe failed:', err);
     }
     return () => {
+      if (facTimer) clearTimeout(facTimer);
       try {
         if (channel) supabase.removeChannel(channel);
       } catch {}
@@ -264,6 +298,47 @@ export default function BedManagementClient() {
     (workers || []).forEach(w => { if (w?.id) map.set(w.id, w); });
     return map;
   }, [workers]);
+
+  const workerBySlot = useMemo(() => {
+    const map = new Map<string, WorkerLite>();
+    (workers || []).forEach(w => {
+      const k = (w.ktx || '').trim();
+      const d = (w.day || '').trim();
+      const r = normalizeRoomLabel(w.phongSo || '');
+      const g = normalizeBedLabel(w.giuong || '');
+      if (k && d && r && g) {
+        const key = `${k}||${d}||${r}||${g}`;
+        if (!map.has(key)) map.set(key, w);
+      }
+    });
+    return map;
+  }, [workers]);
+
+  const getWorkerForBed = useCallback(
+    (bed?: BedRow | null): WorkerLite | null => {
+      if (!bed) return null;
+      if (bed.worker_id) {
+        const byId = workerById.get(bed.worker_id);
+        if (byId) return byId;
+      }
+      const key = `${(bed.ktx || '').trim()}||${(bed.day || '').trim()}||${normalizeRoomLabel(bed.phong_so || '')}||${normalizeBedLabel(bed.giuong || '')}`;
+      const bySlot = workerBySlot.get(key);
+      if (bySlot) return bySlot;
+      if (bed.ho_va_ten) {
+        const normName = bed.ho_va_ten.trim().toLowerCase().replace(/\s+/g, ' ');
+        const normRoom = normalizeRoomLabel(bed.phong_so || '');
+        const match = (workers || []).find(
+          w =>
+            (w.ktx || '').trim() === (bed.ktx || '').trim() &&
+            normalizeRoomLabel(w.phongSo || '') === normRoom &&
+            (w.hoVaTen || '').trim().toLowerCase().replace(/\s+/g, ' ') === normName
+        );
+        if (match) return match;
+      }
+      return null;
+    },
+    [workerById, workerBySlot, workers]
+  );
 
   const roomCap = useCallback(
     (ktx: string, day: string, phong: string) =>
@@ -700,31 +775,107 @@ export default function BedManagementClient() {
     }
   }, [isAdmin, supabase, loadBeds, loadWorkers, loadCapacities]);
 
-  /** Giải phóng giường: xóa vị trí trong `workers` và set `beds` về empty (chống nhiễu trigger nếu beds row bị xóa sự cố). */
+  /** Resolve worker ID from bed.worker_id, context slot/name fallback, or live Supabase query */
+  const resolveLiveWorkerForBed = useCallback(
+    async (bed: BedRow): Promise<WorkerLite | null> => {
+      const localMatch = getWorkerForBed(bed);
+      if (localMatch?.id) return localMatch;
+
+      if (bed.worker_id) {
+        const { data } = await supabase
+          .from('workers')
+          .select('id, ho_va_ten, ma_nv, cccd, don_vi, gioi_tinh, so_dien_thoai, ngay_vao_ktx, ktx, day, phong_so, giuong')
+          .eq('id', bed.worker_id)
+          .maybeSingle();
+        if (data?.id) {
+          return {
+            id: String(data.id),
+            hoVaTen: String(data.ho_va_ten || ''),
+            maNV: String(data.ma_nv || ''),
+            cccd: String(data.cccd || ''),
+            donVi: String(data.don_vi || ''),
+            gioiTinh: String(data.gioi_tinh || ''),
+            soDienThoai: String(data.so_dien_thoai || ''),
+            ngayVaoKTX: String(data.ngay_vao_ktx || ''),
+            ktx: String(data.ktx || ''),
+            day: String(data.day || ''),
+            phongSo: String(data.phong_so || ''),
+            giuong: String(data.giuong || ''),
+          };
+        }
+      }
+
+      if (bed.ktx) {
+        const normRoom = normalizeRoomLabel(bed.phong_so || '');
+        const normBed = normalizeBedLabel(bed.giuong || '');
+        const normName = (bed.ho_va_ten || '').trim().toLowerCase().replace(/\s+/g, ' ');
+        const { data: ktxWorkers } = await supabase
+          .from('workers')
+          .select('id, ho_va_ten, ma_nv, cccd, don_vi, gioi_tinh, so_dien_thoai, ngay_vao_ktx, ktx, day, phong_so, giuong')
+          .eq('ktx', bed.ktx);
+        const found = (ktxWorkers || []).find((w: any) => {
+          const sameRoom = normalizeRoomLabel(String(w?.phong_so || '')) === normRoom;
+          const sameDay = !bed.day || !w?.day || String(w.day).trim() === bed.day.trim();
+          const sameBed = normBed && normalizeBedLabel(String(w?.giuong || '')) === normBed;
+          const sameName = normName && String(w?.ho_va_ten || '').trim().toLowerCase().replace(/\s+/g, ' ') === normName;
+          return sameDay && sameRoom && (sameBed || sameName);
+        });
+        if (found?.id) {
+          return {
+            id: String(found.id),
+            hoVaTen: String(found.ho_va_ten || ''),
+            maNV: String(found.ma_nv || ''),
+            cccd: String(found.cccd || ''),
+            donVi: String(found.don_vi || ''),
+            gioiTinh: String(found.gioi_tinh || ''),
+            soDienThoai: String(found.so_dien_thoai || ''),
+            ngayVaoKTX: String(found.ngay_vao_ktx || ''),
+            ktx: String(found.ktx || ''),
+            day: String(found.day || ''),
+            phongSo: String(found.phong_so || ''),
+            giuong: String(found.giuong || ''),
+          };
+        }
+      }
+      return null;
+    },
+    [getWorkerForBed, supabase]
+  );
+
   /** Lựa chọn 1: gửi yêu cầu check-out sang QR Portal (status=pending) — giữ nguyên giường cho đến khi duyệt. */
   const handleCheckoutRequest = useCallback(async () => {
     const bed = drawerBed;
-    const wid = bed?.worker_id ?? '';
-    if (!bed || !wid) return;
+    if (!bed || bed.status !== 'occupied') return;
     if (!canWriteBed(bed)) {
       toast.error(`Bạn không có quyền trả phòng tại ${bed.ktx} - ${bed.day}.`);
       return;
     }
     setBusy(true);
     setActionError('');
-    const workerRef = workerById.get(wid);
-    const now = new Date().toISOString();
     try {
-      const { data: existingPending } = await supabase
+      const workerRef = await resolveLiveWorkerForBed(bed);
+      const wid = workerRef?.id || bed.worker_id || null;
+      const now = new Date().toISOString();
+
+      let pendingCheckQuery = supabase
         .from('worker_registrations')
         .select('id')
         .eq('status', 'pending')
-        .like('ghi_chu', '[CHECKOUT]%')
-        .eq('worker_id', wid)
-        .limit(1);
+        .like('ghi_chu', '[CHECKOUT]%');
 
+      if (wid) {
+        pendingCheckQuery = pendingCheckQuery.eq('worker_id', wid);
+      } else {
+        pendingCheckQuery = pendingCheckQuery
+          .eq('ktx', bed.ktx || '')
+          .eq('day', bed.day || '')
+          .eq('phong_so', bed.phong_so || '')
+          .eq('giuong', bed.giuong || '');
+      }
+
+      const { data: existingPending } = await pendingCheckQuery.limit(1);
       if (existingPending && existingPending.length > 0) {
-        toast.info('Công nhân này đã có yêu cầu check-out đang chờ duyệt ở QR Portal.');
+        toast.info('Giường / công nhân này đã có yêu cầu check-out đang chờ duyệt ở QR Portal.');
         return;
       }
 
@@ -747,77 +898,135 @@ export default function BedManagementClient() {
       const actor = currentUser?.name || currentUser?.email || 'Admin';
       addLog(
         actor,
-        'Sửa',
+        'CHECKOUT_REQUEST',
         `Gửi yêu cầu check-out (chờ duyệt): ${bed.ho_va_ten || workerRef?.hoVaTen || ''} (${bed.ma_nv || workerRef?.maNV || '—'}) tại ${bed.ktx} · ${bed.day} · P${bed.phong_so} · G${bed.giuong}`
       );
       toast.success('Đã gửi yêu cầu check-out sang QR Portal — giường sẽ giải phóng sau khi quản lý duyệt.');
       setDrawerBed(null);
     } catch (err: any) {
       console.error('[bed-management] checkout request failed:', err);
-      setActionError(err?.message || 'Không thể gửi yêu cầu check-out.');
+      const msg = err?.message || 'Không thể gửi yêu cầu check-out.';
+      setActionError(msg);
+      toast.error(msg);
     } finally {
       setBusy(false);
     }
-  }, [drawerBed, canWriteBed, workerById, supabase, currentUser, addLog]);
+  }, [drawerBed, canWriteBed, resolveLiveWorkerForBed, supabase, currentUser, addLog]);
 
-  /** Lựa chọn 2: xóa vĩnh viễn công nhân khỏi KTX (worker += log, beds → empty via trigger). */
+  /** Lựa chọn 2: Check-out & Trả giường ngay (xóa hồ sơ khỏi KTX, xác nhận đã xóa, giải phóng giường tức thì). */
   const handleHardDelete = useCallback(async () => {
     const bed = drawerBed;
-    const wid = bed?.worker_id ?? '';
-    if (!bed || !wid) return;
+    if (!bed || bed.status !== 'occupied') return;
     if (!canWriteBed(bed)) {
-      toast.error(`Bạn không có quyền xóa công nhân tại ${bed.ktx} - ${bed.day}.`);
+      toast.error(`Bạn không có quyền check-out / xóa công nhân tại ${bed.ktx} - ${bed.day}.`);
       return;
     }
     setBusy(true);
     setActionError('');
-    const workerRef = workerById.get(wid);
     const now = new Date().toISOString();
     try {
-      try {
-        await supabase.from('worker_deletion_log').insert({
-          worker_id: wid,
-          ho_va_ten: bed.ho_va_ten || workerRef?.hoVaTen || null,
-          ma_nv: bed.ma_nv || workerRef?.maNV || null,
-          ktx: bed.ktx || null,
-          day: bed.day || null,
-          deleted_at: now,
-        });
-      } catch (logErr) {
-        console.warn('[bed-management] deletion log failed:', logErr);
+      const workerRef = await resolveLiveWorkerForBed(bed);
+      const wid = workerRef?.id || bed.worker_id || null;
+      const targetName = bed.ho_va_ten || workerRef?.hoVaTen || '';
+      const targetMaNv = bed.ma_nv || workerRef?.maNV || '';
+      let deletedWorkerId: string | null = null;
+
+      if (wid) {
+        try {
+          await supabase.from('worker_deletion_log').insert({
+            worker_id: wid,
+            ho_va_ten: targetName || null,
+            ma_nv: targetMaNv || null,
+            ktx: bed.ktx || workerRef?.ktx || null,
+            day: bed.day || workerRef?.day || null,
+            deleted_at: now,
+          });
+        } catch (logErr) {
+          console.warn('[bed-management] deletion log failed:', logErr);
+        }
+
+        const { data: deletedRows, error: delErr } = await supabase
+          .from('workers')
+          .delete()
+          .eq('id', wid)
+          .select('id');
+
+        if (delErr) throw new Error(delErr.message);
+        if (!deletedRows || deletedRows.length === 0) {
+          throw new Error(
+            `Không thể xóa hồ sơ công nhân "${targetName || wid}" khỏi CSDL (kiểm tra quyền RLS tại ${bed.ktx} · ${bed.day}).`
+          );
+        }
+        deletedWorkerId = String(deletedRows[0].id);
+
+        preserveDeletedWorkerEntries([
+          {
+            id: deletedWorkerId,
+            hoVaTen: targetName,
+            maNV: targetMaNv,
+            ktx: bed.ktx || workerRef?.ktx || '',
+            day: bed.day || workerRef?.day || '',
+          },
+        ]);
       }
 
-      const { error } = await supabase.from('workers').delete().eq('id', wid);
-      if (error) throw new Error(error.message);
+      // Giải phóng giường chắc chắn bằng cả worker_id lẫn vị trí chuẩn hóa
+      await releaseBedByLocation(supabase, {
+        workerIds: wid ? [wid] : [],
+        bedId: bed.id,
+        ktx: bed.ktx,
+        day: bed.day,
+        phongSo: bed.phong_so,
+        giuong: bed.giuong,
+      });
 
+      // Đồng bộ mọi đơn check-out pending còn tồn cho cùng công nhân/vị trí để tránh treo
       try {
-        await supabase
-          .from('beds')
-          .update({ status: 'empty', worker_id: null, ma_nv: null, ho_va_ten: null })
-          .eq('id', bed.id);
-      } catch (bedErr) {
-        console.warn('[bed-management] release bed after delete failed:', bedErr);
+        if (deletedWorkerId) {
+          await supabase
+            .from('worker_registrations')
+            .update({ status: 'approved', reviewed_by: currentUser?.id, reviewed_at: now })
+            .eq('status', 'pending')
+            .eq('worker_id', deletedWorkerId)
+            .like('ghi_chu', '[CHECKOUT]%');
+        }
+      } catch {}
+
+      if (deletedWorkerId) {
+        setContextWorkers(prev => prev.filter(w => w.id !== deletedWorkerId));
       }
+
+      setBeds(prev =>
+        prev.map(b => (b.id === bed.id ? { ...b, status: 'empty', worker_id: null, ma_nv: null, ho_va_ten: null } : b))
+      );
 
       const actor = currentUser?.name || currentUser?.email || 'Admin';
       addLog(
         actor,
-        'Xóa',
-        `Trả phòng & xóa công nhân khỏi giường: ${bed.ho_va_ten || workerRef?.hoVaTen || ''} (${bed.ma_nv || workerRef?.maNV || '—'}) tại ${bed.ktx} · ${bed.day} · P${bed.phong_so} · G${bed.giuong}`
+        'CHECKOUT_APPROVED',
+        `Check-out trực tiếp & trả giường: ${targetName || '—'} (${targetMaNv || '—'}) tại ${bed.ktx} · ${bed.day} · P${bed.phong_so} · G${bed.giuong}`
       );
-      setBeds(prev =>
-        prev.map(b => (b.id === bed.id ? { ...b, status: 'empty', worker_id: null, ma_nv: null, ho_va_ten: null } : b))
+
+      invalidateWorkerHierarchyCache();
+      invalidateKtxStructureCache();
+      invalidateFacilitiesCache();
+      refreshWorkers().catch(() => {});
+
+      toast.success(
+        deletedWorkerId
+          ? `Đã check-out "${targetName}" và giải phóng Giường ${bed.giuong}!`
+          : `Đã giải phóng Giường ${bed.giuong} (hồ sơ đã được gỡ trước đó)!`
       );
-      toast.success('Đã làm thủ tục trả phòng thành công!');
       setDrawerBed(null);
-      refreshWorkers();
     } catch (err: any) {
       console.error('[bed-management] hard delete failed:', err);
-      setActionError(err?.message || 'Không thể xóa công nhân khỏi KTX.');
+      const msg = err?.message || 'Không thể check-out / xóa công nhân khỏi KTX.';
+      setActionError(msg);
+      toast.error(msg);
     } finally {
       setBusy(false);
     }
-  }, [drawerBed, canWriteBed, workerById, supabase, currentUser, addLog, refreshWorkers]);
+  }, [drawerBed, canWriteBed, resolveLiveWorkerForBed, supabase, currentUser, setContextWorkers, addLog, refreshWorkers]);
 
   const setBedStatus = useCallback(
     async (bed: BedRow, status: BedStatus) => {
@@ -925,10 +1134,10 @@ export default function BedManagementClient() {
 
   const BedTooltip = ({ bed, worker }: { bed: BedRow; worker?: WorkerLite | null }) => (
     <div
-      className="pointer-events-none absolute left-1/2 bottom-full z-40 mb-2 hidden sm:block w-64 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+      className="pointer-events-none absolute left-1/2 bottom-full z-40 mb-2 hidden sm:block w-64 -translate-x-1/2"
       role="tooltip"
     >
-      <div className="rounded-xl border border-bdr bg-page shadow-2xl p-3">
+      <div className="rounded-xl border border-bdr bg-page shadow-lg p-3">
         {(() => {
           const w = bed?.worker_id ? (workerById.get(bed.worker_id) || worker) : worker;
           const name = bed?.ho_va_ten || w?.hoVaTen || null;
@@ -1218,7 +1427,7 @@ export default function BedManagementClient() {
                         </div>
                       )}
                       {/* Room Card */}
-                      <div className={`rounded-2xl border p-3.5 shadow-xl transition-all hover:shadow-2xl ${
+                      <div className={`rounded-2xl border p-3.5 shadow-sm transition-colors ${
                         g.overloaded ? 'border-dgr tint-dgr' : 'border-bdr bg-surf'
                       }`}>
                         <div className="flex items-center justify-between gap-2 mb-2.5">
@@ -1242,20 +1451,23 @@ export default function BedManagementClient() {
                           </span>
                         </div>
                         <div className="w-full h-1.5 bg-bdr2 rounded-full overflow-hidden mb-3">
-                          <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${Math.min(pct * 100, 100)}%` }} />
+                          <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(pct * 100, 100)}%` }} />
                         </div>
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
                           {g.beds.map(bed => {
-                            const worker = bed?.worker_id ? (workerById.get(bed.worker_id) || null) : null;
+                            const worker = getWorkerForBed(bed);
                             const occupied = bed?.status === 'occupied';
                             const maintenance = bed?.status === 'maintenance';
                             const female = occupied && isFemale(worker, bed?.ho_va_ten);
                             const unit = worker?.donVi || '';
                             const bedLabel = `G${bed?.giuong || '?'}`;
+                            const isHovered = occupied && hoveredBedId === bed?.id;
                             return (
                               <button
                                 type="button"
                                 key={bed?.id}
+                                onMouseEnter={() => { if (occupied && bed?.id) setHoveredBedId(bed.id); }}
+                                onMouseLeave={() => { if (hoveredBedId === bed?.id) setHoveredBedId(null); }}
                                 onClick={() => {
                                   if (occupied || maintenance) {
                                     setDrawerBed(bed);
@@ -1268,7 +1480,7 @@ export default function BedManagementClient() {
                                     setCandidateSearch('');
                                   }
                                 }}
-                                className={`group relative text-left rounded-xl border p-2.5 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-pri2 overflow-visible ${bedCellClasses(bed?.status ?? 'empty', female)}`}
+                                className={`relative text-left rounded-xl border p-2.5 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-pri2 overflow-visible ${bedCellClasses(bed?.status ?? 'empty', female)}`}
                               >
                                 <div className="flex items-center justify-between mb-1">
                                   <span className="inline-flex items-center gap-1 text-xs font-extrabold text-lnk font-tabular">
@@ -1291,7 +1503,7 @@ export default function BedManagementClient() {
                                 ) : (
                                   <p className="text-[11px] font-bold text-lnk">Bấm để gán…</p>
                                 )}
-                                {occupied && <BedTooltip bed={bed} worker={worker} />}
+                                {isHovered && <BedTooltip bed={bed} worker={worker} />}
                               </button>
                             );
                           })}
@@ -1306,7 +1518,7 @@ export default function BedManagementClient() {
 
           {/* ─── TABLE VIEW ─── */}
           {view === 'table' && (
-            <div className="bg-surf border border-bdr rounded-2xl shadow-xl overflow-hidden">
+            <div className="bg-surf border border-bdr rounded-2xl shadow-sm overflow-hidden">
               <div className="overflow-x-auto scrollbar-thin">
                 <table className="w-full text-sm">
                   <thead>
@@ -1473,7 +1685,7 @@ export default function BedManagementClient() {
 
       {/* ─── Assign Modal ─── */}
       {assignTarget && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setAssignTarget(null)}>
+        <div className="fixed inset-0 z-50 bg-black/65 flex items-center justify-center p-4" onClick={() => setAssignTarget(null)}>
           <div className="bg-surf border border-bdr rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-bdr">
               <div>
@@ -1532,7 +1744,7 @@ export default function BedManagementClient() {
       {/* ─── Quick Drawer (right side) ─── */}
       {drawerBed && (
         <>
-          <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm animate-fade-in" onClick={() => { setDrawerBed(null); setShowTransferModal(false); }} />
+          <div className="fixed inset-0 z-40 bg-black/65" onClick={() => { setDrawerBed(null); setShowTransferModal(false); }} />
           <div
             className="fixed z-50 animate-slide-in-right bottom-0 inset-x-0 max-h-[85vh] sm:max-h-full sm:top-0 sm:right-0 sm:left-auto sm:inset-x-auto sm:h-full w-full sm:max-w-md bg-surf border-t sm:border-t-0 sm:border-l border-bdr text-tx shadow-2xl flex flex-col rounded-t-2xl sm:rounded-none overflow-hidden"
           >
@@ -1553,7 +1765,7 @@ export default function BedManagementClient() {
 
             <div className="px-5 py-4 space-y-3 overflow-y-auto scrollbar-thin">
               {(() => {
-                const w = drawerBed?.worker_id ? (workerById.get(drawerBed.worker_id) || null) : null;
+                const w = getWorkerForBed(drawerBed);
                 const name = drawerBed?.ho_va_ten || w?.hoVaTen || '';
                 const female = isFemale(w, drawerBed?.ho_va_ten);
                 if (!name) {
@@ -1589,12 +1801,15 @@ export default function BedManagementClient() {
                       <span>Bạn chỉ có quyền xem giường thuộc {drawerBed.ktx} · {drawerBed.day}.</span>
                     </div>
                   )}
-                  {drawerBed?.status === 'occupied' && canWriteBed(drawerBed) && (
+                  {drawerBed?.status === 'occupied' && canWriteBed(drawerBed) && (() => {
+                    const resolvedDrawerWorker = getWorkerForBed(drawerBed);
+                    const hasWorkerIdentity = Boolean(drawerBed?.worker_id || resolvedDrawerWorker?.id);
+                    return (
                     <>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <button
                           type="button"
-                          disabled={!drawerBed?.worker_id || busy}
+                          disabled={!hasWorkerIdentity || busy}
                           onClick={() => setShowTransferModal(true)}
                           className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-pri hover:opacity-90 text-white text-sm font-semibold disabled:opacity-50 transition-colors cursor-pointer"
                         >
@@ -1602,9 +1817,10 @@ export default function BedManagementClient() {
                         </button>
                         <button
                           type="button"
-                          disabled={!drawerBed?.worker_id || busy}
+                          disabled={!hasWorkerIdentity || busy}
                           onClick={() => {
-                            setSwapSourceBed(drawerBed);
+                            const effectiveWid = drawerBed.worker_id || resolvedDrawerWorker?.id || null;
+                            setSwapSourceBed({ ...drawerBed, worker_id: effectiveWid });
                             setSwapSearch('');
                           }}
                           className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border border-bdr2 bg-bdg hover:bg-act text-lnk text-sm font-semibold disabled:opacity-50 transition-colors cursor-pointer"
@@ -1616,30 +1832,31 @@ export default function BedManagementClient() {
                       {/* Trả phòng — chọn cách xử lý */}
                       <div className="rounded-xl border border-bdr bg-act p-3 space-y-2">
                         <p className="text-[11px] font-extrabold text-tx uppercase tracking-wider flex items-center gap-1.5">
-                          <DoorOpen size={12} className="text-dgr" /> Trả phòng / Yêu cầu check-out
+                          <DoorOpen size={12} className="text-dgr" /> Trả phòng / Check-out khỏi KTX
                         </p>
                         <button
                           type="button"
-                          disabled={!drawerBed?.worker_id || busy}
+                          disabled={busy}
+                          onClick={handleHardDelete}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-dgr hover:opacity-90 text-white text-sm font-extrabold disabled:opacity-50 transition-colors cursor-pointer"
+                        >
+                          {busy ? <Loader2 size={14} className="animate-spin" /> : <UserX size={14} />} Check-out & Trả giường ngay
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
                           onClick={handleCheckoutRequest}
-                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-wn hover:opacity-90 text-wn-fg text-sm font-extrabold disabled:opacity-50 transition-colors"
+                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-wn hover:opacity-90 text-wn-fg text-sm font-extrabold disabled:opacity-50 transition-colors cursor-pointer"
                         >
                           {busy ? <Loader2 size={14} className="animate-spin" /> : <DoorOpen size={14} />} Gửi yêu cầu check-out để duyệt
                         </button>
-                        <button
-                          type="button"
-                          disabled={!drawerBed?.worker_id || busy}
-                          onClick={handleHardDelete}
-                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-dgr hover:opacity-90 text-white text-sm font-extrabold disabled:opacity-50 transition-colors"
-                        >
-                          {busy ? <Loader2 size={14} className="animate-spin" /> : <UserX size={14} />} Xóa vĩnh viễn khỏi KTX
-                        </button>
                         <p className="text-[10px] text-mu leading-snug">
-                          Gửi yêu cầu → chờ quản lý duyệt ở tab <b>Duyệt Check-out</b> (QR Portal). Xóa vĩnh viễn → công nhân bị gỡ ngay khỏi hệ thống.
+                          <b>Check-out ngay</b> → gỡ công nhân khỏi hệ thống và giải phóng giường tức thì. <b>Gửi yêu cầu</b> → chờ duyệt ở tab Duyệt Check-out (QR Portal).
                         </p>
                       </div>
                     </>
-                  )}
+                    );
+                  })()}
                   {drawerBed?.status === 'maintenance' && canWriteBed(drawerBed) && (
                     <button
                       type="button"
@@ -1744,7 +1961,7 @@ export default function BedManagementClient() {
       <BedTransferModal
         open={showTransferModal}
         onClose={() => setShowTransferModal(false)}
-        workerId={drawerBed?.worker_id ?? null}
+        workerId={drawerBed?.worker_id || getWorkerForBed(drawerBed)?.id || null}
         sourceBed={drawerBed
           ? {
               id: drawerBed.id || '',

@@ -53,7 +53,51 @@ export async function releaseBedsForWorkers(
   const CHUNK = 200;
   for (let i = 0; i < cleanIds.length; i += CHUNK) {
     const chunk = cleanIds.slice(i, i + CHUNK);
-    try {
+    const { data, error } = await supabase
+      .from('beds')
+      .update({
+        status: 'empty',
+        worker_id: null,
+        ma_nv: null,
+        ho_va_ten: null,
+      })
+      .in('worker_id', chunk)
+      .select('id');
+
+    if (error) {
+      console.warn('[bedSync] releaseBedsForWorkers error:', error.message);
+    } else if (Array.isArray(data)) {
+      released += data.length;
+    }
+  }
+  return released;
+}
+
+/**
+ * Releases beds matching workerIds and/or a normalized (ktx, day, phongSo, giuong) slot.
+ * Throws if Supabase explicitly rejects the update so callers never silently report false success.
+ */
+export async function releaseBedByLocation(
+  supabase: SupabaseClient,
+  params: {
+    workerIds?: string[];
+    ktx?: string | null;
+    day?: string | null;
+    phongSo?: string | null;
+    giuong?: string | null;
+    bedId?: string | null;
+  }
+): Promise<{ releasedIds: string[] }> {
+  const releasedSet = new Set<string>();
+  const cleanWorkerIds = Array.from(
+    new Set((params.workerIds || []).map(id => String(id || '').trim()).filter(Boolean))
+  );
+
+  // 1. Release any bed linked directly by worker_id
+  if (cleanWorkerIds.length > 0) {
+    const CHUNK = 200;
+    for (let i = 0; i < cleanWorkerIds.length; i += CHUNK) {
+      const chunk = cleanWorkerIds.slice(i, i + CHUNK);
       const { data, error } = await supabase
         .from('beds')
         .update({
@@ -65,14 +109,86 @@ export async function releaseBedsForWorkers(
         .in('worker_id', chunk)
         .select('id');
 
-      if (!error && Array.isArray(data)) {
-        released += data.length;
+      if (error) {
+        throw new Error(`Không thể giải phóng giường theo mã công nhân: ${error.message}`);
       }
-    } catch (err) {
-      console.warn('[bedSync] releaseBedsForWorkers warning:', err);
+      (data || []).forEach((row: any) => {
+        if (row?.id) releasedSet.add(String(row.id));
+      });
     }
   }
-  return released;
+
+  // 2. Release specific bed row if bedId is known
+  if (params.bedId && params.bedId.trim()) {
+    const { data, error } = await supabase
+      .from('beds')
+      .update({
+        status: 'empty',
+        worker_id: null,
+        ma_nv: null,
+        ho_va_ten: null,
+      })
+      .eq('id', params.bedId.trim())
+      .select('id');
+
+    if (error) {
+      throw new Error(`Không thể giải phóng giường ${params.bedId}: ${error.message}`);
+    }
+    (data || []).forEach((row: any) => {
+      if (row?.id) releasedSet.add(String(row.id));
+    });
+  }
+
+  // 3. Fallback: release by normalized KTX + Dãy + Phòng + Giường
+  const ktx = (params.ktx || '').trim();
+  const day = (params.day || '').trim();
+  const normRoom = normalizeRoomLabel(params.phongSo || '');
+  const normBed = normalizeBedLabel(params.giuong || '');
+
+  if (ktx && day && normRoom && normBed) {
+    const { data: candidateBeds, error: queryErr } = await supabase
+      .from('beds')
+      .select('id, phong_so, giuong, status')
+      .eq('ktx', ktx)
+      .eq('day', day)
+      .neq('status', 'maintenance');
+
+    if (queryErr) {
+      throw new Error(`Không thể kiểm tra giường tại ${ktx} · ${day}: ${queryErr.message}`);
+    }
+
+    const slotIds = (candidateBeds || [])
+      .filter(
+        (b: any) =>
+          !releasedSet.has(String(b?.id)) &&
+          b?.status === 'occupied' &&
+          normalizeRoomLabel(String(b?.phong_so ?? '')) === normRoom &&
+          normalizeBedLabel(String(b?.giuong ?? '')) === normBed
+      )
+      .map((b: any) => String(b.id));
+
+    if (slotIds.length > 0) {
+      const { data: updatedRows, error: slotErr } = await supabase
+        .from('beds')
+        .update({
+          status: 'empty',
+          worker_id: null,
+          ma_nv: null,
+          ho_va_ten: null,
+        })
+        .in('id', slotIds)
+        .select('id');
+
+      if (slotErr) {
+        throw new Error(`Không thể cập nhật trạng thái trống cho giường: ${slotErr.message}`);
+      }
+      (updatedRows || []).forEach((row: any) => {
+        if (row?.id) releasedSet.add(String(row.id));
+      });
+    }
+  }
+
+  return { releasedIds: Array.from(releasedSet) };
 }
 
 /**

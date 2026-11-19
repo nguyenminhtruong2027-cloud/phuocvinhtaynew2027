@@ -137,19 +137,6 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
   const workerMetaByIdRef = useRef<Map<string, Worker>>(new Map());
   const lastFetchedAtRef = useRef<number>(0);
 
-  const fetchCount = useCallback(async () => {
-    try {
-      const { count, error } = await supabase
-        .from('workers')
-        .select('*', { count: 'exact', head: true });
-      if (!error && count !== null) {
-        setTotalWorkerCount(count);
-      }
-    } catch (err) {
-      console.warn('fetchCount warning:', err);
-    }
-  }, [supabase]);
-
   const fetchWorkers = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     try {
@@ -230,7 +217,11 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
             if (newWorker.id) workerMetaByIdRef.current.set(newWorker.id, newWorker);
             setWorkers(prev => {
               if (prev.some(w => w.id === newWorker.id)) return prev;
-              const next = [...prev, newWorker].sort((a, b) => (a.stt ?? 0) - (b.stt ?? 0) || a.hoVaTen.localeCompare(b.hoVaTen));
+              const last = prev[prev.length - 1];
+              const canAppend = !last || (newWorker.stt ?? 0) >= (last.stt ?? 0);
+              const next = canAppend
+                ? [...prev, newWorker]
+                : [...prev, newWorker].sort((a, b) => (a.stt ?? 0) - (b.stt ?? 0) || a.hoVaTen.localeCompare(b.hoVaTen));
               setTotalWorkerCount(next.length);
               return next;
             });
@@ -272,8 +263,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
 
   const refreshWorkers = useCallback(async () => {
     await fetchWorkers(true);
-    await fetchCount();
-  }, [fetchWorkers, fetchCount]);
+  }, [fetchWorkers]);
 
   const addWorker = useCallback(async (worker: Worker) => {
     const dbRow = workerToDbRow(worker);

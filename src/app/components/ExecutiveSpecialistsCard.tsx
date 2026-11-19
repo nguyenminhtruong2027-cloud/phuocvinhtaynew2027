@@ -688,7 +688,7 @@ export default function ExecutiveSpecialistsCard({
     <>
       {/* ── Realtime Toast Notification ── */}
       {toastMessage && (
-        <div className={`fixed bottom-5 right-5 z-[100] flex items-center gap-2.5 px-4 py-3 border rounded-xl shadow-2xl animate-fade-in backdrop-blur-md max-w-[90vw] ${
+        <div className={`fixed bottom-5 right-5 z-[100] flex items-center gap-2.5 px-4 py-3 border rounded-xl shadow-2xl animate-fade-in max-w-[90vw] ${
           toastMessage.type === 'error'
             ? 'tint-dgr border-dgr text-dgr'
             : toastMessage.type === 'warning'
@@ -1026,7 +1026,7 @@ export default function ExecutiveSpecialistsCard({
 
       {/* ── MODAL CHI TIẾT: PHÂN CÔNG TRỰC BAN CHUYÊN VIÊN THEO NGÀY ── */}
       {showModal && (
-        <div className="fixed inset-0 z-50 p-2 sm:p-4 md:p-6 bg-black/80 backdrop-blur-sm flex items-center justify-center overflow-y-auto">
+        <div className="fixed inset-0 z-50 p-2 sm:p-4 md:p-6 bg-black/75 flex items-center justify-center overflow-y-auto">
           <div className="bg-surf border border-bdr2 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col my-auto text-tx overflow-hidden">
             
             {/* Modal Header */}
@@ -1380,7 +1380,7 @@ export default function ExecutiveSpecialistsCard({
 
       {/* ── SQL Setup Helper Modal (Admin) ── */}
       {showSqlModal && (
-        <div className="fixed inset-0 z-50 p-3 sm:p-6 bg-black/85 backdrop-blur-md flex items-center justify-center overflow-y-auto">
+        <div className="fixed inset-0 z-50 p-3 sm:p-6 bg-black/80 flex items-center justify-center overflow-y-auto">
           <div className="bg-surf border border-wn rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col my-auto text-tx overflow-hidden">
             <div className="px-5 py-4 border-b border-bdr bg-act/90 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2.5">

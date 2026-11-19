@@ -12,7 +12,6 @@ import {
   TrendingUp, TrendingDown, XCircle, GitBranch, HardHat,
   VenusAndMars, Sparkles, Building2, Layers, UserCheck, CheckCircle, ArrowRight, Activity
 } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
 import { CraftIconBadge, type CraftTone } from '@/components/ui/CraftIcon';
 import { AnimatedNumber, SlidingTabs, StaggerGrid, StaggerItem } from '@/components/ui/MotionPrimitives';
 import dynamic from 'next/dynamic';
@@ -38,6 +37,8 @@ import { fetchWorkerFluctuationReport, getVNDateString } from '@/lib/workerFluct
 const RoomDrawer = dynamic(() => import('./components/RoomDrawer'), { ssr: false });
 const DashboardCharts = dynamic(() => import('./components/DashboardCharts'), { ssr: false });
 const RecentEntriesFeed = dynamic(() => import('./components/RecentEntriesFeed'), { ssr: false });
+
+const EMPTY_TOOLTIP_WORKERS: { hoVaTen: string; maNV: string; gioiTinh?: string }[] = [];
 
 // ─── Room heatmap color helpers (Executive Dark Mode) ──────────────────────
 function getRoomHeatColor(count: number, capacity: number): { bg: string; border: string; label: string; dot: string; textColor: string } {
@@ -110,15 +111,14 @@ function ProgressRing({
           cx={radius}
           cy={radius}
         />
-        <motion.circle
+        <circle
           stroke={color}
           fill="transparent"
           strokeWidth={stroke}
           strokeDasharray={`${circumference} ${circumference}`}
-          initial={{ strokeDashoffset: circumference }}
-          animate={{ strokeDashoffset }}
-          transition={{ duration: 0.75, ease: [0.22, 1, 0.36, 1] }}
+          strokeDashoffset={strokeDashoffset}
           strokeLinecap="round"
+          className="transition-[stroke-dashoffset] duration-500 ease-out"
           r={normalizedRadius}
           cx={radius}
           cy={radius}
@@ -160,24 +160,14 @@ function ExecutiveKPICard({
   rightVisual?: React.ReactNode;
 }) {
   return (
-    <motion.div
-      whileHover={onClick ? { y: -3 } : { y: -2 }}
-      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+    <div
       className={`rounded-2xl p-4 sm:p-5 flex flex-col justify-between relative overflow-hidden group w-full ${
         alert
           ? 'tint-dgr border border-dgr'
           : 'surface-elevated'
-      } ${onClick ? 'cursor-pointer' : ''}`}
+      } ${onClick ? 'cursor-pointer hover:-translate-y-0.5 transition-transform duration-150' : ''}`}
       onClick={onClick}
     >
-      {/* Subtle corner ambient accent */}
-      <span
-        aria-hidden="true"
-        className="pointer-events-none absolute -top-12 -right-12 w-28 h-28 rounded-full opacity-25 blur-2xl transition-opacity duration-300 group-hover:opacity-45"
-        style={{
-          background: tone === 'teal' ? 'var(--ok2)' : tone === 'amber' ? 'var(--wn)' : tone === 'rose' ? 'var(--dgr)' : 'var(--pri2)',
-        }}
-      />
       <div className="relative z-10">
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1 min-w-0 flex-1">
@@ -211,7 +201,7 @@ function ExecutiveKPICard({
       </div>
 
       {bottomInfo && <div className="relative z-10 mt-3.5 pt-3 border-t border-bdr">{bottomInfo}</div>}
-    </motion.div>
+    </div>
   );
 }
 
@@ -230,12 +220,9 @@ function ExecutiveAlertCard({
   onClick?: () => void;
 }) {
   return (
-    <motion.div
-      whileHover={onClick ? { y: -2 } : undefined}
-      whileTap={onClick ? { scale: 0.98 } : undefined}
-      transition={{ duration: 0.15 }}
+    <div
       className={`flex items-center gap-2.5 sm:gap-3 rounded-xl sm:rounded-2xl px-3 sm:px-3.5 py-2.5 sm:py-3 surface-elevated group w-full min-w-0 ${
-        onClick ? 'cursor-pointer' : ''
+        onClick ? 'cursor-pointer hover:-translate-y-0.5 active:scale-[0.98] transition-transform duration-100' : ''
       }`}
       onClick={onClick}
     >
@@ -244,7 +231,7 @@ function ExecutiveAlertCard({
         <p className="text-[11px] sm:text-xs text-mu font-medium truncate whitespace-nowrap">{label}</p>
         <p className="text-sm sm:text-base font-extrabold text-tx font-tabular tracking-tight whitespace-nowrap truncate">{value}</p>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -348,11 +335,7 @@ function RoomTooltip({
   onClose: () => void;
 }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 6, scale: 0.96 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 4, scale: 0.97 }}
-      transition={{ duration: 0.14 }}
+    <div
       className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 bg-surf border border-bdr2 text-tx rounded-xl shadow-modal p-3 text-xs"
     >
       <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-bdr">
@@ -398,12 +381,12 @@ function RoomTooltip({
         </ul>
       )}
       <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-bdr2" />
-    </motion.div>
+    </div>
   );
 }
 
 // ─── Heatmap Room Cell (Architectural Tactile Room Tile) ────────────────────
-function HeatmapRoomCell({
+const HeatmapRoomCell = React.memo(function HeatmapRoomCell({
   room, count, capacity, ktx, building, workers, onClickRoom, unitName, genderInfo, onQuickAssignGender
 }: {
   room: string; count: number; capacity: number;
@@ -460,11 +443,8 @@ function HeatmapRoomCell({
 
   return (
     <div className="relative min-w-0 w-full overflow-visible">
-      <motion.div
-        whileHover={{ y: -2, scale: 1.02 }}
-        whileTap={{ scale: 0.97 }}
-        transition={{ duration: 0.14 }}
-        className={`relative border rounded-xl px-2 pt-1.5 pb-2 cursor-pointer flex flex-col justify-between gap-1 min-w-0 w-full overflow-hidden select-none shadow-sm hover:shadow-md ${bg} ${
+      <div
+        className={`relative border rounded-xl px-2 pt-1.5 pb-2 cursor-pointer flex flex-col justify-between gap-1 min-w-0 w-full overflow-hidden select-none shadow-sm hover:shadow-md transition-transform duration-100 hover:-translate-y-0.5 active:scale-[0.97] ${bg} ${
           isFemaleRoom
             ? 'tint-pink border-pink-tint'
             : isMaleRoom
@@ -507,60 +487,54 @@ function HeatmapRoomCell({
               {isFemaleRoom ? '♀' : isMaleRoom ? '♂' : isMixedRoom ? '⚡' : '•'}
             </button>
 
-            <AnimatePresence>
-              {showMenu && (
-                <motion.div
-                  ref={menuRef}
-                  initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                  transition={{ duration: 0.14 }}
-                  onClick={e => e.stopPropagation()}
-                  className="absolute right-0 top-full mt-1 z-50 w-36 rounded-xl bg-surf border border-bdr2 shadow-modal p-1 space-y-1"
+            {showMenu && (
+              <div
+                ref={menuRef}
+                onClick={e => e.stopPropagation()}
+                className="absolute right-0 top-full mt-1 z-50 w-36 rounded-xl bg-surf border border-bdr2 shadow-modal p-1 space-y-1"
+              >
+                <div className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-mu border-b border-bdr pb-0.5 mb-0.5">
+                  Đổi công năng {roomLabel}
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => handleSelectGender(e, 'male')}
+                  className={`w-full text-left px-2 py-1 rounded-lg text-xs font-bold flex items-center justify-between transition-colors ${
+                    isMaleRoom ? 'bg-pri text-white shadow-sm' : 'text-lnk hover:bg-bdg'
+                  }`}
                 >
-                  <div className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-mu border-b border-bdr pb-0.5 mb-0.5">
-                    Đổi công năng {roomLabel}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={(e) => handleSelectGender(e, 'male')}
-                    className={`w-full text-left px-2 py-1 rounded-lg text-xs font-bold flex items-center justify-between transition-colors ${
-                      isMaleRoom ? 'bg-pri text-white shadow-sm' : 'text-lnk hover:bg-bdg'
-                    }`}
-                  >
-                    <span className="flex items-center gap-1">
-                      <span>♂</span>
-                      <span>Phòng Nam</span>
-                    </span>
-                    {isMaleRoom && <span className="text-[10px]">✓</span>}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => handleSelectGender(e, 'female')}
-                    className={`w-full text-left px-2 py-1 rounded-lg text-xs font-bold flex items-center justify-between transition-colors ${
-                      isFemaleRoom ? 'bg-pink-600 text-white shadow-sm' : 'text-pink-tone hover:tint-pink'
-                    }`}
-                  >
-                    <span className="flex items-center gap-1">
-                      <span>♀</span>
-                      <span>Phòng Nữ</span>
-                    </span>
-                    {isFemaleRoom && <span className="text-[10px]">✓</span>}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => handleSelectGender(e, 'auto')}
-                    className="w-full text-left px-2 py-1 rounded-lg text-[11px] font-medium text-mu hover:text-tx hover:bg-act transition-colors flex items-center justify-between"
-                  >
-                    <span className="flex items-center gap-1">
-                      <span>⚡</span>
-                      <span>Tự động</span>
-                    </span>
-                    {!genderInfo.isCustom && <span className="text-[10px]">✓</span>}
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                  <span className="flex items-center gap-1">
+                    <span>♂</span>
+                    <span>Phòng Nam</span>
+                  </span>
+                  {isMaleRoom && <span className="text-[10px]">✓</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => handleSelectGender(e, 'female')}
+                  className={`w-full text-left px-2 py-1 rounded-lg text-xs font-bold flex items-center justify-between transition-colors ${
+                    isFemaleRoom ? 'bg-pink-600 text-white shadow-sm' : 'text-pink-tone hover:tint-pink'
+                  }`}
+                >
+                  <span className="flex items-center gap-1">
+                    <span>♀</span>
+                    <span>Phòng Nữ</span>
+                  </span>
+                  {isFemaleRoom && <span className="text-[10px]">✓</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => handleSelectGender(e, 'auto')}
+                  className="w-full text-left px-2 py-1 rounded-lg text-[11px] font-medium text-mu hover:text-tx hover:bg-act transition-colors flex items-center justify-between"
+                >
+                  <span className="flex items-center gap-1">
+                    <span>⚡</span>
+                    <span>Tự động</span>
+                  </span>
+                  {!genderInfo.isCustom && <span className="text-[10px]">✓</span>}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -581,21 +555,19 @@ function HeatmapRoomCell({
             style={{ width: `${clampedPct}%` }}
           />
         </span>
-      </motion.div>
+      </div>
 
-      <AnimatePresence>
-        {showTooltip && !showMenu && (
-          <RoomTooltip
-            workers={workers}
-            room={room}
-            genderInfo={genderInfo}
-            onClose={() => setShowTooltip(false)}
-          />
-        )}
-      </AnimatePresence>
+      {showTooltip && !showMenu && (
+        <RoomTooltip
+          workers={workers}
+          room={room}
+          genderInfo={genderInfo}
+          onClose={() => setShowTooltip(false)}
+        />
+      )}
     </div>
   );
-}
+});
 
 // ─── Block Title With Staff Name ──────────────────────────────────────────
 interface BlockAssignment {
@@ -657,6 +629,7 @@ export default function OccupancyDashboardPage() {
   // Load and sync room gender designations (Supabase room_units is authoritative)
   useEffect(() => {
     let active = true;
+    let syncTimer: ReturnType<typeof setTimeout> | null = null;
     const saved = loadSavedRoomGenderMap();
     setRoomGenderMap(saved);
 
@@ -668,16 +641,24 @@ export default function OccupancyDashboardPage() {
       });
     };
 
+    const scheduleSyncLabels = () => {
+      if (syncTimer) clearTimeout(syncTimer);
+      syncTimer = setTimeout(() => {
+        if (active) syncLabels();
+      }, 250);
+    };
+
     syncLabels();
 
     const supabase = createClient();
     const channel = supabase
       .channel('dashboard_room_units_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_units' }, syncLabels)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_units' }, scheduleSyncLabels)
       .subscribe();
 
     return () => {
       active = false;
+      if (syncTimer) clearTimeout(syncTimer);
       supabase.removeChannel(channel);
     };
   }, []);
@@ -1026,15 +1007,131 @@ export default function OccupancyDashboardPage() {
     return allKTX;
   }, [selectedKTX, allKTX]);
 
+  // Pre-index all workers & rooms into O(1) lookup Maps for fast heatmap rendering
+  const heatmapIndex = useMemo(() => {
+    const ktxWorkersMap = new Map<string, typeof workers>();
+    const buildingWorkersMap = new Map<string, typeof workers>();
+    const roomWorkersMap = new Map<string, typeof workers>();
+    const roomTooltipWorkersMap = new Map<string, { hoVaTen: string; maNV: string; gioiTinh?: string }[]>();
+    const roomGenderByKeyMap = new Map<string, RoomGenderInfo>();
+    const ktxBuildingsSetMap = new Map<string, Set<string>>();
+    const buildingRoomsMap = new Map<string, Map<string, string>>();
+
+    const addBuildingToKtx = (ktx: string, day: string) => {
+      let set = ktxBuildingsSetMap.get(ktx);
+      if (!set) {
+        set = new Set();
+        ktxBuildingsSetMap.set(ktx, set);
+      }
+      set.add(day);
+    };
+
+    (accommodationFacilities || []).forEach(f => {
+      const ktx = (f.ktx ?? '').trim();
+      const day = (f.day ?? '').trim();
+      if (!ktx || !day) return;
+      addBuildingToKtx(ktx, day);
+      const rawRoom = (f.phong_khu_vuc ?? '').trim();
+      if (!rawRoom) return;
+      const norm = normalizeRoomLabel(rawRoom);
+      if (!norm) return;
+      const bKey = `${ktx}||${day}`;
+      let rMap = buildingRoomsMap.get(bKey);
+      if (!rMap) {
+        rMap = new Map();
+        buildingRoomsMap.set(bKey, rMap);
+      }
+      if (!rMap.has(norm)) rMap.set(norm, rawRoom);
+    });
+
+    (workers || []).forEach(w => {
+      const ktx = (w.ktx ?? '').trim();
+      if (!ktx) return;
+      let kList = ktxWorkersMap.get(ktx);
+      if (!kList) {
+        kList = [];
+        ktxWorkersMap.set(ktx, kList);
+      }
+      kList.push(w);
+
+      const day = (w.day ?? '').trim();
+      if (!day) return;
+      addBuildingToKtx(ktx, day);
+      const bKey = `${ktx}||${day}`;
+      let bList = buildingWorkersMap.get(bKey);
+      if (!bList) {
+        bList = [];
+        buildingWorkersMap.set(bKey, bList);
+      }
+      bList.push(w);
+
+      const rawRoom = (w.phongSo ?? '').trim();
+      if (!rawRoom) return;
+      const norm = normalizeRoomLabel(rawRoom);
+      if (!norm) return;
+      const fullNormKey = `${ktx}||${day}||${norm}`;
+      if (!hiddenOrFunctionalKeys.has(fullNormKey)) {
+        let rMap = buildingRoomsMap.get(bKey);
+        if (!rMap) {
+          rMap = new Map();
+          buildingRoomsMap.set(bKey, rMap);
+        }
+        if (!rMap.has(norm)) rMap.set(norm, rawRoom);
+      }
+      let rwList = roomWorkersMap.get(fullNormKey);
+      if (!rwList) {
+        rwList = [];
+        roomWorkersMap.set(fullNormKey, rwList);
+      }
+      rwList.push(w);
+
+      let twList = roomTooltipWorkersMap.get(fullNormKey);
+      if (!twList) {
+        twList = [];
+        roomTooltipWorkersMap.set(fullNormKey, twList);
+      }
+      twList.push({ hoVaTen: w.hoVaTen, maNV: w.maNV, gioiTinh: w.gioiTinh });
+    });
+
+    const ktxBuildingsSortedMap = new Map<string, string[]>();
+    ktxBuildingsSetMap.forEach((set, ktx) => {
+      ktxBuildingsSortedMap.set(ktx, Array.from(set).sort(naturalSortCompare));
+    });
+
+    const buildingRoomsSortedMap = new Map<string, string[]>();
+    buildingRoomsMap.forEach((rMap, bKey) => {
+      const [ktx, building] = bKey.split('||');
+      const sorted = Array.from(rMap.values()).sort(naturalSortCompare);
+      buildingRoomsSortedMap.set(bKey, sorted);
+      sorted.forEach(room => {
+        const normR = normalizeRoomLabel(room);
+        const fullNormKey = `${ktx}||${building}||${normR}`;
+        const rawKey = `${ktx}||${building}||${room}`;
+        const rwList = roomWorkersMap.get(fullNormKey) || [];
+        const adminGender = roomGenderMap[rawKey];
+        roomGenderByKeyMap.set(
+          rawKey,
+          getRoomGenderInfo(rwList, adminGender === 'male' ? 'Nam' : adminGender === 'female' ? 'Nữ' : null)
+        );
+      });
+    });
+
+    return {
+      ktxWorkersMap,
+      buildingWorkersMap,
+      roomWorkersMap,
+      roomTooltipWorkersMap,
+      roomGenderByKeyMap,
+      ktxBuildingsSortedMap,
+      buildingRoomsSortedMap,
+    };
+  }, [workers, accommodationFacilities, hiddenOrFunctionalKeys, roomGenderMap]);
+
   const drawerWorkers = useMemo(() => {
     if (!drawerRoom) return [];
     const normR = normalizeRoomLabel(drawerRoom.room);
-    return workers.filter(w =>
-      w.ktx === drawerRoom.ktx &&
-      w.day === drawerRoom.building &&
-      (w.phongSo === drawerRoom.room || normalizeRoomLabel(w.phongSo) === normR)
-    );
-  }, [drawerRoom, workers]);
+    return heatmapIndex.roomWorkersMap.get(`${drawerRoom.ktx}||${drawerRoom.building}||${normR}`) || [];
+  }, [drawerRoom, heatmapIndex]);
 
   const handleExportReport = useCallback(() => {
     const today = new Date();
@@ -1138,10 +1235,9 @@ export default function OccupancyDashboardPage() {
 
           {/* ── 2. Unified Action Buttons Bar ── */}
           <div className="flex flex-col sm:flex-row flex-wrap items-center gap-2.5 sm:gap-3 w-full">
-            <motion.button
-              whileTap={{ scale: 0.98 }}
+            <button
               onClick={() => setShowQuickAdd(true)}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl btn-glow-primary text-xs sm:text-sm font-semibold cursor-pointer"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl btn-glow-primary text-xs sm:text-sm font-semibold cursor-pointer active:scale-[0.98]"
             >
               <UserPlus size={16} />
               <span>Xếp phòng nhanh</span>
@@ -1150,25 +1246,23 @@ export default function OccupancyDashboardPage() {
                   {missingData}
                 </span>
               )}
-            </motion.button>
+            </button>
 
-            <motion.button
-              whileTap={{ scale: 0.98 }}
+            <button
               onClick={() => router.push('/worker-management')}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-bdr2 bg-surf text-tx hover:bg-act hover:border-pri2/40 text-xs sm:text-sm font-semibold shadow-sm transition-colors duration-150 cursor-pointer"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-bdr2 bg-surf text-tx hover:bg-act hover:border-pri2/40 text-xs sm:text-sm font-semibold shadow-sm transition-colors duration-100 active:scale-[0.98] cursor-pointer"
             >
               <FileSpreadsheet size={16} className="text-ok" />
               <span>Import Excel</span>
-            </motion.button>
+            </button>
 
-            <motion.button
-              whileTap={{ scale: 0.98 }}
+            <button
               onClick={handleExportReport}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-bdr2 bg-surf text-tx hover:bg-act hover:border-pri2/40 text-xs sm:text-sm font-semibold shadow-sm transition-colors duration-150 cursor-pointer"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-bdr2 bg-surf text-tx hover:bg-act hover:border-pri2/40 text-xs sm:text-sm font-semibold shadow-sm transition-colors duration-100 active:scale-[0.98] cursor-pointer"
             >
               <Download size={16} className="text-lnk" />
               <span>Xuất Báo Cáo Ngày</span>
-            </motion.button>
+            </button>
 
             {loading && (
               <span className="text-xs text-lnk font-medium flex items-center gap-1.5 sm:ml-auto">
@@ -1541,24 +1635,19 @@ export default function OccupancyDashboardPage() {
                   ]}
                 />
 
-                {/* Building Filters (Animated sliding pills) */}
+                {/* Building Filters (Instant active pills) */}
                 {!isEmpty && allBuildings.length > 0 && (
                   <div className="inline-flex items-center gap-1 flex-wrap p-1 rounded-xl bg-act/80 border border-bdr2">
                     <button
                       type="button"
                       onClick={() => setSelectedBuilding(null)}
-                      className={`relative px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                        selectedBuilding === null ? 'text-white' : 'text-mu hover:text-tx'
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                        selectedBuilding === null
+                          ? 'bg-pri text-white border border-pri2 shadow-sm'
+                          : 'text-mu hover:text-tx hover:bg-surf/60 border border-transparent'
                       }`}
                     >
-                      {selectedBuilding === null && (
-                        <motion.span
-                          layoutId="dashboard-building-filter"
-                          transition={{ type: 'spring', stiffness: 430, damping: 32 }}
-                          className="absolute inset-0 rounded-lg bg-pri border border-pri2 shadow-sm"
-                        />
-                      )}
-                      <span className="relative z-10">Tất cả dãy</span>
+                      Tất cả dãy
                     </button>
                     {allBuildings.map(b => {
                       const active = selectedBuilding === b;
@@ -1567,18 +1656,13 @@ export default function OccupancyDashboardPage() {
                           key={b}
                           type="button"
                           onClick={() => setSelectedBuilding(b)}
-                          className={`relative px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                            active ? 'text-white' : 'text-mu hover:text-tx'
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                            active
+                              ? 'bg-pri text-white border border-pri2 shadow-sm'
+                              : 'text-mu hover:text-tx hover:bg-surf/60 border border-transparent'
                           }`}
                         >
-                          {active && (
-                            <motion.span
-                              layoutId="dashboard-building-filter"
-                              transition={{ type: 'spring', stiffness: 430, damping: 32 }}
-                              className="absolute inset-0 rounded-lg bg-pri border border-pri2 shadow-sm"
-                            />
-                          )}
-                          <span className="relative z-10">{b}</span>
+                          {b}
                         </button>
                       );
                     })}
@@ -1685,14 +1769,11 @@ export default function OccupancyDashboardPage() {
             {!isEmpty && !loading && ktxListForGrid.length > 0 && (
               <div className="space-y-6">
                 {ktxListForGrid.map(ktx => {
-                  const ktxWorkers = workers.filter(w => (w.ktx ?? '').trim() === ktx);
-                  const ktxFacilities = accommodationFacilities.filter(f => (f.ktx ?? '').trim() === ktx);
-                  const buildingSet = new Set<string>();
-                  ktxFacilities.forEach(f => { if (f.day?.trim()) buildingSet.add(f.day.trim()); });
-                  ktxWorkers.forEach(w => { if (w.day?.trim()) buildingSet.add(w.day.trim()); });
-                  const ktxBuildings = Array.from(buildingSet)
-                    .filter(b => !selectedBuilding || b === selectedBuilding)
-                    .sort(naturalSortCompare);
+                  const ktxWorkers = heatmapIndex.ktxWorkersMap.get(ktx) || [];
+                  const allKtxBuildings = heatmapIndex.ktxBuildingsSortedMap.get(ktx) || [];
+                  const ktxBuildings = selectedBuilding
+                    ? allKtxBuildings.filter(b => b === selectedBuilding)
+                    : allKtxBuildings;
 
                   if (ktxBuildings.length === 0) {
                     if (selectedKTX === ktx) {
@@ -1768,26 +1849,9 @@ export default function OccupancyDashboardPage() {
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6 min-w-0 w-full items-start">
                         {ktxBuildings.map(building => {
-                          const buildingWorkers = ktxWorkers.filter(w => (w.day ?? '').trim() === building);
-                          const roomLabelByNorm = new Map<string, string>();
-                          ktxFacilities
-                            .filter(f => (f.day ?? '').trim() === building && f.phong_khu_vuc?.trim())
-                            .forEach(f => {
-                              const raw = f.phong_khu_vuc.trim();
-                              const norm = normalizeRoomLabel(raw);
-                              if (norm && !roomLabelByNorm.has(norm)) {
-                                roomLabelByNorm.set(norm, raw);
-                              }
-                            });
-                          buildingWorkers.forEach(w => {
-                            const raw = (w.phongSo ?? '').trim();
-                            if (!raw) return;
-                            const norm = normalizeRoomLabel(raw);
-                            if (norm && !roomLabelByNorm.has(norm) && !hiddenOrFunctionalKeys.has(`${ktx}||${building}||${norm}`)) {
-                              roomLabelByNorm.set(norm, raw);
-                            }
-                          });
-                          const allRooms = Array.from(roomLabelByNorm.values()).sort(naturalSortCompare);
+                          const bKey = `${ktx}||${building}`;
+                          const buildingWorkers = heatmapIndex.buildingWorkersMap.get(bKey) || [];
+                          const allRooms = heatmapIndex.buildingRoomsSortedMap.get(bKey) || [];
 
                           const totalCap = allRooms.reduce(
                             (sum, room) => sum + (getRoomCapacity(capacities, ktx, building, room) || DEFAULT_ROOM_CAPACITY),
@@ -1796,19 +1860,19 @@ export default function OccupancyDashboardPage() {
                           const occupancyPct = totalCap > 0 ? buildingWorkers.length / totalCap : 0;
                           const barColor = occupancyPct > 1 ? 'bg-dgr' : occupancyPct >= 1 ? 'bg-wn' : occupancyPct >= 0.5 ? 'bg-ok2' : 'bg-pri2';
 
-                          // Apply active roomFilterMode
+                          // Apply active roomFilterMode using O(1) Map lookup
                           let displayRooms = allRooms;
                           if (roomFilterMode === 'overloaded') {
                             displayRooms = allRooms.filter(room => {
                               const normR = normalizeRoomLabel(room);
-                              const count = buildingWorkers.filter(w => w.phongSo === room || normalizeRoomLabel(w.phongSo) === normR).length;
+                              const count = (heatmapIndex.roomWorkersMap.get(`${bKey}||${normR}`) || []).length;
                               const cap = getRoomCapacity(capacities, ktx, building, room) || DEFAULT_ROOM_CAPACITY;
                               return count > cap;
                             });
                           } else if (roomFilterMode === 'empty') {
                             displayRooms = allRooms.filter(room => {
                               const normR = normalizeRoomLabel(room);
-                              const count = buildingWorkers.filter(w => w.phongSo === room || normalizeRoomLabel(w.phongSo) === normR).length;
+                              const count = (heatmapIndex.roomWorkersMap.get(`${bKey}||${normR}`) || []).length;
                               return count === 0;
                             });
                           }
@@ -1818,7 +1882,7 @@ export default function OccupancyDashboardPage() {
                           }
 
                           return (
-                            <div key={building} className="rounded-2xl bg-act border border-bdr2 p-3 sm:p-4 flex flex-col justify-start shadow-md hover:border-bdr3 transition-all h-auto self-start">
+                            <div key={building} className="rounded-2xl bg-act border border-bdr2 p-3 sm:p-4 flex flex-col justify-start shadow-md hover:border-bdr3 transition-colors h-auto self-start">
                               <BlockTitle
                                 ktx={ktx}
                                 building={building}
@@ -1831,25 +1895,21 @@ export default function OccupancyDashboardPage() {
                               <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-[repeat(auto-fill,minmax(88px,1fr))] sm:gap-2 mt-2.5 items-start">
                                 {displayRooms.map(room => {
                                   const normR = normalizeRoomLabel(room);
-                                  const roomWorkers = buildingWorkers.filter(w => w.phongSo === room || normalizeRoomLabel(w.phongSo) === normR);
-                                  const roomKey = `${ktx}||${building}||${room}`;
-                                  const unitName = roomUnitMap[roomKey];
-                                  const adminGender = roomGenderMap[roomKey];
-                                  const gInfo = getRoomGenderInfo(
-                                    roomWorkers,
-                                    adminGender === 'male' ? 'Nam' : adminGender === 'female' ? 'Nữ' : null
-                                  );
+                                  const fullNormKey = `${bKey}||${normR}`;
+                                  const roomKey = `${bKey}||${room}`;
+                                  const tooltipWorkers = heatmapIndex.roomTooltipWorkersMap.get(fullNormKey) || EMPTY_TOOLTIP_WORKERS;
+                                  const gInfo = heatmapIndex.roomGenderByKeyMap.get(roomKey) || getRoomGenderInfo([], null);
                                   return (
                                     <HeatmapRoomCell
                                       key={`${ktx}-${building}-${room}`}
                                       room={room}
-                                      count={roomWorkers.length}
+                                      count={tooltipWorkers.length}
                                       capacity={getRoomCapacity(capacities, ktx, building, room) || DEFAULT_ROOM_CAPACITY}
                                       ktx={ktx}
                                       building={building}
-                                      workers={roomWorkers.map(w => ({ hoVaTen: w.hoVaTen, maNV: w.maNV, gioiTinh: w.gioiTinh }))}
+                                      workers={tooltipWorkers}
                                       onClickRoom={handleRoomClick}
-                                      unitName={unitName}
+                                      unitName={roomUnitMap[roomKey]}
                                       genderInfo={gInfo}
                                       onQuickAssignGender={handleQuickAssignGender}
                                     />
@@ -1880,38 +1940,36 @@ export default function OccupancyDashboardPage() {
         </div>
 
         {/* Room Drawer Modal */}
-        <AnimatePresence>
-          {drawerRoom && (
-            <RoomDrawer
-              key={`${drawerRoom.ktx}-${drawerRoom.building}-${drawerRoom.room}`}
-              ktx={drawerRoom.ktx}
-              building={drawerRoom.building}
-              room={drawerRoom.room}
-              workers={drawerWorkers}
-              capacity={getRoomCapacity(capacities, drawerRoom.ktx, drawerRoom.building, drawerRoom.room) || DEFAULT_ROOM_CAPACITY}
-              adminAssignedUnit={roomUnitMap[`${drawerRoom.ktx}||${drawerRoom.building}||${drawerRoom.room}`]}
-              assignedGender={roomGenderMap[`${drawerRoom.ktx}||${drawerRoom.building}||${drawerRoom.room}`]}
-              onRoomGenderUpdated={(newGender) => {
-                const key = `${drawerRoom.ktx}||${drawerRoom.building}||${drawerRoom.room}`;
-                setRoomGenderMap(prev => {
-                  const next = { ...prev };
-                  if (newGender === 'auto') {
-                    delete next[key];
-                  } else {
-                    next[key] = newGender;
-                  }
-                  saveRoomGenderMap(next);
-                  return next;
-                });
-              }}
-              onClose={() => setDrawerRoom(null)}
-            />
-          )}
-        </AnimatePresence>
+        {drawerRoom && (
+          <RoomDrawer
+            key={`${drawerRoom.ktx}-${drawerRoom.building}-${drawerRoom.room}`}
+            ktx={drawerRoom.ktx}
+            building={drawerRoom.building}
+            room={drawerRoom.room}
+            workers={drawerWorkers}
+            capacity={getRoomCapacity(capacities, drawerRoom.ktx, drawerRoom.building, drawerRoom.room) || DEFAULT_ROOM_CAPACITY}
+            adminAssignedUnit={roomUnitMap[`${drawerRoom.ktx}||${drawerRoom.building}||${drawerRoom.room}`]}
+            assignedGender={roomGenderMap[`${drawerRoom.ktx}||${drawerRoom.building}||${drawerRoom.room}`]}
+            onRoomGenderUpdated={(newGender) => {
+              const key = `${drawerRoom.ktx}||${drawerRoom.building}||${drawerRoom.room}`;
+              setRoomGenderMap(prev => {
+                const next = { ...prev };
+                if (newGender === 'auto') {
+                  delete next[key];
+                } else {
+                  next[key] = newGender;
+                }
+                saveRoomGenderMap(next);
+                return next;
+              });
+            }}
+            onClose={() => setDrawerRoom(null)}
+          />
+        )}
 
         {/* Overloaded Rooms Modal */}
         {showOverloadedModal && (
-          <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
             <div className="bg-surf border border-bdr rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
               <div className="p-4 sm:p-5 border-b border-bdr flex items-center justify-between bg-act/50">
                 <div className="flex items-center gap-3">

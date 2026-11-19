@@ -17,7 +17,7 @@ export default function DeleteConfirmModal({ target, onConfirm, onClose }: Props
   const name = !isBulk ? (target as Worker).hoVaTen : '';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65" onClick={onClose}>
       <motion.div
         initial={{ opacity: 0, scale: 0.94, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}

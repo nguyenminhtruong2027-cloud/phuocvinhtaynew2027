@@ -1087,7 +1087,7 @@ export default function UserManagementClient() {
 
       {/* Add / Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-3 sm:p-4 overflow-y-auto">
           <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-xl max-h-[92vh] flex flex-col my-auto text-foreground overflow-hidden">
             {/* Modal Header */}
             <div className="px-6 py-4 border-b border-border bg-muted/30 shrink-0">
@@ -1319,7 +1319,7 @@ export default function UserManagementClient() {
 
       {/* Delete Confirmation Modal */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
           <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
             <h3 className="text-lg font-bold text-foreground">Xác nhận xóa tài khoản</h3>
             <p className="text-sm text-muted-foreground leading-relaxed">
@@ -1347,7 +1347,7 @@ export default function UserManagementClient() {
 
       {/* Reset Password Modal */}
       {resetTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
           <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
             <div className="flex items-center gap-2.5">
               <div className="w-9 h-9 rounded-xl tint-wn border border-wn flex items-center justify-center text-wn shrink-0">

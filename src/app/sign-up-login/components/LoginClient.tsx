@@ -139,7 +139,7 @@ export default function LoginClient() {
             ].map(stat => (
               <div
                 key={`stat-${stat.label}`}
-                className="bg-white/10 backdrop-blur-sm border border-white/15 rounded-xl p-3.5"
+                className="bg-white/15 border border-white/15 rounded-xl p-3.5"
               >
                 <p className="text-white font-bold text-sm">{stat.value}</p>
                 <p className="text-white/70 text-xs mt-0.5">{stat.label}</p>

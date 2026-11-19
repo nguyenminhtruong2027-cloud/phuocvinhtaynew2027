@@ -326,7 +326,7 @@ export default function RoomDrawer({
     <>
       {/* Toast */}
       {genderToast && (
-        <div className="fixed top-5 right-5 z-[100] flex items-center gap-2 px-4 py-2.5 bg-surf border border-bdr2 text-tx rounded-xl shadow-2xl backdrop-blur-md text-xs font-bold">
+        <div className="fixed top-5 right-5 z-[100] flex items-center gap-2 px-4 py-2.5 bg-surf border border-bdr2 text-tx rounded-xl shadow-2xl text-xs font-bold">
           <CheckCircle2 size={16} className="text-ok shrink-0" />
           <span>{genderToast}</span>
         </div>
@@ -338,7 +338,7 @@ export default function RoomDrawer({
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.18 }}
-        className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+        className="fixed inset-0 z-40 bg-black/65"
         onClick={onClose}
       />
 

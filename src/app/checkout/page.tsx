@@ -96,7 +96,7 @@ export default function CheckoutPage() {
     }));
 
     let active = true;
-    fetchWorkerHierarchy(true).then(data => {
+    fetchWorkerHierarchy(false).then(data => {
       if (!active) return;
       if (data) {
         setHierarchy({
@@ -357,7 +357,7 @@ export default function CheckoutPage() {
     if (!form.day.trim()) missing.push('Dãy nhà');
     if (!form.phong_so.trim()) missing.push('Phòng số');
     if (!form.ho_va_ten.trim()) missing.push('Họ và tên');
-    if (!form.ma_nv_or_cccd.trim()) missing.push('Mã công nhân hoặc CCCD');
+    if (!form.ma_nv_or_cccd.trim() && !selectedResident) missing.push('Mã công nhân hoặc CCCD');
     if (!form.ly_do.trim()) missing.push('Lý do dọn ra');
 
     if (missing.length > 0) {
@@ -369,8 +369,25 @@ export default function CheckoutPage() {
     try {
       const codeOrCccd = form.ma_nv_or_cccd.trim();
       const isDigitsOnly = /^\d{9,12}$/.test(codeOrCccd);
-      const maNvValue = isDigitsOnly ? '' : codeOrCccd;
-      const cccdValue = isDigitsOnly ? codeOrCccd : codeOrCccd;
+      const residentCleanMa =
+        selectedResident?.ma_nv && !['-', '—', 'chờ mã', 'chưa có'].includes(selectedResident.ma_nv.trim().toLowerCase())
+          ? selectedResident.ma_nv.trim()
+          : '';
+      const residentCleanCccd =
+        selectedResident?.cccd && !['-', '—'].includes(selectedResident.cccd.trim())
+          ? selectedResident.cccd.trim()
+          : '';
+
+      const maNvValue = codeOrCccd
+        ? isDigitsOnly
+          ? residentCleanMa
+          : codeOrCccd
+        : residentCleanMa;
+      const cccdValue = codeOrCccd
+        ? isDigitsOnly
+          ? codeOrCccd
+          : residentCleanCccd
+        : residentCleanCccd;
 
       const reasonSummary = form.ly_do === 'Khác' && form.ly_do_chi_tiet.trim()
         ? form.ly_do_chi_tiet.trim()
@@ -383,6 +400,8 @@ export default function CheckoutPage() {
       }${form.ban_giao_tai_san ? ' | Đã vệ sinh & bàn giao tài sản' : ''}`;
 
       const { error: insertErr } = await supabase.from('worker_registrations').insert({
+        type: 'CHECKOUT',
+        worker_id: selectedResident?.id || null,
         ho_va_ten: form.ho_va_ten.trim(),
         ma_nv: maNvValue,
         so_cccd: cccdValue,
@@ -777,12 +796,12 @@ export default function CheckoutPage() {
 
                 <div>
                   <label className="block text-xs font-semibold text-muted-foreground mb-1">
-                    Mã công nhân hoặc Số CCCD *
+                    {selectedResident ? 'Mã công nhân hoặc Số CCCD (không bắt buộc)' : 'Mã công nhân hoặc Số CCCD *'}
                   </label>
                   <input
                     type="text"
-                    required
-                    placeholder="Mã NV (NV001) hoặc CCCD"
+                    required={!selectedResident}
+                    placeholder={selectedResident ? 'Để trống nếu chưa có mã NV / CCCD' : 'Mã NV (NV001) hoặc CCCD'}
                     value={form.ma_nv_or_cccd}
                     onChange={e => setForm({ ...form, ma_nv_or_cccd: e.target.value })}
                     className="w-full bg-background border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 font-mono"
