@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
+import { useWorkers } from '@/context/WorkerContext';
 import { toast } from 'sonner';
 import {
   Search, Edit2, Check, X, Plus, Loader2, BedDouble, Wind, Package, Fan,
@@ -810,6 +811,7 @@ function AddRoomModal({ activeKtx, ktxOptions, existingRows, onSave, onClose, sa
 export default function FacilitiesClient() {
   const { isAdmin, canDeleteAll, canWriteBlock, currentUser } = useAuth();
   const { addLog } = useAudit();
+  const { workers } = useWorkers();
   const [rows, setRows] = useState<FacilityRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeKtx, setActiveKtx] = useState<string>('');
@@ -833,9 +835,10 @@ export default function FacilitiesClient() {
   const activeKtxRef = useRef(activeKtx);
   activeKtxRef.current = activeKtx;
 
-  // Delete modal & guard
+  // Delete & Hide guard modals
   const [deleteTarget, setDeleteTarget] = useState<FacilityRow | null>(null);
   const [blockedTarget, setBlockedTarget] = useState<{ row: FacilityRow; count: number } | null>(null);
+  const [hideConfirmTarget, setHideConfirmTarget] = useState<{ row: FacilityRow; count: number } | null>(null);
   const [checkingDeleteId, setCheckingDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -1224,12 +1227,46 @@ export default function FacilitiesClient() {
 
   const cancelEdit = () => { setEditingId(null); setEditingRow(null); setSaveError(null); };
 
+  const getRoomOccupantCount = useCallback(
+    (ktx: string, day: string, room: string) => {
+      const k = (ktx || '').trim();
+      const d = (day || '').trim();
+      const r = normalizeRoomLabel(room);
+      if (!k || !d || !r) return 0;
+      return workers.filter(
+        w =>
+          !(w.ngayRaKTX || '').trim() &&
+          !w.ghiChu?.includes('[CHECKOUT]') &&
+          (w.ktx || '').trim() === k &&
+          (w.day || '').trim() === d &&
+          normalizeRoomLabel(w.phongSo) === r
+      ).length;
+    },
+    [workers]
+  );
+
   const saveEdit = async () => {
     if (!editingRow) return;
     const targetRow = rows.find(r => r.id === editingRow.id);
     if (targetRow && !canWriteFacility(targetRow.ktx, targetRow.day)) {
       toast.error(`Bạn không có quyền chỉnh sửa phòng tại ${targetRow.ktx} - ${targetRow.day}.`);
       return;
+    }
+    if (targetRow) {
+      const occupantCount = getRoomOccupantCount(targetRow.ktx, targetRow.day, targetRow.phong_khu_vuc);
+      if (editingRow.room_type === 'functional' && occupantCount > 0) {
+        const msg = `Phòng ${targetRow.phong_khu_vuc} đang có ${occupantCount} công nhân ở. Hãy chuyển phòng trước khi đổi sang Phòng chức năng.`;
+        setSaveError(msg);
+        toast.error(msg);
+        return;
+      }
+      const nextBeds = Number(editingRow.giuong) || 0;
+      if (editingRow.room_type === 'accommodation' && nextBeds < occupantCount) {
+        const msg = `Số giường mới (${nextBeds}) nhỏ hơn số công nhân đang ở (${occupantCount} người). Hãy chuyển bớt người trước khi giảm sức chứa.`;
+        setSaveError(msg);
+        toast.error(msg);
+        return;
+      }
     }
     setSaving(true);
     setSaveError(null);
@@ -1273,12 +1310,7 @@ export default function FacilitiesClient() {
   };
 
   // ─── Toggle is_visible directly ───────────────────────────────────────────
-  const toggleVisibility = async (row: FacilityRow) => {
-    if (!canWriteFacility(row.ktx, row.day)) {
-      toast.error(`Bạn không có quyền thay đổi hiển thị phòng tại ${row.ktx} - ${row.day}.`);
-      return;
-    }
-    const nextVisible = row.is_visible === false ? true : false;
+  const executeToggleVisibility = async (row: FacilityRow, nextVisible: boolean) => {
     setRows(prev => prev.map(r => r.id === row.id ? { ...r, is_visible: nextVisible } : r));
     try {
       const { error } = await supabase
@@ -1288,6 +1320,7 @@ export default function FacilitiesClient() {
       if (error) {
         console.warn('Update is_visible error:', error.message);
         setRows(prev => prev.map(r => r.id === row.id ? { ...r, is_visible: !nextVisible } : r));
+        toast.error(`Không thể cập nhật trạng thái hiển thị: ${error.message}`);
       } else {
         await syncBedsForFacilityRoom(supabase, { ...row, is_visible: nextVisible });
         try {
@@ -1297,15 +1330,32 @@ export default function FacilitiesClient() {
             `${nextVisible ? 'Hiện' : 'Ẩn'} phòng trên sơ đồ: ${row.ktx} · ${row.day} · ${row.phong_khu_vuc}`
           );
         } catch {}
+        toast.success(nextVisible ? `Đã hiện ${row.phong_khu_vuc} trên sơ đồ` : `Đã ẩn ${row.phong_khu_vuc} khỏi sơ đồ`);
         invalidateKtxStructureCache();
         reloadKtxStructure(true);
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('ktx_facilities_updated'));
         }
       }
-    } catch (err) {
+    } catch {
       setRows(prev => prev.map(r => r.id === row.id ? { ...r, is_visible: !nextVisible } : r));
     }
+  };
+
+  const toggleVisibility = async (row: FacilityRow) => {
+    if (!canWriteFacility(row.ktx, row.day)) {
+      toast.error(`Bạn không có quyền thay đổi hiển thị phòng tại ${row.ktx} - ${row.day}.`);
+      return;
+    }
+    const nextVisible = row.is_visible === false ? true : false;
+    if (!nextVisible) {
+      const occ = getRoomOccupantCount(row.ktx, row.day, row.phong_khu_vuc);
+      if (occ > 0) {
+        setHideConfirmTarget({ row, count: occ });
+        return;
+      }
+    }
+    await executeToggleVisibility(row, nextVisible);
   };
 
   // ─── Delete guard & check ─────────────────────────────────────────────────
@@ -1611,6 +1661,44 @@ export default function FacilitiesClient() {
           onCancel={() => setBulkDeleteModal(null)}
           deleting={bulkDeleting}
         />
+      )}
+      {hideConfirmTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4" onClick={() => setHideConfirmTarget(null)}>
+          <div className="surface-elevated rounded-2xl shadow-modal w-full max-w-md p-5 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl tint-wn border border-wn/30 flex items-center justify-center text-wn shrink-0">
+                <AlertTriangle size={20} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-tx">Cảnh báo ẩn phòng đang có người ở</h3>
+                <p className="text-xs text-mu leading-relaxed">
+                  <strong>{hideConfirmTarget.row.ktx} · {hideConfirmTarget.row.day} · {hideConfirmTarget.row.phong_khu_vuc}</strong> hiện đang có{' '}
+                  <strong className="text-wn">{hideConfirmTarget.count} công nhân</strong> đang lưu trú. Nếu ẩn phòng, phòng này sẽ không xuất hiện trên sơ đồ tổng quan và báo cáo sức chứa.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t border-bdr">
+              <button
+                type="button"
+                onClick={() => setHideConfirmTarget(null)}
+                className="px-3.5 py-2 rounded-xl border border-bdr2 bg-surf text-tx text-xs font-semibold hover:bg-act cursor-pointer"
+              >
+                Giữ hiển thị
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const target = hideConfirmTarget.row;
+                  setHideConfirmTarget(null);
+                  await executeToggleVisibility(target, false);
+                }}
+                className="px-3.5 py-2 rounded-xl bg-wn text-wn-fg text-xs font-semibold hover:opacity-90 cursor-pointer"
+              >
+                Vẫn ẩn phòng này
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Header */}
@@ -2009,7 +2097,7 @@ export default function FacilitiesClient() {
                                 : 'bg-muted text-muted-foreground border-border opacity-70 hover:opacity-100'
                             }`}
                           >
-                            <span className={`w-1.5 h-1.5 rounded-full ${row.is_visible !== false ? 'bg-ok2 animate-pulse' : 'bg-gray-400'}`} />
+                            <span className={`w-1.5 h-1.5 rounded-full ${row.is_visible !== false ? 'bg-ok2' : 'bg-gray-400'}`} />
                             <span>{row.is_visible !== false ? 'Hiện' : 'Ẩn'}</span>
                           </button>
                         )}

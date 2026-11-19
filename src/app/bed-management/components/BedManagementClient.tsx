@@ -7,7 +7,7 @@ import {
   AlertCircle, LayoutGrid, Table2, BarChart3, Wrench, DoorOpen, Calendar,
   ExternalLink, UserPlus, CheckCircle2, Printer, Lock, Download,
 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
@@ -98,6 +98,7 @@ function shortName(full?: string | null): string {
 
 export default function BedManagementClient() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isAdmin, canWriteBlock, currentUser } = useAuth();
   const { addLog } = useAudit();
   const { workers: contextWorkers, refreshWorkers } = useWorkers();
@@ -124,18 +125,47 @@ export default function BedManagementClient() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [actionError, setActionError] = useState('');
-  const [view, setView] = useState<ViewMode>('grid');
-  const [searchQuery, setSearchQuery] = useState('');
 
-  const [filterKtx, setFilterKtx] = useState('');
-  const [filterDay, setFilterDay] = useState('');
-  const [filterRoom, setFilterRoom] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'all' | BedStatus>('all');
+  const initialView = ((): ViewMode => {
+    const v = searchParams?.get('view');
+    return v === 'table' || v === 'analytics' || v === 'grid' ? v : 'grid';
+  })();
+  const initialStatus = ((): 'all' | BedStatus => {
+    const s = searchParams?.get('status');
+    return s === 'occupied' || s === 'empty' || s === 'maintenance' ? s : 'all';
+  })();
+
+  const [view, setView] = useState<ViewMode>(initialView);
+  const [searchQuery, setSearchQuery] = useState(() => searchParams?.get('q') || '');
+
+  const [filterKtx, setFilterKtx] = useState(() => searchParams?.get('ktx') || '');
+  const [filterDay, setFilterDay] = useState(() => searchParams?.get('day') || '');
+  const [filterRoom, setFilterRoom] = useState(() => searchParams?.get('room') || '');
+  const [filterStatus, setFilterStatus] = useState<'all' | BedStatus>(initialStatus);
+
+  // Sync active filters back into URL cleanly without re-navigation
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams();
+    if (view !== 'grid') params.set('view', view);
+    if (filterKtx) params.set('ktx', filterKtx);
+    if (filterDay) params.set('day', filterDay);
+    if (filterRoom) params.set('room', filterRoom);
+    if (filterStatus !== 'all') params.set('status', filterStatus);
+    if (searchQuery.trim()) params.set('q', searchQuery.trim());
+    const qs = params.toString();
+    const nextUrl = `${window.location.pathname}${qs ? `?${qs}` : ''}`;
+    if (nextUrl !== `${window.location.pathname}${window.location.search}`) {
+      window.history.replaceState(null, '', nextUrl);
+    }
+  }, [view, filterKtx, filterDay, filterRoom, filterStatus, searchQuery]);
 
   const [assignTarget, setAssignTarget] = useState<BedRow | null>(null);
   const [candidateSearch, setCandidateSearch] = useState('');
   const [drawerBed, setDrawerBed] = useState<BedRow | null>(null);
   const [showTransferModal, setShowTransferModal] = useState(false);
+  const [swapSourceBed, setSwapSourceBed] = useState<BedRow | null>(null);
+  const [swapSearch, setSwapSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [syncingBeds, setSyncingBeds] = useState(false);
   const [showQrPrint, setShowQrPrint] = useState(false);
@@ -437,6 +467,28 @@ export default function BedManagementClient() {
         toast.error(`Bạn không có quyền gán giường tại ${assignTarget.ktx} - ${assignTarget.day}.`);
         return;
       }
+      if (!isAdmin && worker.ktx && worker.day && worker.giuong && !canWriteBlock(worker.day, worker.ktx)) {
+        toast.error(`Công nhân đang thuộc ${worker.ktx} · ${worker.day} ngoài phạm vi phụ trách của bạn.`);
+        return;
+      }
+
+      // Live race guard: confirm bed is still empty in DB before writing
+      setBusy(true);
+      try {
+        const { data: liveBed } = await supabase
+          .from('beds')
+          .select('status')
+          .eq('id', assignTarget.id)
+          .maybeSingle();
+        if (liveBed && liveBed.status !== 'empty') {
+          toast.error('Giường này vừa được người khác gán hoặc bảo trì! Đang cập nhật lại sơ đồ...');
+          loadBeds(true);
+          return;
+        }
+      } finally {
+        setBusy(false);
+      }
+
       const ok = await applyWorkerBed(worker.id, {
         ktx: assignTarget.ktx || '',
         day: assignTarget.day || '',
@@ -444,6 +496,25 @@ export default function BedManagementClient() {
         giuong: assignTarget.giuong || '',
       });
       if (ok) {
+        const targetId = assignTarget.id;
+        // Optimistic UI update before background sync
+        setBeds(prev =>
+          prev.map(b => {
+            if (b.id === targetId) {
+              return {
+                ...b,
+                status: 'occupied',
+                worker_id: worker.id,
+                ma_nv: worker.maNV || null,
+                ho_va_ten: worker.hoVaTen || null,
+              };
+            }
+            if (b.worker_id === worker.id) {
+              return { ...b, status: 'empty', worker_id: null, ma_nv: null, ho_va_ten: null };
+            }
+            return b;
+          })
+        );
         try {
           await releaseBedsForWorkers(supabase, [worker.id]);
           await supabase
@@ -454,25 +525,151 @@ export default function BedManagementClient() {
               ma_nv: worker.maNV || null,
               ho_va_ten: worker.hoVaTen || null,
             })
-            .eq('id', assignTarget.id);
+            .eq('id', targetId);
         } catch (err) {
           console.warn('[bed-management] direct bed occupy warning:', err);
         }
         const actor = currentUser?.name || currentUser?.email || 'Admin';
         addLog(
           actor,
-          'Chuyển phòng',
+          'BED_REASSIGN',
           `Gán giường: ${worker.hoVaTen} (${worker.maNV || '—'}) → ${assignTarget.ktx} · ${assignTarget.day} · P${assignTarget.phong_so} · G${assignTarget.giuong}`
         );
         toast.success(`Đã gán ${worker.hoVaTen} vào G${assignTarget.giuong} (Phòng ${assignTarget.phong_so})`);
         setAssignTarget(null);
         setCandidateSearch('');
-        loadBeds(true);
-        loadWorkers();
+        refreshWorkers();
       }
     },
-    [assignTarget, canWriteBed, applyWorkerBed, supabase, currentUser, addLog, loadBeds, loadWorkers]
+    [assignTarget, canWriteBed, isAdmin, canWriteBlock, applyWorkerBed, supabase, currentUser, addLog, loadBeds, refreshWorkers]
   );
+
+  // 1-Click Atomic Swap between two occupied beds (A <-> B)
+  const handleSwapBeds = useCallback(
+    async (targetBed: BedRow) => {
+      const sourceBed = swapSourceBed;
+      if (!sourceBed || !targetBed || sourceBed.id === targetBed.id) return;
+      if (!sourceBed.worker_id || !targetBed.worker_id || sourceBed.worker_id === targetBed.worker_id) return;
+      if (!canWriteBed(sourceBed) || !canWriteBed(targetBed)) {
+        toast.error('Bạn không có quyền hoán đổi giường ngoài phạm vi phụ trách.');
+        return;
+      }
+
+      setBusy(true);
+      setActionError('');
+      try {
+        // Verify live DB state of both beds before swapping
+        const { data: livePair, error: liveErr } = await supabase
+          .from('beds')
+          .select('id, status, worker_id')
+          .in('id', [sourceBed.id, targetBed.id]);
+
+        if (liveErr) throw new Error(liveErr.message);
+        const liveA = (livePair || []).find(r => String(r.id) === sourceBed.id);
+        const liveB = (livePair || []).find(r => String(r.id) === targetBed.id);
+        if (!liveA || !liveB || liveA.status !== 'occupied' || liveB.status !== 'occupied' ||
+            liveA.worker_id !== sourceBed.worker_id || liveB.worker_id !== targetBed.worker_id) {
+          toast.error('Trạng thái một trong hai giường vừa thay đổi. Vui lòng kiểm tra lại!');
+          loadBeds(true);
+          return;
+        }
+
+        const workerAId = sourceBed.worker_id;
+        const workerBId = targetBed.worker_id;
+
+        const [updA, updB] = await Promise.all([
+          supabase
+            .from('workers')
+            .update({ ktx: targetBed.ktx, day: targetBed.day, phong_so: targetBed.phong_so, giuong: targetBed.giuong })
+            .eq('id', workerAId),
+          supabase
+            .from('workers')
+            .update({ ktx: sourceBed.ktx, day: sourceBed.day, phong_so: sourceBed.phong_so, giuong: sourceBed.giuong })
+            .eq('id', workerBId),
+        ]);
+        if (updA.error) throw new Error(updA.error.message);
+        if (updB.error) throw new Error(updB.error.message);
+
+        await Promise.all([
+          supabase
+            .from('beds')
+            .update({
+              status: 'occupied',
+              worker_id: workerBId,
+              ma_nv: targetBed.ma_nv || null,
+              ho_va_ten: targetBed.ho_va_ten || null,
+            })
+            .eq('id', sourceBed.id),
+          supabase
+            .from('beds')
+            .update({
+              status: 'occupied',
+              worker_id: workerAId,
+              ma_nv: sourceBed.ma_nv || null,
+              ho_va_ten: sourceBed.ho_va_ten || null,
+            })
+            .eq('id', targetBed.id),
+        ]);
+
+        // Optimistic state update
+        setBeds(prev =>
+          prev.map(b => {
+            if (b.id === sourceBed.id) {
+              return { ...b, worker_id: workerBId, ma_nv: targetBed.ma_nv, ho_va_ten: targetBed.ho_va_ten };
+            }
+            if (b.id === targetBed.id) {
+              return { ...b, worker_id: workerAId, ma_nv: sourceBed.ma_nv, ho_va_ten: sourceBed.ho_va_ten };
+            }
+            return b;
+          })
+        );
+
+        const actor = currentUser?.email || currentUser?.name || 'Admin';
+        addLog(
+          actor,
+          'BED_REASSIGN',
+          `Hoán đổi giường: ${sourceBed.ho_va_ten || 'A'} (${sourceBed.ktx} · ${sourceBed.day} · P${sourceBed.phong_so} · G${sourceBed.giuong}) ↔ ${targetBed.ho_va_ten || 'B'} (${targetBed.ktx} · ${targetBed.day} · P${targetBed.phong_so} · G${targetBed.giuong})`
+        );
+
+        toast.success(
+          `Đã hoán đổi: ${shortName(sourceBed.ho_va_ten)} ↔ ${shortName(targetBed.ho_va_ten)}`
+        );
+        setSwapSourceBed(null);
+        setSwapSearch('');
+        setDrawerBed(null);
+        refreshWorkers();
+      } catch (err: any) {
+        console.error('[bed-management] swap beds failed:', err);
+        const msg = err?.message || 'Không thể hoán đổi giường.';
+        setActionError(msg);
+        toast.error(msg);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [swapSourceBed, canWriteBed, supabase, loadBeds, currentUser, addLog, refreshWorkers]
+  );
+
+  const swapCandidates = useMemo(() => {
+    if (!swapSourceBed) return [];
+    const q = swapSearch.trim().toLowerCase();
+    return (beds || [])
+      .filter(
+        b =>
+          b.status === 'occupied' &&
+          b.id !== swapSourceBed.id &&
+          b.worker_id &&
+          b.worker_id !== swapSourceBed.worker_id &&
+          canWriteBed(b)
+      )
+      .filter(b => {
+        if (!q) return true;
+        const w = b.worker_id ? workerById.get(b.worker_id) : null;
+        return [b.ho_va_ten, b.ma_nv, b.ktx, b.day, `P${b.phong_so}`, `G${b.giuong}`, w?.donVi]
+          .some(v => String(v ?? '').toLowerCase().includes(q));
+      })
+      .slice(0, 50);
+  }, [swapSourceBed, beds, swapSearch, canWriteBed, workerById]);
 
   const handleSyncBeds = useCallback(async () => {
     if (!isAdmin) {
@@ -608,16 +805,19 @@ export default function BedManagementClient() {
         'Xóa',
         `Trả phòng & xóa công nhân khỏi giường: ${bed.ho_va_ten || workerRef?.hoVaTen || ''} (${bed.ma_nv || workerRef?.maNV || '—'}) tại ${bed.ktx} · ${bed.day} · P${bed.phong_so} · G${bed.giuong}`
       );
+      setBeds(prev =>
+        prev.map(b => (b.id === bed.id ? { ...b, status: 'empty', worker_id: null, ma_nv: null, ho_va_ten: null } : b))
+      );
       toast.success('Đã làm thủ tục trả phòng thành công!');
       setDrawerBed(null);
-      loadBeds(true);
+      refreshWorkers();
     } catch (err: any) {
       console.error('[bed-management] hard delete failed:', err);
       setActionError(err?.message || 'Không thể xóa công nhân khỏi KTX.');
     } finally {
       setBusy(false);
     }
-  }, [drawerBed, canWriteBed, workerById, supabase, currentUser, addLog, loadBeds]);
+  }, [drawerBed, canWriteBed, workerById, supabase, currentUser, addLog, refreshWorkers]);
 
   const setBedStatus = useCallback(
     async (bed: BedRow, status: BedStatus) => {
@@ -627,12 +827,18 @@ export default function BedManagementClient() {
       }
       setBusy(true);
       setActionError('');
+      // Optimistic local state
+      const prevStatus = bed.status;
+      setBeds(prev => prev.map(b => (b.id === bed.id ? { ...b, status } : b)));
       try {
         const { error } = await supabase
           .from('beds')
           .update({ status })
           .eq('id', bed.id);
-        if (error) throw new Error(error.message);
+        if (error) {
+          setBeds(prev => prev.map(b => (b.id === bed.id ? { ...b, status: prevStatus } : b)));
+          throw new Error(error.message);
+        }
         const actor = currentUser?.name || currentUser?.email || 'Admin';
         addLog(
           actor,
@@ -640,7 +846,7 @@ export default function BedManagementClient() {
           `Cập nhật trạng thái giường ${bed.ktx} · ${bed.day} · P${bed.phong_so} · G${bed.giuong} → ${status === 'maintenance' ? 'Bảo trì' : 'Sẵn sàng (Trống)'}`
         );
         drawerBed && setDrawerBed(status === 'empty' ? null : { ...drawerBed, status });
-        loadBeds(true);
+        toast.success(status === 'maintenance' ? `Đã chuyển G${bed.giuong} sang Bảo trì` : `Đã đưa G${bed.giuong} về Sẵn sàng`);
       } catch (err: any) {
         console.error('[bed-management] set bed status failed:', err);
         setActionError(err?.message || 'Không thể cập nhật trạng thái giường.');
@@ -648,7 +854,7 @@ export default function BedManagementClient() {
         setBusy(false);
       }
     },
-    [supabase, canWriteBed, currentUser, addLog, drawerBed, loadBeds]
+    [supabase, canWriteBed, currentUser, addLog, drawerBed]
   );
 
   const handleExportBeds = useCallback(() => {
@@ -722,7 +928,7 @@ export default function BedManagementClient() {
       className="pointer-events-none absolute left-1/2 bottom-full z-40 mb-2 hidden sm:block w-64 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
       role="tooltip"
     >
-      <div className="rounded-xl border border-bdr bg-page/95 shadow-2xl p-3 backdrop-blur-sm">
+      <div className="rounded-xl border border-bdr bg-page shadow-2xl p-3">
         {(() => {
           const w = bed?.worker_id ? (workerById.get(bed.worker_id) || worker) : worker;
           const name = bed?.ho_va_ten || w?.hoVaTen || null;
@@ -1385,14 +1591,27 @@ export default function BedManagementClient() {
                   )}
                   {drawerBed?.status === 'occupied' && canWriteBed(drawerBed) && (
                     <>
-                      <button
-                        type="button"
-                        disabled={!drawerBed?.worker_id || busy}
-                        onClick={() => setShowTransferModal(true)}
-                        className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-pri hover:opacity-90 text-white text-sm font-semibold disabled:opacity-50 transition-colors"
-                      >
-                        <ArrowRightLeft size={14} /> Chuyển / Đổi giường
-                      </button>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          disabled={!drawerBed?.worker_id || busy}
+                          onClick={() => setShowTransferModal(true)}
+                          className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-pri hover:opacity-90 text-white text-sm font-semibold disabled:opacity-50 transition-colors cursor-pointer"
+                        >
+                          <ArrowRightLeft size={14} /> Chuyển giường trống
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!drawerBed?.worker_id || busy}
+                          onClick={() => {
+                            setSwapSourceBed(drawerBed);
+                            setSwapSearch('');
+                          }}
+                          className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border border-bdr2 bg-bdg hover:bg-act text-lnk text-sm font-semibold disabled:opacity-50 transition-colors cursor-pointer"
+                        >
+                          <ArrowRightLeft size={14} /> Hoán đổi 2 người
+                        </button>
+                      </div>
 
                       {/* Trả phòng — chọn cách xử lý */}
                       <div className="rounded-xl border border-bdr bg-act p-3 space-y-2">
@@ -1449,6 +1668,78 @@ export default function BedManagementClient() {
         </>
       )}
 
+      {/* ─── Swap Bed Modal (Hoán đổi 2 công nhân A <-> B) ─── */}
+      {swapSourceBed && (
+        <div className="fixed inset-0 z-50 bg-black/65 flex items-center justify-center p-4" onClick={() => { setSwapSourceBed(null); setSwapSearch(''); }}>
+          <div className="bg-surf border border-bdr2 rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-bdr bg-act/50">
+              <div>
+                <h3 className="font-bold text-tx flex items-center gap-2">
+                  <ArrowRightLeft size={16} className="text-lnk" /> Hoán đổi vị trí 2 công nhân
+                </h3>
+                <p className="text-xs text-mu mt-0.5 font-tabular">
+                  Từ: <strong className="text-tx">{swapSourceBed.ho_va_ten || '—'}</strong> ({swapSourceBed.ktx} · {swapSourceBed.day} · P{swapSourceBed.phong_so} · G{swapSourceBed.giuong})
+                </p>
+              </div>
+              <button onClick={() => { setSwapSourceBed(null); setSwapSearch(''); }} className="p-2 rounded-lg hover:bg-act text-mu hover:text-tx cursor-pointer">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="px-5 pt-4">
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ic" />
+                <input
+                  autoFocus
+                  value={swapSearch}
+                  onChange={e => setSwapSearch(e.target.value)}
+                  placeholder="Tìm công nhân/giường cần hoán đổi (tên, mã NV, phòng...)"
+                  className="w-full bg-surf border border-bdr text-tx placeholder-mu rounded-xl pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-pri2/50"
+                />
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1.5 scrollbar-thin">
+              {swapCandidates.length === 0 ? (
+                <p className="text-sm text-ic italic text-center py-8">Không có giường đang ở nào phù hợp trong phạm vi quyền của bạn.</p>
+              ) : (
+                swapCandidates.map(target => {
+                  const w = target.worker_id ? workerById.get(target.worker_id) : null;
+                  return (
+                    <button
+                      key={target.id}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => handleSwapBeds(target)}
+                      className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl border border-bdr hover:border-pri2 hover:bg-act/60 transition-colors disabled:opacity-60 cursor-pointer"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-okbg border border-bdr2 flex items-center justify-center text-ok text-xs font-bold shrink-0">
+                        {String(target.ho_va_ten || '?').charAt(0).toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-tx truncate">
+                          {target.ho_va_ten || '(Chưa rõ)'}
+                          {target.ma_nv ? <span className="text-xs text-mu font-mono ml-1.5">#{target.ma_nv}</span> : null}
+                        </p>
+                        <p className="text-[11px] text-mu font-tabular truncate">
+                          {[target.ktx, target.day, `P${target.phong_so}`, `G${target.giuong}`, w?.donVi].filter(Boolean).join(' · ')}
+                        </p>
+                      </div>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-lnk shrink-0">
+                        <ArrowRightLeft size={13} /> Đổi chỗ
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+            {busy && (
+              <div className="px-5 py-3 border-t border-bdr flex items-center gap-2 text-xs text-mu">
+                <Loader2 size={13} className="animate-spin" /> Đang hoán đổi 2 giường…
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ─── Transfer modal (cascade KTX → Dãy → Phòng → Giường trống) ─── */}
       <BedTransferModal
         open={showTransferModal}
@@ -1463,7 +1754,7 @@ export default function BedManagementClient() {
               giuong: drawerBed.giuong || '',
             }
           : null}
-        onTransferred={() => { setDrawerBed(null); loadBeds(true); }}
+        onTransferred={() => { setDrawerBed(null); loadBeds(true); refreshWorkers(); }}
       />
     </div>
   );

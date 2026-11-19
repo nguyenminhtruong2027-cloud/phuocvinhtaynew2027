@@ -864,7 +864,7 @@ export default function UserManagementClient() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="bg-act/95 backdrop-blur-md text-mu text-[11px] uppercase tracking-wider font-bold border-b border-bdr2 sticky top-0 z-10">
+              <thead className="bg-act text-mu text-[11px] uppercase tracking-wider font-bold border-b border-bdr2 sticky top-0 z-10">
                 <tr>
                   <th className="px-4 py-3">Họ và tên</th>
                   <th className="px-4 py-3">Email</th>

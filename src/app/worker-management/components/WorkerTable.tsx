@@ -204,8 +204,8 @@ export default function WorkerTable({
       <div className="overflow-x-auto scrollbar-thin">
         <table className="w-full border-collapse min-w-[1250px] text-left table-auto">
           <thead>
-            <tr className="bg-act/95 backdrop-blur-md border-b border-bdr2 sticky top-0 z-20">
-              <th className="px-3 py-3 w-10 text-center bg-act/95 z-20">
+            <tr className="bg-act border-b border-bdr2 sticky top-0 z-20">
+              <th className="px-3 py-3 w-10 text-center bg-act z-20">
                 <input
                   type="checkbox"
                   checked={allSelected}
@@ -219,7 +219,7 @@ export default function WorkerTable({
               {COLUMNS.map((col, i) => (
                 <th
                   key={`th-${col.key}-${i}`}
-                  className={`px-3 py-3 text-[11px] font-bold text-mu uppercase tracking-wider whitespace-nowrap cursor-pointer select-none hover:text-tx transition-colors bg-act/95 z-20 ${col.width || ''} ${
+                  className={`px-3 py-3 text-[11px] font-bold text-mu uppercase tracking-wider whitespace-nowrap cursor-pointer select-none hover:text-tx transition-colors bg-act z-20 ${col.width || ''} ${
                     i === 1 ? 'sticky left-[88px] z-30' : ''
                   }`}
                   onClick={() => onSort(col.key)}
@@ -230,10 +230,10 @@ export default function WorkerTable({
                   </div>
                 </th>
               ))}
-              <th className="px-3 py-3 text-[11px] font-bold text-mu uppercase tracking-wider w-24 whitespace-nowrap bg-act/95 z-20">
+              <th className="px-3 py-3 text-[11px] font-bold text-mu uppercase tracking-wider w-24 whitespace-nowrap bg-act z-20">
                 Tạm trú
               </th>
-              <th className="px-3 py-3 text-[11px] font-bold text-mu uppercase tracking-wider w-28 text-right pr-4 whitespace-nowrap bg-act/95 z-20">
+              <th className="px-3 py-3 text-[11px] font-bold text-mu uppercase tracking-wider w-28 text-right pr-4 whitespace-nowrap bg-act z-20">
                 Thao tác
               </th>
             </tr>

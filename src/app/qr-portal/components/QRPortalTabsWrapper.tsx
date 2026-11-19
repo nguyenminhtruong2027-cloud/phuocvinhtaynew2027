@@ -74,7 +74,7 @@ export default function QRPortalTabsWrapper() {
   return (
     <div className="min-h-screen bg-page text-tx font-sans" suppressHydrationWarning>
       {/* Main Nav Header */}
-      <header className="bg-side/90 border-b border-bdr sticky top-0 z-40 backdrop-blur-md">
+      <header className="bg-side border-b border-bdr sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-2 flex items-center justify-between gap-4 overflow-x-auto">
           <SlidingTabs<PortalTab>
             layoutId="qr-portal-tabs"

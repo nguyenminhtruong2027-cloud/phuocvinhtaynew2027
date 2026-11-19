@@ -123,7 +123,7 @@ function formatDateVN(dateStr: string): string {
 function CustomBarTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-act/95 backdrop-blur-md border border-bdr rounded-xl shadow-xl p-3 text-xs">
+    <div className="bg-act border border-bdr rounded-xl shadow-xl p-3 text-xs">
       <p className="font-bold text-tx mb-2 pb-1 border-b border-bdr">{formatDateVN(label)}</p>
       {payload.map((p: any) => (
         <div key={p.dataKey} className="flex items-center justify-between gap-3 mb-1">

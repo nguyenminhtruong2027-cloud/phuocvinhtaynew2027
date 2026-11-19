@@ -49,30 +49,33 @@ export interface AuditFilterParams {
 
 interface AuditContextValue {
   logs: AuditEntry[];
+  totalLogCount: number;
   addLog: (account: string, action: AuditAction, detail: string) => void;
   loading: boolean;
   refetchLogs: () => Promise<void>;
+  fetchLogsPage: (page: number, pageSize: number) => Promise<{ entries: AuditEntry[]; total: number }>;
   fetchFilteredLogs: (filters: AuditFilterParams) => Promise<AuditEntry[]>;
 }
 
 const AuditContext = createContext<AuditContextValue | null>(null);
 
 export function AuditProvider({ children }: { children: React.ReactNode }) {
-  const { currentUser, loading: authLoading } = useAuth();
+  const { currentUser, isAdmin, loading: authLoading } = useAuth();
   const pathname = usePathname();
   const isPublicPath = PUBLIC_PATHS.some(p => pathname?.startsWith(p));
-  const shouldLoadAudit = !authLoading && Boolean(currentUser) && !isPublicPath;
+  const shouldLoadAudit = !authLoading && Boolean(currentUser) && isAdmin && !isPublicPath;
 
   const [logs, setLogs] = useState<AuditEntry[]>([]);
+  const [totalLogCount, setTotalLogCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const supabase = createClient();
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data, count, error } = await supabase
         .from('audit_logs')
-        .select('*')
+        .select('*', { count: 'exact' })
         .order('timestamp', { ascending: false })
         .limit(500);
       if (!error && data) {
@@ -84,10 +87,47 @@ export function AuditProvider({ children }: { children: React.ReactNode }) {
           detail: row.detail,
         }));
         setLogs(dedupeById(mapped));
+        if (typeof count === 'number') setTotalLogCount(count);
+        else setTotalLogCount(mapped.length);
       }
-    } catch {}
+    } catch (err) {
+      console.warn('[AuditContext] fetchLogs warning:', err);
+    }
     setLoading(false);
   }, [supabase]);
+
+  const fetchLogsPage = useCallback(
+    async (page: number, pageSize: number): Promise<{ entries: AuditEntry[]; total: number }> => {
+      try {
+        const from = Math.max(0, (page - 1) * pageSize);
+        const to = from + pageSize - 1;
+        const { data, count, error } = await supabase
+          .from('audit_logs')
+          .select('*', { count: 'exact' })
+          .order('timestamp', { ascending: false })
+          .range(from, to);
+        if (error || !data) {
+          return { entries: [], total: totalLogCount };
+        }
+        const entries = dedupeById(
+          data.map(row => ({
+            id: row.id,
+            timestamp: row.timestamp,
+            account: row.account,
+            action: row.action as AuditAction,
+            detail: row.detail,
+          }))
+        );
+        const total = typeof count === 'number' ? count : entries.length;
+        setTotalLogCount(total);
+        return { entries, total };
+      } catch (err) {
+        console.warn('[AuditContext] fetchLogsPage warning:', err);
+        return { entries: [], total: totalLogCount };
+      }
+    },
+    [supabase, totalLogCount]
+  );
 
   const fetchFilteredLogs = useCallback(async (filters: AuditFilterParams): Promise<AuditEntry[]> => {
     try {
@@ -139,6 +179,7 @@ export function AuditProvider({ children }: { children: React.ReactNode }) {
     if (authLoading) return;
     if (!shouldLoadAudit) {
       setLogs([]);
+      setTotalLogCount(0);
       setLoading(false);
       return;
     }
@@ -153,20 +194,24 @@ export function AuditProvider({ children }: { children: React.ReactNode }) {
       action,
       detail,
     };
-    // Optimistic update
     setLogs(prev => [entry, ...prev]);
-    // Persist to Supabase
+    setTotalLogCount(prev => prev + 1);
     try {
-      await supabase.from('audit_logs').insert({
+      const { error } = await supabase.from('audit_logs').insert({
         account,
         action,
         detail,
       });
-    } catch {}
+      if (error) {
+        console.warn('[AuditContext] Ghi nhật ký thất bại:', error.message);
+      }
+    } catch (err) {
+      console.warn('[AuditContext] Ghi nhật ký gặp sự cố:', err);
+    }
   }, [supabase]);
 
   return (
-    <AuditContext.Provider value={{ logs, addLog, loading, refetchLogs: fetchLogs, fetchFilteredLogs }}>
+    <AuditContext.Provider value={{ logs, totalLogCount, addLog, loading, refetchLogs: fetchLogs, fetchLogsPage, fetchFilteredLogs }}>
       {children}
     </AuditContext.Provider>
   );

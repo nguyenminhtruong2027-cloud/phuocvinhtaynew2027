@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { compareKtxNames } from '@/data/workers';
+import { fetchFacilitiesList } from '@/lib/facilityCapacity';
 
 export interface KtxBlockGroup {
   ktx: string;
@@ -64,11 +65,10 @@ export function invalidateKtxStructureCache(): void {
 
 /**
  * Fetches dynamic KTX & block structure 100% directly from Supabase (Single Source of Truth):
- * 1. `room_units` table (ktx, day_nha) - Physical room units registered in the database
- * 2. `workers` table (ktx, day) - Active resident allocations in the database
- * 3. `profiles` table (assigned_blocks) - Staff block assignments in the database
- *
- * NO HARDCODED KTX ARRAYS. Only KTXs that physically exist in the database are returned.
+ * 1. `facilities` (cached via facilityCapacity)
+ * 2. `room_units` table (ktx, day_nha)
+ * 3. `workers` table (ktx, day)
+ * 4. `profiles` table (assigned_blocks)
  */
 export async function fetchDynamicKtxStructure(forceRefresh = false): Promise<KtxBlockGroup[]> {
   if (!forceRefresh && _cachedKtxStructure) {
@@ -100,102 +100,107 @@ export async function fetchDynamicKtxStructure(forceRefresh = false): Promise<Kt
 
       const PAGE_SIZE = 1000;
 
-      // Source 0: facilities table (ktx, day, room_type, is_visible)
-      try {
-        const { data: facilityRows } = await supabase
-          .from('facilities')
-          .select('ktx, day, room_type, is_visible');
-        if (facilityRows && facilityRows.length > 0) {
-          facilityRows.forEach(row => {
-            if ((row.room_type || 'accommodation') === 'accommodation' && row.is_visible !== false) {
-              addEntry(row.ktx, row.day);
+      const loadFacilities = async () => {
+        try {
+          const facs = await fetchFacilitiesList(forceRefresh);
+          return facs.map(row => ({
+            ktx: row.ktx,
+            day: row.day,
+            room_type: row.room_type,
+            is_visible: row.is_visible,
+          }));
+        } catch (err) {
+          console.warn('[ktxStructure] Warning fetching facilities:', err);
+          return [];
+        }
+      };
+
+      const loadRoomUnits = async () => {
+        const rows: Array<{ ktx: string; day_nha: string }> = [];
+        let from = 0;
+        while (true) {
+          const { data: roomRows, error: roomErr } = await supabase
+            .from('room_units')
+            .select('ktx, day_nha')
+            .range(from, from + PAGE_SIZE - 1);
+          if (roomErr) {
+            console.warn('[ktxStructure] Warning fetching room_units:', roomErr.message);
+            break;
+          }
+          if (!roomRows || roomRows.length === 0) break;
+          rows.push(...(roomRows as any));
+          if (roomRows.length < PAGE_SIZE) break;
+          from += PAGE_SIZE;
+        }
+        return rows;
+      };
+
+      const loadWorkerLocs = async () => {
+        const rows: Array<{ ktx: string; day: string }> = [];
+        let from = 0;
+        while (true) {
+          const { data: workerRows, error: workerErr } = await supabase
+            .from('workers')
+            .select('ktx, day')
+            .order('id', { ascending: true })
+            .range(from, from + PAGE_SIZE - 1);
+          if (workerErr) {
+            console.warn('[ktxStructure] Warning fetching workers:', workerErr.message);
+            break;
+          }
+          if (!workerRows || workerRows.length === 0) break;
+          rows.push(...(workerRows as any));
+          if (workerRows.length < PAGE_SIZE) break;
+          from += PAGE_SIZE;
+        }
+        return rows;
+      };
+
+      const loadProfiles = async () => {
+        try {
+          const { data, error } = await supabase.from('profiles').select('assigned_blocks');
+          if (error || !data) return [];
+          return data;
+        } catch {
+          return [];
+        }
+      };
+
+      const [facilityRows, roomRows, workerRows, profileRows] = await Promise.all([
+        loadFacilities(),
+        loadRoomUnits(),
+        loadWorkerLocs(),
+        loadProfiles(),
+      ]);
+
+      facilityRows.forEach(row => {
+        if ((row.room_type || 'accommodation') === 'accommodation' && row.is_visible !== false) {
+          addEntry(row.ktx, row.day);
+        }
+      });
+
+      roomRows.forEach(row => {
+        addEntry(row.ktx, row.day_nha);
+      });
+
+      workerRows.forEach(row => {
+        addEntry(row.ktx, row.day);
+      });
+
+      profileRows.forEach((p: any) => {
+        if (Array.isArray(p.assigned_blocks)) {
+          p.assigned_blocks.forEach((blockStr: string) => {
+            if (typeof blockStr === 'string' && blockStr.includes(' - ')) {
+              const parts = blockStr.split(' - ');
+              const ktx = parts[0];
+              const day = parts.slice(1).join(' - ');
+              addEntry(ktx, day);
+            } else if (typeof blockStr === 'string' && blockStr.trim()) {
+              addEntry(blockStr.trim());
             }
           });
         }
-      } catch (err) {
-        console.warn('[ktxStructure] Warning fetching facilities:', err);
-      }
-
-      // Source 1: room_units table (ktx, day_nha)
-      let from = 0;
-      let hasMore = true;
-      while (hasMore) {
-        const { data: roomRows, error: roomErr } = await supabase
-          .from('room_units')
-          .select('ktx, day_nha')
-          .range(from, from + PAGE_SIZE - 1);
-
-        if (roomErr) {
-          console.warn('[ktxStructure] Warning fetching room_units:', roomErr.message);
-          break;
-        }
-
-        if (roomRows && roomRows.length > 0) {
-          roomRows.forEach(row => {
-            addEntry(row.ktx, row.day_nha);
-          });
-
-          if (roomRows.length < PAGE_SIZE) {
-            hasMore = false;
-          } else {
-            from += PAGE_SIZE;
-          }
-        } else {
-          hasMore = false;
-        }
-      }
-
-      // Source 2: workers table (ktx, day)
-      from = 0;
-      hasMore = true;
-      while (hasMore) {
-        const { data: workerRows, error: workerErr } = await supabase
-          .from('workers')
-          .select('ktx, day')
-          .order('id', { ascending: true })
-          .range(from, from + PAGE_SIZE - 1);
-
-        if (workerErr) {
-          console.warn('[ktxStructure] Warning fetching workers:', workerErr.message);
-          break;
-        }
-
-        if (workerRows && workerRows.length > 0) {
-          workerRows.forEach(row => {
-            addEntry(row.ktx, row.day);
-          });
-
-          if (workerRows.length < PAGE_SIZE) {
-            hasMore = false;
-          } else {
-            from += PAGE_SIZE;
-          }
-        } else {
-          hasMore = false;
-        }
-      }
-
-      // Source 3: profiles.assigned_blocks
-      const { data: profileRows, error: profileErr } = await supabase
-        .from('profiles')
-        .select('assigned_blocks');
-
-      if (!profileErr && profileRows && profileRows.length > 0) {
-        profileRows.forEach(p => {
-          if (Array.isArray(p.assigned_blocks)) {
-            p.assigned_blocks.forEach((blockStr: string) => {
-              if (typeof blockStr === 'string' && blockStr.includes(' - ')) {
-                const parts = blockStr.split(' - ');
-                const ktx = parts[0];
-                const day = parts.slice(1).join(' - ');
-                addEntry(ktx, day);
-              } else if (typeof blockStr === 'string' && blockStr.trim()) {
-                addEntry(blockStr.trim());
-              }
-            });
-          }
-        });
-      }
+      });
 
       // Strictly dynamic: no static fallback if database has no entries
 

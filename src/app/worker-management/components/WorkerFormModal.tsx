@@ -7,6 +7,8 @@ import { useKtxStructure, compareDayNames } from '@/lib/ktxStructure';
 import { fetchRoomBedAvailability, RoomBedAvailability } from '@/lib/workerHierarchy';
 import { normalizeRoomLabel } from '@/lib/facilityCapacity';
 import { normalizeBedLabel } from '@/lib/bedSync';
+import { parseVNDateSafe } from '@/lib/vnDate';
+import { loadSavedRoomGenderMap, normalizeGender } from '@/lib/roomGender';
 
 interface Props {
   worker: Worker | null;
@@ -491,6 +493,7 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
   const [showScanner, setShowScanner] = useState(false);
   const [scanSuccess, setScanSuccess] = useState(false);
   const [confirmDuplicateCccd, setConfirmDuplicateCccd] = useState(false);
+  const [confirmGenderMismatch, setConfirmGenderMismatch] = useState(false);
   const isEdit = !!worker;
 
   const { ktxGroups, ktxNames } = useKtxStructure();
@@ -508,11 +511,10 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
     return Array.from(set).sort(compareKtxNames);
   }, [ktxNames, allWorkers]);
 
-  const dayList = allAvailableDays;
   const platoonList = [...new Set(allWorkers.map(w => w.tieuDoan).filter(Boolean))].sort();
 
   const defaultKtxVal = ktxList[0] || '';
-  const defaultDayVal = dayList[0] || '';
+  const defaultDayVal = allAvailableDays[0] || '';
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     defaultValues: worker ? {
@@ -531,11 +533,31 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
   const watchedCheckOut = watch('ngayRaKTX');
   const watchedMaNV = watch('maNV') || '';
   const watchedCccd = watch('cccd') || '';
+  const watchedGioiTinh = watch('gioiTinh') || '';
   const watchedKtx = watch('ktx') || '';
   const watchedDay = watch('day') || '';
   const watchedPhong = watch('phongSo') || '';
   const watchedGiuong = watch('giuong') || '';
   const previewDays = calcSoNgay(watchedCheckIn || '', watchedCheckOut || '');
+
+  const dayList = useMemo(() => {
+    const k = watchedKtx.trim();
+    if (!k) return allAvailableDays;
+    const set = new Set<string>();
+    const group = ktxGroups.find(g => g.ktx.trim() === k);
+    if (group) group.days.forEach(d => set.add(d));
+    allWorkers.forEach(w => {
+      if ((w.ktx || '').trim() === k && w.day) set.add(w.day);
+    });
+    return set.size > 0 ? Array.from(set).sort(compareDayNames) : allAvailableDays;
+  }, [watchedKtx, ktxGroups, allWorkers, allAvailableDays]);
+
+  const invalidDateOrder = useMemo(() => {
+    const inDt = parseVNDateSafe(watchedCheckIn);
+    const outDt = parseVNDateSafe(watchedCheckOut);
+    if (!inDt || !outDt) return false;
+    return outDt.getTime() < inDt.getTime();
+  }, [watchedCheckIn, watchedCheckOut]);
 
   // Real-time duplicate MaNV / CCCD warning against existing workers
   const duplicateAlerts = useMemo(() => {
@@ -625,6 +647,78 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
     return roomOccupants.find(w => normalizeBedLabel(w.giuong) === normBed) || null;
   }, [roomOccupants, watchedGiuong]);
 
+  const isSameExistingBed = useMemo(() => {
+    if (!worker) return false;
+    return (
+      (worker.ktx || '').trim() === watchedKtx.trim() &&
+      (worker.day || '').trim() === watchedDay.trim() &&
+      normalizeRoomLabel(worker.phongSo) === normalizeRoomLabel(watchedPhong) &&
+      normalizeBedLabel(worker.giuong) === normalizeBedLabel(watchedGiuong)
+    );
+  }, [worker, watchedKtx, watchedDay, watchedPhong, watchedGiuong]);
+
+  const selectedBedEntry = useMemo(() => {
+    const normBed = normalizeBedLabel(watchedGiuong);
+    if (!normBed || !bedAvail?.allBeds) return null;
+    return bedAvail.allBeds.find(b => b.giuong === normBed) || null;
+  }, [bedAvail, watchedGiuong]);
+
+  const isMaintenanceBed = selectedBedEntry?.status === 'maintenance';
+  const isOccupiedBedConflict = Boolean(conflictingOccupant) || (selectedBedEntry?.status === 'occupied' && !isSameExistingBed);
+
+  const roomGenderWarning = useMemo(() => {
+    const k = watchedKtx.trim();
+    const d = watchedDay.trim();
+    const p = normalizeRoomLabel(watchedPhong);
+    const workerG = normalizeGender(watchedGioiTinh);
+    if (!k || !d || !p || (workerG !== 'nam' && workerG !== 'nu')) return null;
+
+    const savedMap = loadSavedRoomGenderMap();
+    const saved = savedMap[`${k}||${d}||${p}`] || savedMap[`${k}||${d}||${watchedPhong.trim()}`];
+    if (saved === 'male' && workerG === 'nu') {
+      return `Phòng ${p} đang được gán là Phòng Nam, khác giới tính công nhân (Nữ).`;
+    }
+    if (saved === 'female' && workerG === 'nam') {
+      return `Phòng ${p} đang được gán là Phòng Nữ, khác giới tính công nhân (Nam).`;
+    }
+
+    const oppCount = roomOccupants.filter(occ => {
+      const og = normalizeGender(occ.gioiTinh);
+      return (og === 'nam' || og === 'nu') && og !== workerG;
+    }).length;
+    if (oppCount > 0) {
+      return `Phòng ${p} hiện đang có ${oppCount} công nhân ${workerG === 'nam' ? 'Nữ' : 'Nam'}.`;
+    }
+    return null;
+  }, [watchedKtx, watchedDay, watchedPhong, watchedGioiTinh, roomOccupants]);
+
+  useEffect(() => {
+    setConfirmGenderMismatch(false);
+  }, [watchedKtx, watchedDay, watchedPhong, watchedGioiTinh]);
+
+  const submitBlockedReason = useMemo(() => {
+    if (invalidDateOrder) return 'Ngày ra KTX không thể nhỏ hơn Ngày vào KTX';
+    if (isMaintenanceBed) return `Giường ${normalizeBedLabel(watchedGiuong)} đang bảo trì, hãy chọn giường khác`;
+    if (isOccupiedBedConflict) {
+      return conflictingOccupant
+        ? `Giường ${normalizeBedLabel(watchedGiuong)} đang có ${conflictingOccupant.hoVaTen} ở`
+        : `Giường ${normalizeBedLabel(watchedGiuong)} đã có người ở`;
+    }
+    if (hasActiveCccdDup && !confirmDuplicateCccd) return 'Cần tick xác nhận trùng CCCD trước khi lưu';
+    if (roomGenderWarning && !confirmGenderMismatch) return 'Cần tick xác nhận khác giới tính phòng trước khi lưu';
+    return null;
+  }, [
+    invalidDateOrder,
+    isMaintenanceBed,
+    isOccupiedBedConflict,
+    conflictingOccupant,
+    watchedGiuong,
+    hasActiveCccdDup,
+    confirmDuplicateCccd,
+    roomGenderWarning,
+    confirmGenderMismatch,
+  ]);
+
   const handleScanned = (parsed: CCCDData | null) => {
     setShowScanner(false);
     if (parsed) {
@@ -639,17 +733,20 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
   };
 
   const onSubmit = async (data: FormData) => {
+    if (submitBlockedReason) return;
     setSaving(true);
-    await new Promise(r => setTimeout(r, 400));
-    const saved: Worker = {
-      ...data,
-      id: worker?.id ?? `new-${Date.now()}`,
-      stt: worker?.stt ?? 0,
-      khoaTraCuu: `${data.day}|${data.phongSo}|${data.giuong}`,
-      avatar: data.avatar || '',
-    };
-    onSave(saved);
-    setSaving(false);
+    try {
+      const saved: Worker = {
+        ...data,
+        id: worker?.id ?? `new-${Date.now()}`,
+        stt: worker?.stt ?? 0,
+        khoaTraCuu: `${data.ktx || ''}|${data.day || ''}|${data.phongSo || ''}`,
+        avatar: data.avatar || '',
+      };
+      onSave(saved);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -812,12 +909,43 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
                         </span>
                       ) : null}
                     </div>
-                    {conflictingOccupant && (
-                      <div className="flex items-center gap-1.5 text-wn font-medium">
-                        <AlertTriangle size={12} className="shrink-0" />
+                    {invalidDateOrder && (
+                      <div className="flex items-center gap-1.5 text-dgr font-medium">
+                        <AlertCircle size={12} className="shrink-0" />
+                        <span>Ngày ra KTX ({watchedCheckOut}) không thể trước Ngày vào KTX ({watchedCheckIn}).</span>
+                      </div>
+                    )}
+                    {isMaintenanceBed && (
+                      <div className="flex items-center gap-1.5 text-dgr font-medium">
+                        <AlertCircle size={12} className="shrink-0" />
+                        <span>Giường {normalizeBedLabel(watchedGiuong)} đang trong trạng thái bảo trì, không thể xếp người ở.</span>
+                      </div>
+                    )}
+                    {!isMaintenanceBed && isOccupiedBedConflict && (
+                      <div className="flex items-center gap-1.5 text-dgr font-medium">
+                        <AlertCircle size={12} className="shrink-0" />
                         <span>
-                          Giường {normalizeBedLabel(watchedGiuong)} đang có <strong>{conflictingOccupant.hoVaTen}</strong> ở.
+                          {conflictingOccupant
+                            ? <>Giường {normalizeBedLabel(watchedGiuong)} đang có <strong>{conflictingOccupant.hoVaTen}</strong> ở.</>
+                            : <>Giường {normalizeBedLabel(watchedGiuong)} đang có người sử dụng trên sơ đồ giường.</>}
                         </span>
+                      </div>
+                    )}
+                    {roomGenderWarning && (
+                      <div className="p-2 rounded-lg tint-wn border border-wn/40 text-wn space-y-1.5">
+                        <div className="flex items-start gap-1.5 font-medium">
+                          <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                          <span>{roomGenderWarning}</span>
+                        </div>
+                        <label className="flex items-center gap-2 cursor-pointer select-none text-tx font-medium">
+                          <input
+                            type="checkbox"
+                            checked={confirmGenderMismatch}
+                            onChange={e => setConfirmGenderMismatch(e.target.checked)}
+                            className="w-3.5 h-3.5 accent-amber-500 rounded cursor-pointer"
+                          />
+                          <span>Xác nhận vẫn xếp vào phòng này</span>
+                        </label>
                       </div>
                     )}
                     {!loadingBeds && bedAvail && bedAvail.emptyBeds.length > 0 && (
@@ -875,9 +1003,9 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
             </div>
 
             <div className="sticky bottom-0 bg-card border-t border-border px-5 py-3 flex items-center justify-between gap-3">
-              {hasActiveCccdDup && !confirmDuplicateCccd ? (
-                <span className="text-[11px] font-semibold text-wn">
-                  ⚠ Cần tick xác nhận trùng CCCD trước khi lưu
+              {submitBlockedReason ? (
+                <span className="text-[11px] font-semibold text-dgr">
+                  ⚠ {submitBlockedReason}
                 </span>
               ) : (
                 <span />
@@ -886,8 +1014,8 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
                 <button type="button" onClick={onClose} className="btn-secondary text-xs">Hủy bỏ</button>
                 <button
                   type="submit"
-                  disabled={saving || (hasActiveCccdDup && !confirmDuplicateCccd)}
-                  className="btn-primary text-xs min-w-[110px] justify-center"
+                  disabled={saving || Boolean(submitBlockedReason)}
+                  className="btn-primary text-xs min-w-[110px] justify-center disabled:opacity-50"
                 >
                   {saving ? <><Loader2 size={13} className="animate-spin" />Đang lưu...</> : <><Save size={13} />{isEdit ? 'Lưu thay đổi' : 'Thêm công nhân'}</>}
                 </button>

@@ -23,7 +23,7 @@ export default function BulkActionBar({ selectedCount, onDelete, onBulkTamTru, o
           className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-1.5rem)] max-w-4xl pointer-events-auto"
         >
           <div
-            className="flex flex-wrap items-center gap-2 sm:gap-2.5 bg-surf/92 border border-bdr3 rounded-2xl px-3.5 sm:px-4 py-2.5 shadow-2xl backdrop-blur-xl"
+            className="flex flex-wrap items-center gap-2 sm:gap-2.5 bg-surf border border-bdr3 rounded-2xl px-3.5 sm:px-4 py-2.5 shadow-2xl"
             style={{ boxShadow: 'inset 0 1px 0 var(--specular), 0 18px 40px -10px var(--sh)' }}
           >
             {/* Selection Counter Badge */}

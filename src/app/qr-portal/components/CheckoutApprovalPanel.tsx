@@ -3,11 +3,21 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
-import { fetchWorkerHierarchy, WorkerHierarchyData, invalidateWorkerHierarchyCache } from '@/lib/workerHierarchy';
+import { useWorkers } from '@/context/WorkerContext';
+import {
+  buildWorkerHierarchyFromWorkers,
+  invalidateWorkerHierarchyCache,
+  WorkerRef,
+} from '@/lib/workerHierarchy';
 import { invalidateKtxStructureCache } from '@/lib/ktxStructure';
 import { releaseBedsForWorkers, normalizeBedLabel } from '@/lib/bedSync';
 import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
-import { normalizeRoomLabel } from '@/lib/facilityCapacity';
+import {
+  FacilityItem,
+  fetchFacilitiesList,
+  invalidateFacilitiesCache,
+  normalizeRoomLabel,
+} from '@/lib/facilityCapacity';
 import { toast } from 'sonner';
 import {
   CheckCircle2,
@@ -220,27 +230,51 @@ export default function CheckoutApprovalPanel({
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
 
-  // Bộ lọc theo KTX / Dãy / Phòng từ dữ liệu công nhân (Requirement 3)
+  // Bộ lọc theo KTX / Dãy / Phòng từ WorkerContext + cached facilities (zero duplicate worker fetch)
   const [selectedKtx, setSelectedKtx] = useState<string>('all');
   const [selectedDay, setSelectedDay] = useState<string>('all');
   const [selectedRoom, setSelectedRoom] = useState<string>('all');
-  const [hierarchy, setHierarchy] = useState<WorkerHierarchyData>({
-    units: [],
-    ktxList: [],
-    daysByKtx: {},
-    roomsByKtxDay: {},
-    roomCapacities: {},
-    workers: [],
-  });
+  const [facilities, setFacilities] = useState<FacilityItem[]>([]);
 
   const { currentUser, isAdmin, canWriteBlock } = useAuth();
-  const supabase = createClient();
+  const { workers, refreshWorkers } = useWorkers();
+  const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
-    fetchWorkerHierarchy().then(setHierarchy).catch(err => {
-      console.warn('Checkout fetchWorkerHierarchy error:', err);
-    });
+    let active = true;
+    fetchFacilitiesList()
+      .then(rows => {
+        if (active) setFacilities(rows);
+      })
+      .catch(err => {
+        console.warn('Checkout fetchFacilitiesList error:', err);
+      });
+    return () => { active = false; };
   }, []);
+
+  const hierarchy = useMemo(() => {
+    const refs: WorkerRef[] = workers.map(w => ({
+      hoVaTen: w.hoVaTen || '',
+      maNV: w.maNV || '',
+      cccd: w.cccd || '',
+      soDienThoai: w.soDienThoai || '',
+      ktx: w.ktx || '',
+      day: w.day || '',
+      phongSo: w.phongSo || '',
+      donVi: w.donVi || '',
+      giuong: w.giuong || '',
+      gioiTinh: w.gioiTinh || '',
+    }));
+    return buildWorkerHierarchyFromWorkers(refs, facilities);
+  }, [workers, facilities]);
+
+  useEffect(() => {
+    if (selectedKtx !== 'all' && hierarchy.ktxList.length > 0 && !hierarchy.ktxList.includes(selectedKtx)) {
+      setSelectedKtx('all');
+      setSelectedDay('all');
+      setSelectedRoom('all');
+    }
+  }, [hierarchy.ktxList, selectedKtx]);
 
   const onCountChangeRef = useRef(onCountChange);
   const successTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -507,17 +541,11 @@ export default function CheckoutApprovalPanel({
         setDetailReq(prev => (prev ? { ...prev, status: 'approved', reviewed_at: nowStr } : null));
       }
 
-      // Invalidate caches and refresh hierarchy immediately
+      // Invalidate caches and refresh WorkerContext
       invalidateWorkerHierarchyCache();
       invalidateKtxStructureCache();
-      fetchWorkerHierarchy(true).then(updated => {
-        setHierarchy(updated);
-        if (selectedKtx !== 'all' && !updated.ktxList.includes(selectedKtx)) {
-          setSelectedKtx('all');
-          setSelectedDay('all');
-          setSelectedRoom('all');
-        }
-      }).catch(() => {});
+      invalidateFacilitiesCache();
+      refreshWorkers().catch(() => {});
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('ktx_workers_updated'));
@@ -583,14 +611,8 @@ export default function CheckoutApprovalPanel({
       // Invalidate caches and refresh hierarchy
       invalidateWorkerHierarchyCache();
       invalidateKtxStructureCache();
-      fetchWorkerHierarchy(true).then(updated => {
-        setHierarchy(updated);
-        if (selectedKtx !== 'all' && !updated.ktxList.includes(selectedKtx)) {
-          setSelectedKtx('all');
-          setSelectedDay('all');
-          setSelectedRoom('all');
-        }
-      }).catch(() => {});
+      invalidateFacilitiesCache();
+      refreshWorkers().catch(() => {});
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('ktx_workers_updated'));

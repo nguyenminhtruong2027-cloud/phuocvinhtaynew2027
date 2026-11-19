@@ -24,20 +24,30 @@ import {
   Home,
   Check,
   Inbox,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
+import { useWorkers } from '@/context/WorkerContext';
 import { toast } from 'sonner';
 import { syncBedForWorkerSave, normalizeBedLabel } from '@/lib/bedSync';
-import { normalizeRoomLabel } from '@/lib/facilityCapacity';
+import {
+  buildRoomKey,
+  FacilityItem,
+  fetchFacilitiesList,
+  invalidateFacilitiesCache,
+  normalizeRoomLabel,
+} from '@/lib/facilityCapacity';
+import { loadSavedRoomGenderMap, normalizeGender } from '@/lib/roomGender';
 import { QrCodeImage, downloadQrPng, generateQrDataUrl } from '@/components/QrCodeImage';
 import { printHtmlViaIframe, escapeHtml } from '@/lib/printHtml';
 import {
-  fetchWorkerHierarchy,
+  buildWorkerHierarchyFromWorkers,
   fetchRoomBedAvailability,
   invalidateWorkerHierarchyCache,
   WorkerHierarchyData,
   RoomBedAvailability,
+  WorkerRef,
   checkDuplicateWorker,
 } from '@/lib/workerHierarchy';
 import {
@@ -160,7 +170,9 @@ function DetailModal({
     reg.don_vi && !hierarchy.units.includes(reg.don_vi) ? reg.don_vi : ''
   );
 
+  const { isAdmin, canWriteBlock } = useAuth();
   const { ktxGroups } = useKtxStructure();
+  const autoPickFirstBedRef = React.useRef(false);
 
   const availableKtx = useMemo(() => {
     const set = new Set<string>(hierarchy.ktxList);
@@ -192,7 +204,16 @@ function DetailModal({
     let active = true;
     setLoadingBeds(true);
     fetchRoomBedAvailability(editForm.ktx, editForm.day, editForm.phong_so, hierarchy)
-      .then(res => { if (active) setBedAvail(res); })
+      .then(res => {
+        if (!active) return;
+        setBedAvail(res);
+        if (autoPickFirstBedRef.current) {
+          autoPickFirstBedRef.current = false;
+          if (res.emptyBeds.length > 0) {
+            setEditForm(prev => ({ ...prev, giuong: res.emptyBeds[0] }));
+          }
+        }
+      })
       .catch(() => { if (active) setBedAvail(null); })
       .finally(() => { if (active) setLoadingBeds(false); });
     return () => { active = false; };
@@ -222,6 +243,7 @@ function DetailModal({
       ktx: newKtx,
       day: nextDay,
       phong_so: nextRoom,
+      giuong: '',
     }));
   };
 
@@ -232,6 +254,7 @@ function DetailModal({
       ...prev,
       day: newDay,
       phong_so: nextRoom,
+      giuong: '',
     }));
   };
 
@@ -253,6 +276,142 @@ function DetailModal({
   const dupMatch = useMemo(() => {
     return checkDuplicateWorker(hierarchy.workers, editForm.so_cccd, editForm.so_dien_thoai);
   }, [hierarchy.workers, editForm.so_cccd, editForm.so_dien_thoai]);
+
+  const savedGenderMap = useMemo(() => loadSavedRoomGenderMap(), []);
+
+  const roomGenderWarning = useMemo(() => {
+    if (!editForm.ktx || !editForm.day || !editForm.phong_so) return null;
+    const applicantG = normalizeGender(editForm.gioi_tinh);
+    if (applicantG === 'other') return null;
+
+    const normRoom = normalizeRoomLabel(editForm.phong_so);
+    const exactKey = `${editForm.ktx.trim()}||${editForm.day.trim()}||${editForm.phong_so.trim()}`;
+    const normKey = `${editForm.ktx.trim()}||${editForm.day.trim()}||${normRoom}`;
+    const adminLabel = savedGenderMap[exactKey] ?? savedGenderMap[normKey];
+
+    if (adminLabel === 'male' && applicantG === 'nu') {
+      return 'Phòng được gắn nhãn Phòng Nam nhưng công nhân khai báo giới tính Nữ.';
+    }
+    if (adminLabel === 'female' && applicantG === 'nam') {
+      return 'Phòng được gắn nhãn Phòng Nữ nhưng công nhân khai báo giới tính Nam.';
+    }
+
+    const occupants = hierarchy.workers.filter(
+      w =>
+        w.ktx.trim() === editForm.ktx.trim() &&
+        w.day.trim() === editForm.day.trim() &&
+        normalizeRoomLabel(w.phongSo) === normRoom
+    );
+    const hasMale = occupants.some(w => normalizeGender(w.gioiTinh) === 'nam');
+    const hasFemale = occupants.some(w => normalizeGender(w.gioiTinh) === 'nu');
+
+    if (applicantG === 'nam' && hasFemale) {
+      return `Phòng ${editForm.phong_so} hiện đang có công nhân Nữ lưu trú. Cân nhắc chọn phòng Nam hoặc phòng trống.`;
+    }
+    if (applicantG === 'nu' && hasMale) {
+      return `Phòng ${editForm.phong_so} hiện đang có công nhân Nam lưu trú. Cân nhắc chọn phòng Nữ hoặc phòng trống.`;
+    }
+    return null;
+  }, [editForm.ktx, editForm.day, editForm.phong_so, editForm.gioi_tinh, savedGenderMap, hierarchy.workers]);
+
+  const smartRoomSuggestions = useMemo(() => {
+    if (!isPending) return [];
+    const applicantG = normalizeGender(editForm.gioi_tinh);
+    const targetUnit = (isCustomUnit ? customUnit : editForm.don_vi).trim().toLowerCase();
+
+    const occByRoom = new Map<string, WorkerRef[]>();
+    for (const w of hierarchy.workers) {
+      if (!w.ktx || !w.day || !w.phongSo) continue;
+      const key = buildRoomKey(w.ktx, w.day, w.phongSo);
+      const arr = occByRoom.get(key) || [];
+      arr.push(w);
+      occByRoom.set(key, arr);
+    }
+
+    const candidates: Array<{
+      ktx: string;
+      day: string;
+      room: string;
+      vacant: number;
+      cap: number;
+      sameUnit: boolean;
+      sameGenderActive: boolean;
+      score: number;
+    }> = [];
+
+    for (const kdKey of Object.keys(hierarchy.roomsByKtxDay)) {
+      const [ktx, day] = kdKey.split('__');
+      if (!ktx || !day) continue;
+      if (!isAdmin && !canWriteBlock(day, ktx)) continue;
+
+      for (const room of hierarchy.roomsByKtxDay[kdKey] || []) {
+        const roomKey = buildRoomKey(ktx, day, room);
+        const cap = hierarchy.roomCapacities[roomKey] || 8;
+        const occ = occByRoom.get(roomKey) || [];
+        const vacant = cap - occ.length;
+        if (vacant <= 0) continue;
+
+        const normRoom = normalizeRoomLabel(room);
+        const adminLabel = savedGenderMap[`${ktx}||${day}||${room}`] ?? savedGenderMap[`${ktx}||${day}||${normRoom}`];
+        const hasMale = occ.some(w => normalizeGender(w.gioiTinh) === 'nam');
+        const hasFemale = occ.some(w => normalizeGender(w.gioiTinh) === 'nu');
+
+        if (applicantG === 'nam' && (adminLabel === 'female' || hasFemale)) continue;
+        if (applicantG === 'nu' && (adminLabel === 'male' || hasMale)) continue;
+
+        const sameUnit = Boolean(targetUnit && occ.some(w => (w.donVi || '').trim().toLowerCase() === targetUnit));
+        const sameGenderActive =
+          (applicantG === 'nam' && (hasMale || adminLabel === 'male')) ||
+          (applicantG === 'nu' && (hasFemale || adminLabel === 'female'));
+
+        let score = 0;
+        if (ktx === editForm.ktx) score += 100;
+        if (sameUnit) score += 40;
+        if (sameGenderActive) score += 20;
+        score -= vacant * 0.5;
+
+        candidates.push({
+          ktx,
+          day,
+          room,
+          vacant,
+          cap,
+          sameUnit,
+          sameGenderActive,
+          score,
+        });
+      }
+    }
+
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates.slice(0, 3);
+  }, [
+    isPending,
+    editForm.gioi_tinh,
+    editForm.don_vi,
+    editForm.ktx,
+    isCustomUnit,
+    customUnit,
+    hierarchy,
+    isAdmin,
+    canWriteBlock,
+    savedGenderMap,
+  ]);
+
+  const selectedBedError = useMemo(() => {
+    if (!isPending || loadingBeds || !bedAvail) return null;
+    const normBed = normalizeBedLabel(editForm.giuong);
+    if (!normBed) return null;
+    const match = bedAvail.allBeds.find(b => normalizeBedLabel(b.giuong) === normBed);
+    if (!match) return null;
+    if (match.status === 'maintenance') {
+      return `Giường ${editForm.giuong.trim()} đang bảo trì, không thể xếp công nhân.`;
+    }
+    if (match.status === 'occupied') {
+      return `Giường ${editForm.giuong.trim()} đã có công nhân đang ở. Vui lòng chọn giường trống.`;
+    }
+    return null;
+  }, [isPending, loadingBeds, bedAvail, editForm.giuong]);
 
   const handleApproveSubmit = () => {
     const finalUnit = isCustomUnit ? customUnit.trim() : editForm.don_vi.trim();
@@ -532,6 +691,55 @@ function DetailModal({
                 </div>
               </div>
 
+              {smartRoomSuggestions.length > 0 && (
+                <div className="rounded bg-page border border-bdr p-2.5 text-xs space-y-1.5">
+                  <div className="flex items-center gap-1.5 font-semibold text-lnk">
+                    <Sparkles size={13} />
+                    <span>Gợi ý phòng phù hợp (còn trống & cùng giới {editForm.gioi_tinh || 'phù hợp'})</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {smartRoomSuggestions.map((s, idx) => (
+                      <button
+                        key={`${s.ktx}-${s.day}-${s.room}-${idx}`}
+                        type="button"
+                        onClick={() => {
+                          autoPickFirstBedRef.current = true;
+                          setEditForm(prev => ({
+                            ...prev,
+                            ktx: s.ktx,
+                            day: s.day,
+                            phong_so: s.room,
+                            giuong: '',
+                          }));
+                        }}
+                        className="px-2.5 py-1 rounded border border-bdr bg-surf hover:border-lnk hover:bg-bdg/40 text-left transition-colors cursor-pointer"
+                      >
+                        <div className="font-bold text-tx">
+                          {s.ktx} · {s.day} · P.{s.room}
+                        </div>
+                        <div className="text-[10px] text-mu">
+                          Còn {s.vacant}/{s.cap} giường{s.sameUnit ? ' · Cùng đơn vị' : ''}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {roomGenderWarning && (
+                <div className="p-2.5 rounded border border-dgr/40 bg-dgrbg text-dgr text-xs flex items-start gap-2">
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                  <span>{roomGenderWarning}</span>
+                </div>
+              )}
+
+              {selectedBedError && (
+                <div className="p-2.5 rounded border border-dgr/50 bg-dgrbg text-dgr text-xs font-semibold flex items-start gap-2">
+                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                  <span>{selectedBedError}</span>
+                </div>
+              )}
+
               {editForm.ktx && editForm.day && editForm.phong_so && (loadingBeds || (bedAvail && bedAvail.capacity > 0)) && (
                 <div className="rounded bg-page border border-bdr p-2.5 text-xs space-y-1.5">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -550,7 +758,7 @@ function DetailModal({
                       </span>
                     )}
                   </div>
-                  {!loadingBeds && bedAvail && editForm.giuong.trim() && bedAvail.occupiedBeds.includes(editForm.giuong.trim()) && (
+                  {!loadingBeds && bedAvail && editForm.giuong.trim() && bedAvail.occupiedBeds.includes(normalizeBedLabel(editForm.giuong.trim())) && (
                     <p className="text-[11px] text-wn font-medium">
                       Lưu ý: Giường {editForm.giuong.trim()} hiện đang có công nhân ở. Nên chọn giường trống bên dưới.
                     </p>
@@ -558,7 +766,7 @@ function DetailModal({
                   {!loadingBeds && bedAvail && bedAvail.emptyBeds.length > 0 && (
                     <div className="flex flex-wrap gap-1">
                       {bedAvail.emptyBeds.slice(0, 14).map(b => {
-                        const selected = editForm.giuong.trim() === b;
+                        const selected = normalizeBedLabel(editForm.giuong) === normalizeBedLabel(b);
                         return (
                           <button
                             key={b}
@@ -660,7 +868,7 @@ function DetailModal({
                 <button
                   type="button"
                   onClick={handleApproveSubmit}
-                  disabled={isProcessing}
+                  disabled={isProcessing || Boolean(selectedBedError)}
                   className="flex-1 py-2 px-3 bg-ok2 hover:opacity-90 text-ok2-fg rounded text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer text-center"
                 >
                   {isProcessing ? <Loader2 size={13} className="animate-spin inline mr-1" /> : <CheckCircle2 size={13} className="inline mr-1" />}
@@ -818,29 +1026,53 @@ export default function QRPortalClient() {
   const [selectedDay, setSelectedDay] = useState<string>('all');
   const [selectedRoom, setSelectedRoom] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchApproving, setBatchApproving] = useState(false);
 
-  // Phân cấp KTX / Dãy / Phòng từ dữ liệu công nhân (workers) & cơ sở vật chất
-  const [hierarchy, setHierarchy] = useState<WorkerHierarchyData>({
-    units: [],
-    ktxList: [],
-    daysByKtx: {},
-    roomsByKtxDay: {},
-    roomCapacities: {},
-    workers: [],
-  });
+  const [facilities, setFacilities] = useState<FacilityItem[]>([]);
 
   const { currentUser, isAdmin, canWriteBlock } = useAuth();
   const { addLog } = useAudit();
-  const supabase = createClient();
+  const { workers, refreshWorkers } = useWorkers();
+  const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
       setRegisterUrl(`${window.location.origin}/register`);
     }
-    fetchWorkerHierarchy().then(setHierarchy).catch(err => {
-      console.warn('QRPortalClient fetchWorkerHierarchy error:', err);
-    });
+    let active = true;
+    fetchFacilitiesList()
+      .then(rows => {
+        if (active) setFacilities(rows);
+      })
+      .catch(err => {
+        console.warn('QRPortalClient fetchFacilitiesList error:', err);
+      });
+    return () => { active = false; };
   }, []);
+
+  const hierarchy: WorkerHierarchyData = useMemo(() => {
+    const activeRefs: WorkerRef[] = workers
+      .filter(
+        w =>
+          !w?.ngayRaKTX &&
+          !w?.ghiChu?.includes('[Đã Check-out') &&
+          !w?.ghiChu?.includes('[CHECKOUT]')
+      )
+      .map(w => ({
+        hoVaTen: w.hoVaTen || '',
+        maNV: w.maNV || '',
+        cccd: w.cccd || '',
+        soDienThoai: w.soDienThoai || '',
+        ktx: w.ktx || '',
+        day: w.day || '',
+        phongSo: w.phongSo || '',
+        donVi: w.donVi || '',
+        giuong: w.giuong || '',
+        gioiTinh: w.gioiTinh || '',
+      }));
+    return buildWorkerHierarchyFromWorkers(activeRefs, facilities);
+  }, [workers, facilities]);
 
   const fetchRegistrations = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -886,17 +1118,22 @@ export default function QRPortalClient() {
     return registrations.filter(r => isAdmin || canWriteBlock(r.day, r.ktx));
   }, [registrations, isAdmin, canWriteBlock]);
 
-  // Phê duyệt hồ sơ — Tạo/cập nhật công nhân (UUID hợp lệ), đồng bộ giường, đánh dấu duyệt & audit log
-  const handleApprove = async (
+  // Core single-registration approval helper (throws on conflict so single or batch caller can handle cleanly)
+  const approveSingleRegistration = async (
     regToApprove: WorkerRegistration,
-    tamTruStatus: 'registered' | 'unregistered' = 'unregistered'
+    tamTruStatus: 'registered' | 'unregistered' = 'unregistered',
+    options?: { skipPostRefresh?: boolean; nextSttOverride?: number }
   ) => {
-    setProcessing(regToApprove.id);
-    try {
-      const nowStr = new Date().toISOString();
+    const nowStr = new Date().toISOString();
 
-      // Compute next STT cleanly
-      let nextStt = 1;
+    const ktxVal = normalizeKtxLabel(regToApprove.ktx || '');
+    const dayVal = normalizeDayLabel(regToApprove.day || '');
+    if (!isAdmin && !canWriteBlock(dayVal, ktxVal)) {
+      throw new Error(`Bạn không có quyền duyệt công nhân vào ${ktxVal} - ${dayVal}.`);
+    }
+
+    let nextStt = options?.nextSttOverride ?? 1;
+    if (options?.nextSttOverride === undefined) {
       try {
         const { data: maxRow } = await supabase
           .from('workers')
@@ -908,12 +1145,11 @@ export default function QRPortalClient() {
           nextStt = maxRow.stt + 1;
         }
       } catch {}
+    }
 
-      const workerId = toValidWorkerUuid(regToApprove.id);
-      const ktxVal = normalizeKtxLabel(regToApprove.ktx || '');
-      const dayVal = normalizeDayLabel(regToApprove.day || '');
-      const roomVal = (regToApprove.phong_so || '').trim();
-      const bedVal = (regToApprove.giuong || '').trim();
+    const workerId = toValidWorkerUuid(regToApprove.id);
+    const roomVal = (regToApprove.phong_so || '').trim();
+    const bedVal = (regToApprove.giuong || '').trim();
 
       // 0a. Live DB duplicate guard against active workers (CCCD & Mã NV)
       const cleanCccd = (regToApprove.so_cccd || '').trim();
@@ -1075,7 +1311,10 @@ export default function QRPortalClient() {
 
       invalidateKtxStructureCache();
       invalidateWorkerHierarchyCache();
-      fetchWorkerHierarchy(true).then(setHierarchy).catch(() => {});
+      invalidateFacilitiesCache();
+      if (!options?.skipPostRefresh) {
+        refreshWorkers().catch(() => {});
+      }
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('ktx_workers_updated'));
@@ -1093,15 +1332,79 @@ export default function QRPortalClient() {
       setRegistrations(prev =>
         prev.map(r => (r.id === regToApprove.id ? updatedReg : r))
       );
+      setSelectedIds(prev => {
+        if (!prev.has(regToApprove.id)) return prev;
+        const next = new Set(prev);
+        next.delete(regToApprove.id);
+        return next;
+      });
       if (detailReg?.id === regToApprove.id) {
         setDetailReg(updatedReg);
       }
+  };
+
+  const handleApprove = async (
+    regToApprove: WorkerRegistration,
+    tamTruStatus: 'registered' | 'unregistered' = 'unregistered'
+  ) => {
+    setProcessing(regToApprove.id);
+    try {
+      await approveSingleRegistration(regToApprove, tamTruStatus);
       toast.success(`Đã duyệt và xếp chỗ cho ${regToApprove.ho_va_ten}`);
     } catch (e: any) {
       console.error('Approve error:', e.message);
       toast.error(`Lỗi khi phê duyệt: ${e?.message || 'Không thể cập nhật'}`);
     } finally {
       setProcessing(null);
+    }
+  };
+
+  const handleBatchApprove = async (regsToApprove: WorkerRegistration[]) => {
+    if (regsToApprove.length === 0) return;
+    setBatchApproving(true);
+    let nextStt = 1;
+    try {
+      const { data: maxRow } = await supabase
+        .from('workers')
+        .select('stt')
+        .order('stt', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (maxRow && typeof maxRow.stt === 'number') {
+        nextStt = maxRow.stt + 1;
+      }
+    } catch {}
+
+    let approvedCount = 0;
+    const skipped: Array<{ name: string; reason: string }> = [];
+
+    for (const reg of regsToApprove) {
+      try {
+        await approveSingleRegistration(reg, 'unregistered', {
+          skipPostRefresh: true,
+          nextSttOverride: nextStt,
+        });
+        nextStt++;
+        approvedCount++;
+      } catch (err: any) {
+        skipped.push({
+          name: reg.ho_va_ten || reg.id,
+          reason: err?.message || 'Xung đột dữ liệu',
+        });
+      }
+    }
+
+    await refreshWorkers().catch(() => {});
+    setBatchApproving(false);
+
+    if (approvedCount > 0 && skipped.length === 0) {
+      toast.success(`Đã duyệt hàng loạt ${approvedCount} hồ sơ thành công.`);
+    } else if (approvedCount > 0 && skipped.length > 0) {
+      toast.warning(
+        `Đã duyệt ${approvedCount} hồ sơ. Bỏ qua ${skipped.length} hồ sơ có xung đột (${skipped.slice(0, 2).map(s => s.name).join(', ')}).`
+      );
+    } else if (skipped.length > 0) {
+      toast.error(`Không duyệt được hồ sơ nào: ${skipped[0].reason}`);
     }
   };
 
@@ -1189,6 +1492,36 @@ export default function QRPortalClient() {
       return true;
     });
   }, [scopedRegistrations, filterStatus, selectedKtx, selectedDay, selectedRoom, searchQuery]);
+
+  const pendingFiltered = useMemo(
+    () => filtered.filter(r => r.status === 'pending'),
+    [filtered]
+  );
+
+  const selectedPendingRegs = useMemo(
+    () => pendingFiltered.filter(r => selectedIds.has(r.id)),
+    [pendingFiltered, selectedIds]
+  );
+
+  const allPendingSelected =
+    pendingFiltered.length > 0 && pendingFiltered.every(r => selectedIds.has(r.id));
+
+  const toggleSelectAllPending = () => {
+    if (allPendingSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(pendingFiltered.map(r => r.id)));
+    }
+  };
+
+  const toggleSelectRow = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const counts = {
     pending: scopedRegistrations.filter(r => r.status === 'pending').length,
@@ -1407,6 +1740,34 @@ export default function QRPortalClient() {
         </div>
       </div>
 
+      {/* Batch Action Bar */}
+      {selectedPendingRegs.length > 0 && (
+        <div className="bg-surf border border-bdr2 rounded-md px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs font-bold text-tx">
+            Đã chọn <span className="text-lnk font-mono">{selectedPendingRegs.length}</span> hồ sơ chờ duyệt
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleBatchApprove(selectedPendingRegs)}
+              disabled={batchApproving}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-ok2 hover:opacity-90 text-ok2-fg rounded text-xs font-bold disabled:opacity-50 cursor-pointer"
+            >
+              {batchApproving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+              <span>{batchApproving ? 'Đang duyệt hàng loạt...' : `Duyệt hàng loạt (${selectedPendingRegs.length})`}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedIds(new Set())}
+              disabled={batchApproving}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-bdr rounded text-xs font-semibold text-mu hover:text-tx hover:bg-act cursor-pointer"
+            >
+              <X size={12} /> Bỏ chọn
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* BẢNG DANH SÁCH (TABLE) THAY VÌ CARD STACK (Requirement: Operations Table View) */}
       <div className="bg-surf border border-bdr rounded-md overflow-hidden">
         {loading ? (
@@ -1428,6 +1789,17 @@ export default function QRPortalClient() {
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-page border-b border-bdr text-[11px] font-bold text-mu uppercase tracking-wider">
+                  <th className="py-2.5 px-3 w-8 text-center">
+                    {pendingFiltered.length > 0 && (
+                      <input
+                        type="checkbox"
+                        checked={allPendingSelected}
+                        onChange={toggleSelectAllPending}
+                        className="rounded border-bdr bg-surf cursor-pointer"
+                        title="Chọn tất cả hồ sơ chờ duyệt"
+                      />
+                    )}
+                  </th>
                   <th className="py-2.5 px-3">CÔNG NHÂN</th>
                   <th className="py-2.5 px-3">LIÊN HỆ & CCCD</th>
                   <th className="py-2.5 px-3">ĐƠN VỊ / TỔ</th>
@@ -1453,6 +1825,16 @@ export default function QRPortalClient() {
                           : 'hover:bg-act'
                       }`}
                     >
+                      <td className="py-2.5 px-3 align-top text-center">
+                        {reg.status === 'pending' && (
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(reg.id)}
+                            onChange={() => toggleSelectRow(reg.id)}
+                            className="rounded border-bdr bg-surf cursor-pointer mt-0.5"
+                          />
+                        )}
+                      </td>
                       {/* Cột 1: Tên & Mã NV */}
                       <td className="py-2.5 px-3 align-top">
                         <div className="font-bold text-tx text-xs sm:text-sm">

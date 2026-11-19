@@ -298,7 +298,7 @@ function GlobalSearchBar({ onSelectWorker }: { onSelectWorker: (id: string) => v
       </div>
 
       {open && results.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-1.5 bg-surf border border-bdr rounded-xl shadow-2xl z-50 overflow-hidden backdrop-blur-md">
+        <div className="absolute top-full left-0 right-0 mt-1.5 bg-surf border border-bdr rounded-xl shadow-2xl z-50 overflow-hidden">
           <div className="px-3 py-1.5 border-b border-bdr bg-act">
             <span className="text-[11px] font-semibold text-mu uppercase tracking-wider">
               Kết quả tìm kiếm ({results.length})
@@ -353,7 +353,7 @@ function RoomTooltip({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 4, scale: 0.97 }}
       transition={{ duration: 0.14 }}
-      className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 bg-surf border border-bdr2 text-tx rounded-xl shadow-modal p-3 text-xs backdrop-blur-md"
+      className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 bg-surf border border-bdr2 text-tx rounded-xl shadow-modal p-3 text-xs"
     >
       <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-bdr">
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -516,7 +516,7 @@ function HeatmapRoomCell({
                   exit={{ opacity: 0, scale: 0.95, y: -4 }}
                   transition={{ duration: 0.14 }}
                   onClick={e => e.stopPropagation()}
-                  className="absolute right-0 top-full mt-1 z-50 w-36 rounded-xl bg-surf border border-bdr2 shadow-modal p-1 space-y-1 backdrop-blur-md"
+                  className="absolute right-0 top-full mt-1 z-50 w-36 rounded-xl bg-surf border border-bdr2 shadow-modal p-1 space-y-1"
                 >
                   <div className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-mu border-b border-bdr pb-0.5 mb-0.5">
                     Đổi công năng {roomLabel}

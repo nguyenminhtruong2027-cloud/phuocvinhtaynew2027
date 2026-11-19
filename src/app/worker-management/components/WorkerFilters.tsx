@@ -215,14 +215,33 @@ export default function WorkerFilters({ filters, onChange, workers }: Props) {
   const set = (key: keyof FilterState, val: string | boolean) =>
     onChange({ ...filters, [key]: val });
 
-  const { ktxNames } = useKtxStructure();
+  const { ktxNames, ktxGroups } = useKtxStructure();
   const ktxList = useMemo(() => {
     const set = new Set([...getUniqueKTX(workers), ...ktxNames]);
     return Array.from(set).sort(compareKtxNames);
   }, [workers, ktxNames]);
-  const buildingList = getUniqueBuildings(workers);
-  const roomList = getUniqueRooms(workers, filters.building || undefined);
-  const platoonList = getUniquePlatoons(workers);
+  const ktxScopedWorkers = useMemo(
+    () => (filters.ktx ? workers.filter(w => w.ktx === filters.ktx) : workers),
+    [workers, filters.ktx]
+  );
+  const buildingList = useMemo(() => {
+    const set = new Set(getUniqueBuildings(ktxScopedWorkers));
+    if (filters.ktx) {
+      ktxGroups.find(g => g.ktx === filters.ktx)?.days.forEach(d => {
+        if (d) set.add(d);
+      });
+    } else {
+      ktxGroups.forEach(g => g.days.forEach(d => {
+        if (d) set.add(d);
+      }));
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true, sensitivity: 'base' }));
+  }, [ktxScopedWorkers, ktxGroups, filters.ktx]);
+  const roomList = useMemo(
+    () => getUniqueRooms(ktxScopedWorkers, filters.building || undefined),
+    [ktxScopedWorkers, filters.building]
+  );
+  const platoonList = useMemo(() => getUniquePlatoons(workers), [workers]);
   const toTruongList = useMemo(() => getUniqueToTruongList(workers), [workers]);
 
   const hasActive =
@@ -271,7 +290,7 @@ export default function WorkerFilters({ filters, onChange, workers }: Props) {
           <label className="text-[11px] font-bold text-mu uppercase tracking-wider">KTX</label>
           <select
             value={filters.ktx}
-            onChange={e => set('ktx', e.target.value)}
+            onChange={e => onChange({ ...filters, ktx: e.target.value, building: '', room: '' })}
             className="bg-surf border border-bdr text-tx rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 w-full cursor-pointer"
           >
             <option value="">Tất cả KTX</option>
@@ -284,7 +303,7 @@ export default function WorkerFilters({ filters, onChange, workers }: Props) {
           <label className="text-[11px] font-bold text-mu uppercase tracking-wider">Dãy</label>
           <select
             value={filters.building}
-            onChange={e => { set('building', e.target.value); onChange({ ...filters, building: e.target.value, room: '' }); }}
+            onChange={e => onChange({ ...filters, building: e.target.value, room: '' })}
             className="bg-surf border border-bdr text-tx rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 w-full cursor-pointer"
           >
             <option value="">Tất cả dãy</option>
@@ -355,6 +374,7 @@ export default function WorkerFilters({ filters, onChange, workers }: Props) {
             <option value="">Tất cả</option>
             <option value="registered">🟢 Đã ĐK</option>
             <option value="unregistered">🟠 Chưa ĐK</option>
+            <option value="overdue">🔴 Quá hạn (&gt;7 ngày)</option>
           </select>
         </div>
 

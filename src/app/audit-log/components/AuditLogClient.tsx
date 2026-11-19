@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useAudit, AuditAction, AuditEntry } from '@/context/AuditContext';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
-import { Filter, Clock, User, Activity, Calendar, X, Download, ClipboardList, Shield } from 'lucide-react';
+import { Filter, Clock, User, Activity, Calendar, X, Download, ClipboardList, Shield, RefreshCw } from 'lucide-react';
 import { exportToExcel } from '@/lib/exportExcel';
 import { getVNDateString } from '@/lib/vnDate';
 import { toast } from 'sonner';
@@ -139,7 +139,7 @@ function parseFilterDate(dateStr: string, endOfDay = false): Date | null {
 }
 
 export default function AuditLogClient() {
-  const { logs, loading, fetchFilteredLogs } = useAudit();
+  const { logs, totalLogCount, loading, refetchLogs, fetchLogsPage, fetchFilteredLogs } = useAudit();
   const { isAdmin } = useAuth();
   const router = useRouter();
   const [filterAccount, setFilterAccount] = useState('');
@@ -149,8 +149,10 @@ export default function AuditLogClient() {
   const [filterDateTo, setFilterDateTo] = useState('');
   const [serverFilteredLogs, setServerFilteredLogs] = useState<AuditEntry[] | null>(null);
   const [searchingServer, setSearchingServer] = useState(false);
+  const [pagedEntries, setPagedEntries] = useState<AuditEntry[] | null>(null);
+  const [loadingPage, setLoadingPage] = useState(false);
   const [page, setPage] = useState(1);
-  const pageSize = 20;
+  const pageSize = 25;
 
   const hasActiveFilter = Boolean(filterAccount || filterAction || filterStaff || filterDateFrom || filterDateTo);
 
@@ -183,6 +185,33 @@ export default function AuditLogClient() {
     };
   }, [isAdmin, hasActiveFilter, filterAccount, filterAction, filterStaff, filterDateFrom, filterDateTo, fetchFilteredLogs]);
 
+  // Real DB pagination for unfiltered history beyond initial 500 cached logs
+  useEffect(() => {
+    if (!isAdmin || hasActiveFilter) {
+      setPagedEntries(null);
+      setLoadingPage(false);
+      return;
+    }
+    const endIdx = page * pageSize;
+    if (endIdx <= logs.length) {
+      setPagedEntries(null);
+      setLoadingPage(false);
+      return;
+    }
+    let active = true;
+    setLoadingPage(true);
+    fetchLogsPage(page, pageSize)
+      .then(({ entries }) => {
+        if (active) setPagedEntries(entries);
+      })
+      .finally(() => {
+        if (active) setLoadingPage(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isAdmin, hasActiveFilter, page, pageSize, logs.length, fetchLogsPage]);
+
   const uniqueAccounts = useMemo(() => [...new Set(logs.map(l => l.account))].sort(), [logs]);
 
   const filtered = useMemo(() => {
@@ -193,12 +222,10 @@ export default function AuditLogClient() {
     return source.filter(l => {
       if (filterAccount && l.account !== filterAccount) return false;
       if (filterAction && l.action !== filterAction) return false;
-      // Staff name/email search (partial match)
       if (filterStaff) {
         const staffLower = filterStaff.toLowerCase();
         if (!l.account.toLowerCase().includes(staffLower) && !l.detail.toLowerCase().includes(staffLower)) return false;
       }
-      // Date range filter
       if (fromDate || toDate) {
         const logDate = new Date(l.timestamp);
         if (!isNaN(logDate.getTime())) {
@@ -210,8 +237,12 @@ export default function AuditLogClient() {
     });
   }, [logs, serverFilteredLogs, hasActiveFilter, filterAccount, filterAction, filterStaff, filterDateFrom, filterDateTo]);
 
-  const totalPages = Math.ceil(filtered.length / pageSize);
-  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const effectiveTotal = hasActiveFilter ? filtered.length : Math.max(totalLogCount, logs.length);
+  const totalPages = Math.max(1, Math.ceil(effectiveTotal / pageSize));
+  const paginated = useMemo(() => {
+    if (!hasActiveFilter && pagedEntries !== null) return pagedEntries;
+    return filtered.slice((page - 1) * pageSize, page * pageSize);
+  }, [hasActiveFilter, pagedEntries, filtered, page, pageSize]);
 
   const clearFilters = () => {
     setFilterAccount('');
@@ -274,12 +305,22 @@ export default function AuditLogClient() {
           <CraftIconBadge icon={ClipboardList} badgeIcon={Shield} tone="blue" size="md" />
           <div>
             <h1 className="text-xl sm:text-2xl font-extrabold text-tx tracking-tight">Nhật Ký Hệ Thống</h1>
-            <p className="text-xs sm:text-sm text-mu mt-0.5">
-              {searchingServer ? 'Đang truy vấn lịch sử...' : `${filtered.length} bản ghi${hasActiveFilter ? ' (tra cứu toàn bộ lịch sử)' : ' gần nhất'} · Tất cả tài khoản Admin`}
+            <p className="text-xs sm:text-sm text-mu mt-0.5 font-tabular">
+              {searchingServer || loadingPage
+                ? 'Đang truy vấn lịch sử...'
+                : `${effectiveTotal.toLocaleString('vi-VN')} bản ghi${hasActiveFilter ? ' (tra cứu toàn bộ lịch sử)' : ' trên hệ thống'} · Tất cả tài khoản Admin`}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => refetchLogs()}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-bdr2 bg-surf text-tx text-xs font-semibold hover:bg-act transition-colors shadow-sm cursor-pointer"
+          >
+            <RefreshCw size={13} />
+            <span>Làm mới</span>
+          </button>
           <button
             type="button"
             onClick={handleExportLogs}
@@ -375,7 +416,7 @@ export default function AuditLogClient() {
       <div className="surface-elevated rounded-2xl overflow-hidden">
         <div className="overflow-x-auto scrollbar-thin">
           <table className="w-full text-sm min-w-[700px]">
-            <thead className="bg-act/95 backdrop-blur-md border-b border-bdr2 sticky top-0 z-10">
+            <thead className="bg-act border-b border-bdr2 sticky top-0 z-10">
               <tr>
                 <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-mu whitespace-nowrap">
                   <div className="flex items-center gap-1"><Clock size={12} />Thời gian (UTC+7)</div>
@@ -388,7 +429,13 @@ export default function AuditLogClient() {
               </tr>
             </thead>
             <tbody>
-              {paginated.length === 0 ? (
+              {loadingPage ? (
+                <tr>
+                  <td colSpan={4} className="px-4 py-12 text-center text-muted-foreground text-sm">
+                    Đang tải trang {page}...
+                  </td>
+                </tr>
+              ) : paginated.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="px-4 py-12 text-center text-muted-foreground text-sm">
                     Không có bản ghi nào
@@ -414,12 +461,12 @@ export default function AuditLogClient() {
           </table>
         </div>
         {totalPages > 1 && (
-          <div className="px-4 py-3 border-t border-border flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">{filtered.length} bản ghi</span>
+          <div className="px-4 py-3 border-t border-border flex items-center justify-between font-tabular">
+            <span className="text-xs text-muted-foreground">{effectiveTotal.toLocaleString('vi-VN')} bản ghi</span>
             <div className="flex items-center gap-1">
-              <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1} className="btn-ghost px-2 py-1 text-xs disabled:opacity-40">‹</button>
+              <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1} className="btn-ghost px-2 py-1 text-xs disabled:opacity-40 cursor-pointer">‹</button>
               <span className="text-xs text-muted-foreground px-2">{page} / {totalPages}</span>
-              <button onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages} className="btn-ghost px-2 py-1 text-xs disabled:opacity-40">›</button>
+              <button onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages} className="btn-ghost px-2 py-1 text-xs disabled:opacity-40 cursor-pointer">›</button>
             </div>
           </div>
         )}

@@ -18,6 +18,7 @@ import { useWorkers } from '@/context/WorkerContext';
 import { useSearchParams } from 'next/navigation';
 import { useKtxStructure } from '@/lib/ktxStructure';
 import { fetchRoomCapacities, getRoomCapacity, normalizeRoomLabel, RoomCapacityMap } from '@/lib/facilityCapacity';
+import { daysSinceVN } from '@/lib/vnDate';
 
 export interface FilterState {
   search: string;
@@ -1640,29 +1641,89 @@ export function WorkerManagementClient() {
     }
   }, [addLog, currentUser]);
 
-  // Handle URL filter params from dashboard / operational alerts / Command Palette
+  // Handle URL filter params from dashboard / operational alerts / Command Palette & URL reload
+  const lastSyncedQsRef = useRef<string | null>(null);
+  const urlHydratedRef = useRef(false);
+
   useEffect(() => {
+    const rawQs = searchParams?.toString() || '';
+    if (lastSyncedQsRef.current !== null && rawQs === lastSyncedQsRef.current) {
+      return;
+    }
+
     const filterParam = searchParams?.get('filter');
     const ktxParam = searchParams?.get('ktx');
+    const buildingParam = searchParams?.get('building');
+    const roomParam = searchParams?.get('room');
+    const platoonParam = searchParams?.get('platoon');
+    const toTruongParam = searchParams?.get('toTruong');
+    const provinceParam = searchParams?.get('province');
     const tamTruParam = searchParams?.get('tamTru');
     const searchParam = searchParams?.get('search');
-    if (filterParam || ktxParam || tamTruParam || searchParam !== null) {
-      setFilters(prev => ({
-        ...prev,
+    const pageParam = searchParams?.get('page');
+
+    const hasAnyFilterParam = Boolean(
+      filterParam ||
+      ktxParam ||
+      buildingParam ||
+      roomParam ||
+      platoonParam ||
+      toTruongParam ||
+      provinceParam ||
+      tamTruParam ||
+      searchParam ||
+      pageParam
+    );
+
+    if (hasAnyFilterParam || urlHydratedRef.current) {
+      setFilters({
+        ...DEFAULT_FILTERS,
         ...(filterParam === 'missing_room' || filterParam === 'no_room'
           ? { profileStatus: 'no_room' }
           : filterParam === 'missing_cccd_sdt' || filterParam === 'full'
           ? { profileStatus: filterParam }
           : {}),
         ...(ktxParam ? { ktx: ktxParam } : {}),
-        ...(tamTruParam === 'registered' || tamTruParam === 'unregistered'
+        ...(buildingParam ? { building: buildingParam } : {}),
+        ...(roomParam ? { room: roomParam } : {}),
+        ...(platoonParam ? { platoon: platoonParam } : {}),
+        ...(toTruongParam ? { toTruong: toTruongParam } : {}),
+        ...(provinceParam ? { province: provinceParam } : {}),
+        ...(tamTruParam === 'registered' || tamTruParam === 'unregistered' || tamTruParam === 'overdue'
           ? { tamTruStatus: tamTruParam }
           : {}),
         ...(searchParam ? { search: searchParam } : {}),
-      }));
-      setPage(1);
+      });
+      const parsedPage = pageParam ? parseInt(pageParam, 10) : 1;
+      setPage(Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1);
     }
+    urlHydratedRef.current = true;
+    lastSyncedQsRef.current = rawQs;
   }, [searchParams]);
+
+  // Sync current filters & page back to URL cleanly without triggering Next navigation reload
+  useEffect(() => {
+    if (!urlHydratedRef.current || typeof window === 'undefined') return;
+    const params = new URLSearchParams();
+    const viewParam = searchParams?.get('view');
+    if (viewParam) params.set('view', viewParam);
+    if (filters.search) params.set('search', filters.search);
+    if (filters.ktx) params.set('ktx', filters.ktx);
+    if (filters.building) params.set('building', filters.building);
+    if (filters.room) params.set('room', filters.room);
+    if (filters.platoon) params.set('platoon', filters.platoon);
+    if (filters.profileStatus) params.set('filter', filters.profileStatus);
+    if (filters.toTruong) params.set('toTruong', filters.toTruong);
+    if (filters.province) params.set('province', filters.province);
+    if (filters.tamTruStatus) params.set('tamTru', filters.tamTruStatus);
+    if (page > 1) params.set('page', String(page));
+
+    const nextQs = params.toString();
+    if (nextQs === lastSyncedQsRef.current) return;
+    lastSyncedQsRef.current = nextQs;
+    const nextUrl = nextQs ? `${window.location.pathname}?${nextQs}` : window.location.pathname;
+    window.history.replaceState(null, '', nextUrl);
+  }, [filters, page, searchParams]);
 
   // Open WorkerDetailModal directly once per ?view=workerId param from CommandPalette
   const lastHandledViewRef = useRef<string | null>(null);
@@ -1729,7 +1790,16 @@ export function WorkerManagementClient() {
       const targetProv = removeAccents(filters.province);
       list = list.filter(w => removeAccents(w.hoKhauTinh || '').includes(targetProv));
     }
-    if (filters.tamTruStatus) list = list.filter(w => (w.tamTruStatus || 'unregistered') === filters.tamTruStatus);
+    if (filters.tamTruStatus === 'overdue') {
+      list = list.filter(w => {
+        if ((w.tamTruStatus || 'unregistered') === 'registered') return false;
+        if (w.ngayRaKTX || w.ghiChu?.includes('[Đã Check-out') || w.ghiChu?.includes('[CHECKOUT]')) return false;
+        const days = daysSinceVN(w.ngayVaoKTX || w.createdAt);
+        return days !== null && days > 7;
+      });
+    } else if (filters.tamTruStatus) {
+      list = list.filter(w => (w.tamTruStatus || 'unregistered') === filters.tamTruStatus);
+    }
     list.sort((a, b) => {
       if (sortKey === 'stt') {
         const cmp = Number(a.stt ?? 0) - Number(b.stt ?? 0);

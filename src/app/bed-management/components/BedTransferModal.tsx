@@ -5,7 +5,11 @@ import { motion } from 'motion/react';
 import { X, Loader2, CheckCircle2, AlertCircle, ArrowRightLeft } from 'lucide-react';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/context/AuthContext';
+import { useAudit } from '@/context/AuditContext';
 import { compareKtxNames } from '@/data/workers';
+import { loadSavedRoomGenderMap, normalizeGender } from '@/lib/roomGender';
+import { normalizeRoomLabel } from '@/lib/facilityCapacity';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { MonoChip } from '@/components/ui/StatusTag';
 
@@ -38,12 +42,16 @@ interface Props {
 const PAGE = 1000;
 
 export default function BedTransferModal({ open, onClose, workerId, sourceBed, onTransferred }: Props) {
+  const { isAdmin, canWriteBlock, currentUser } = useAuth();
+  const { addLog } = useAudit();
   const [beds, setBeds] = useState<TransferBed[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [workerName, setWorkerName] = useState('');
   const [maNv, setMaNv] = useState('');
+  const [workerGender, setWorkerGender] = useState('');
+  const [roomGenderNote, setRoomGenderNote] = useState('');
   const [selKtx, setSelKtx] = useState('');
   const [selDay, setSelDay] = useState('');
   const [selRoom, setSelRoom] = useState('');
@@ -101,12 +109,13 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
     try {
       const { data } = await supabase
         .from('workers')
-        .select('ho_va_ten, ma_nv')
+        .select('ho_va_ten, ma_nv, gioi_tinh')
         .eq('id', workerId)
         .maybeSingle();
       if (data) {
         setWorkerName(String(data?.ho_va_ten ?? ''));
         setMaNv(String(data?.ma_nv ?? ''));
+        setWorkerGender(String(data?.gioi_tinh ?? ''));
       }
     } catch (err) {
       console.warn('[bed-transfer] load worker failed:', err);
@@ -116,14 +125,64 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
   useEffect(() => {
     if (!open) return;
     setSelKtx(''); setSelDay(''); setSelRoom(''); setSelBed('');
+    setRoomGenderNote('');
     loadBeds();
     loadWorker();
   }, [open, loadBeds, loadWorker]);
 
-  // Chỉ giường TRỐNG (không trùng giường cũ)
+  // Check gender consistency when target room is chosen
+  useEffect(() => {
+    if (!selKtx || !selDay || !selRoom) {
+      setRoomGenderNote('');
+      return;
+    }
+    const g = normalizeGender(workerGender);
+    if (g !== 'nam' && g !== 'nu') {
+      setRoomGenderNote('');
+      return;
+    }
+    const normRoom = normalizeRoomLabel(selRoom);
+    const saved = loadSavedRoomGenderMap()[`${selKtx.trim()}||${selDay.trim()}||${normRoom}`];
+    if (saved === 'male' && g === 'nu') {
+      setRoomGenderNote(`Lưu ý: Phòng ${normRoom} được đánh dấu Phòng Nam (khác giới tính Nữ).`);
+      return;
+    }
+    if (saved === 'female' && g === 'nam') {
+      setRoomGenderNote(`Lưu ý: Phòng ${normRoom} được đánh dấu Phòng Nữ (khác giới tính Nam).`);
+      return;
+    }
+    let active = true;
+    supabase
+      .from('workers')
+      .select('gioi_tinh')
+      .eq('ktx', selKtx)
+      .eq('day', selDay)
+      .eq('phong_so', selRoom)
+      .then(({ data }) => {
+        if (!active || !data) return;
+        const opp = data.filter(w => {
+          const wg = normalizeGender((w as any).gioi_tinh);
+          return (wg === 'nam' || wg === 'nu') && wg !== g;
+        }).length;
+        if (opp > 0) {
+          setRoomGenderNote(`Lưu ý: Phòng ${normRoom} đang có ${opp} người ${g === 'nam' ? 'Nữ' : 'Nam'}.`);
+        } else {
+          setRoomGenderNote('');
+        }
+      });
+    return () => { active = false; };
+  }, [selKtx, selDay, selRoom, workerGender, supabase]);
+
+  // Chỉ giường TRỐNG thuộc phạm vi được phép (Admin: tất cả; Staff: block phụ trách)
   const emptyBeds = useMemo(
-    () => (beds || []).filter(b => b.status === 'empty' && (!sourceBed || b.id !== sourceBed.id)),
-    [beds, sourceBed]
+    () =>
+      (beds || []).filter(
+        b =>
+          b.status === 'empty' &&
+          (!sourceBed || b.id !== sourceBed.id) &&
+          (isAdmin || canWriteBlock(b.day, b.ktx))
+      ),
+    [beds, sourceBed, isAdmin, canWriteBlock]
   );
   const ktxList = useMemo(() => [...new Set(emptyBeds.map(b => b.ktx))].sort(compareKtxNames), [emptyBeds]);
   const dayList = useMemo(
@@ -154,10 +213,26 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
       setError('Vui lòng chọn giường mới (chỉ giường trống).');
       return;
     }
+    if (!isAdmin && (!canWriteBlock(sourceBed.day, sourceBed.ktx) || !canWriteBlock(target.day, target.ktx))) {
+      setError('Bạn không có quyền chuyển giường ngoài phạm vi dãy phụ trách.');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
-      // 1) workers → vị trí mới (trigger tự đồng bộ beds; explicit underneath để chắc chắn)
+      // 0) Live race-condition guard: verify target bed is still empty right before transfer
+      const { data: liveTarget } = await supabase
+        .from('beds')
+        .select('status')
+        .eq('id', target.id)
+        .maybeSingle();
+      if (liveTarget && liveTarget.status !== 'empty') {
+        setError('Giường đích vừa được người khác gán hoặc chuyển bảo trì. Đang tải lại danh sách...');
+        loadBeds();
+        return;
+      }
+
+      // 1) workers → vị trí mới
       const { error: workerErr } = await supabase
         .from('workers')
         .update({ ktx: target.ktx, day: target.day, phong_so: target.phong_so, giuong: target.giuong })
@@ -184,29 +259,22 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
         console.warn('[bed-transfer] occupy new bed failed:', err);
       }
 
-      // 4) Audit log
-      try {
-        const logId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `log-${Date.now()}`;
-        await supabase.from('audit_logs').insert({
-          id: logId,
-          timestamp: new Date().toISOString(),
-          account: workerName || maNv || 'Quản lý giường',
-          action: 'BED_REASSIGN',
-          detail: JSON.stringify({
-            worker_id: workerId,
-            ma_nv: maNv || '',
-            ho_va_ten: workerName || '',
-            from: { ktx: sourceBed.ktx, day: sourceBed.day, phong_so: sourceBed.phong_so, giuong: sourceBed.giuong },
-            to: { ktx: target.ktx, day: target.day, phong_so: target.phong_so, giuong: target.giuong },
-            at: new Date().toISOString(),
-          }),
-        });
-      } catch (logErr) {
-        console.warn('[bed-transfer] audit log failed:', logErr);
-      }
+      // 4) Audit log via AuditContext with real operator account
+      addLog(
+        currentUser?.email || currentUser?.name || 'system',
+        'BED_REASSIGN',
+        JSON.stringify({
+          worker_id: workerId,
+          ma_nv: maNv || '',
+          ho_va_ten: workerName || '',
+          from: { ktx: sourceBed.ktx, day: sourceBed.day, phong_so: sourceBed.phong_so, giuong: sourceBed.giuong },
+          to: { ktx: target.ktx, day: target.day, phong_so: target.phong_so, giuong: target.giuong },
+          at: new Date().toISOString(),
+        })
+      );
 
       toast.success(
-        `✅ Đã chuyển công nhân sang KTX ${target.ktx} - Dãy ${target.day} - Phòng ${target.phong_so} - Giường G${target.giuong} thành công!`
+        `Đã chuyển công nhân sang ${target.ktx} · ${target.day} · Phòng ${target.phong_so} · Giường G${target.giuong}!`
       );
       onTransferred?.();
       onClose();
@@ -216,7 +284,7 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
     } finally {
       setBusy(false);
     }
-  }, [workerId, sourceBed, bedList, selBed, supabase, maNv, workerName, onTransferred, onClose]);
+  }, [workerId, sourceBed, bedList, selBed, isAdmin, canWriteBlock, supabase, loadBeds, maNv, workerName, currentUser, addLog, onTransferred, onClose]);
 
   if (!open) return null;
 
@@ -311,6 +379,13 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
                     </select>
                   </div>
                 </div>
+
+                {roomGenderNote && (
+                  <div className="rounded-xl border border-wn/40 tint-wn p-2.5 text-xs font-medium text-wn flex items-center gap-2">
+                    <AlertCircle size={14} className="shrink-0" />
+                    <span>{roomGenderNote}</span>
+                  </div>
+                )}
 
                 <button
                   type="button"

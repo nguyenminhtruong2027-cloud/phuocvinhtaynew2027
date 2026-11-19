@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/client';
-import { normalizeRoomLabel, buildRoomKey } from '@/lib/facilityCapacity';
+import { normalizeRoomLabel, buildRoomKey, fetchFacilitiesList, FacilityItem } from '@/lib/facilityCapacity';
 import { normalizeBedLabel } from '@/lib/bedSync';
 
 export interface WorkerRef {
@@ -12,6 +12,7 @@ export interface WorkerRef {
   phongSo: string;
   donVi: string;
   giuong?: string;
+  gioiTinh?: string;
 }
 
 export interface RoomBedAvailability {
@@ -31,14 +32,16 @@ export interface WorkerHierarchyData {
   workers: WorkerRef[];
 }
 
-// In-memory cache to prevent multiple round-trips when switching views
+// In-memory cache & inflight deduplication to prevent redundant round-trips
 let cachedData: WorkerHierarchyData | null = null;
 let lastFetchTime = 0;
+let _inflightHierarchy: Promise<WorkerHierarchyData> | null = null;
 const CACHE_TTL_MS = 15000; // 15s
 
 export function invalidateWorkerHierarchyCache(): void {
   cachedData = null;
   lastFetchTime = 0;
+  _inflightHierarchy = null;
 }
 
 /** Natural sort comparator for Vietnamese text and numbers (e.g. "KTX 1" < "KTX 2", "Dãy 2" < "Dãy 10") */
@@ -52,52 +55,13 @@ function isIgnoredKtxLabel(raw: string): boolean {
 }
 
 /**
- * Hợp nhất cây phân cấp KTX / Dãy / Phòng từ:
- * 1. Bảng `facilities` (ưu tiên phòng ở & hiển thị trên sơ đồ — bao gồm cả KTX/phòng mới chưa có người ở)
- * 2. Bảng `workers` (đơn vị công tác + các phòng đang có công nhân cư trú)
+ * Pure synchronous builder: builds WorkerHierarchyData from already-loaded workers + facilities
+ * (zero extra Supabase round-trips when WorkerContext + facilityCapacity are already hydrated).
  */
-export async function fetchWorkerHierarchy(forceRefresh = false): Promise<WorkerHierarchyData> {
-  const now = Date.now();
-  if (!forceRefresh && cachedData && now - lastFetchTime < CACHE_TTL_MS) {
-    return cachedData;
-  }
-
-  const supabase = createClient();
-  const allRows: WorkerRef[] = [];
-  let from = 0;
-  const PAGE_SIZE = 1000;
-
-  try {
-    while (true) {
-      const { data, error } = await supabase
-        .from('workers')
-        .select('ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, don_vi')
-        .order('id', { ascending: true })
-        .range(from, from + PAGE_SIZE - 1);
-
-      if (error || !data || data.length === 0) break;
-
-      for (const r of data) {
-        allRows.push({
-          hoVaTen: String(r.ho_va_ten || '').trim(),
-          maNV: String(r.ma_nv || '').trim(),
-          cccd: String(r.cccd || '').trim(),
-          soDienThoai: String(r.so_dien_thoai || '').trim(),
-          ktx: String(r.ktx || '').trim(),
-          day: String(r.day || '').trim(),
-          phongSo: String(r.phong_so || '').trim(),
-          giuong: String(r.giuong || '').trim(),
-          donVi: String(r.don_vi || '').trim(),
-        });
-      }
-
-      if (data.length < PAGE_SIZE) break;
-      from += PAGE_SIZE;
-    }
-  } catch (err) {
-    console.error('Error fetching workers for hierarchy:', err);
-  }
-
+export function buildWorkerHierarchyFromWorkers(
+  workerRows: WorkerRef[],
+  facilities: FacilityItem[] = []
+): WorkerHierarchyData {
   const ktxSet = new Set<string>();
   const daysByKtxSet: Record<string, Set<string>> = {};
   const roomsByKtxDaySet: Record<string, Set<string>> = {};
@@ -121,45 +85,25 @@ export async function fetchWorkerHierarchy(forceRefresh = false): Promise<Worker
     }
   };
 
-  // Merge active accommodation rooms from `facilities` so newly added KTX/rooms appear immediately
-  try {
-    let fFrom = 0;
-    for (let page = 0; page < 20; page++) {
-      const { data: facRows, error: facErr } = await supabase
-        .from('facilities')
-        .select('ktx, day, phong_khu_vuc, giuong, room_type, is_visible')
-        .order('id', { ascending: true })
-        .range(fFrom, fFrom + PAGE_SIZE - 1);
-
-      if (facErr || !facRows || facRows.length === 0) break;
-
-      for (const row of facRows) {
-        const roomType = (row as any)?.room_type || 'accommodation';
-        const isVisible = (row as any)?.is_visible !== false;
-        if (roomType === 'functional' || !isVisible) continue;
-        const ktx = String((row as any)?.ktx || '').trim();
-        const day = String((row as any)?.day || '').trim();
-        const room = String((row as any)?.phong_khu_vuc || '').trim();
-        addLocation(ktx, day, room);
-        const cap = Number((row as any)?.giuong ?? 0);
-        if (ktx && day && room && Number.isFinite(cap) && cap > 0) {
-          roomCapacities[buildRoomKey(ktx, day, room)] = cap;
-        }
-      }
-
-      if (facRows.length < PAGE_SIZE) break;
-      fFrom += PAGE_SIZE;
+  for (const row of facilities) {
+    const roomType = row?.room_type || 'accommodation';
+    const isVisible = row?.is_visible !== false;
+    if (roomType === 'functional' || !isVisible) continue;
+    const ktx = String(row?.ktx || '').trim();
+    const day = String(row?.day || '').trim();
+    const room = String(row?.phong_khu_vuc || '').trim();
+    addLocation(ktx, day, room);
+    const cap = Number(row?.giuong ?? 0);
+    if (ktx && day && room && Number.isFinite(cap) && cap > 0) {
+      roomCapacities[buildRoomKey(ktx, day, room)] = cap;
     }
-  } catch (err) {
-    console.warn('[workerHierarchy] facilities merge fallback:', err);
   }
 
-  for (const w of allRows) {
+  for (const w of workerRows) {
     if (w.donVi) rawUnitsSet.add(w.donVi);
     addLocation(w.ktx, w.day, w.phongSo);
   }
 
-  // Deduplicate units case-insensitively while preserving nice casing
   const unitMap = new Map<string, string>();
   rawUnitsSet.forEach(u => {
     const lower = u.toLowerCase();
@@ -181,18 +125,84 @@ export async function fetchWorkerHierarchy(forceRefresh = false): Promise<Worker
     roomsByKtxDay[kdKey] = Array.from(roomsByKtxDaySet[kdKey] || []).sort(naturalCompare);
   }
 
-  const result: WorkerHierarchyData = {
+  return {
     units,
     ktxList,
     daysByKtx,
     roomsByKtxDay,
     roomCapacities,
-    workers: allRows,
+    workers: workerRows,
   };
+}
 
-  cachedData = result;
-  lastFetchTime = now;
-  return result;
+/**
+ * Hợp nhất cây phân cấp KTX / Dãy / Phòng từ bảng `facilities` (cached) và `workers`.
+ */
+export async function fetchWorkerHierarchy(forceRefresh = false): Promise<WorkerHierarchyData> {
+  const now = Date.now();
+  if (!forceRefresh && cachedData && now - lastFetchTime < CACHE_TTL_MS) {
+    return cachedData;
+  }
+  if (!forceRefresh && _inflightHierarchy) {
+    return _inflightHierarchy;
+  }
+
+  _inflightHierarchy = (async () => {
+    const supabase = createClient();
+    const PAGE_SIZE = 1000;
+
+    const loadWorkers = async (): Promise<WorkerRef[]> => {
+      const allRows: WorkerRef[] = [];
+      let from = 0;
+      try {
+        while (true) {
+          const { data, error } = await supabase
+            .from('workers')
+            .select('ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, don_vi, gioi_tinh')
+            .order('id', { ascending: true })
+            .range(from, from + PAGE_SIZE - 1);
+
+          if (error || !data || data.length === 0) break;
+
+          for (const r of data) {
+            allRows.push({
+              hoVaTen: String(r.ho_va_ten || '').trim(),
+              maNV: String(r.ma_nv || '').trim(),
+              cccd: String(r.cccd || '').trim(),
+              soDienThoai: String(r.so_dien_thoai || '').trim(),
+              ktx: String(r.ktx || '').trim(),
+              day: String(r.day || '').trim(),
+              phongSo: String(r.phong_so || '').trim(),
+              giuong: String(r.giuong || '').trim(),
+              donVi: String(r.don_vi || '').trim(),
+              gioiTinh: String((r as any).gioi_tinh || '').trim(),
+            });
+          }
+
+          if (data.length < PAGE_SIZE) break;
+          from += PAGE_SIZE;
+        }
+      } catch (err) {
+        console.error('Error fetching workers for hierarchy:', err);
+      }
+      return allRows;
+    };
+
+    try {
+      const [allRows, facRows] = await Promise.all([
+        loadWorkers(),
+        fetchFacilitiesList(forceRefresh),
+      ]);
+      const result = buildWorkerHierarchyFromWorkers(allRows, facRows);
+      cachedData = result;
+      lastFetchTime = Date.now();
+      return result;
+    } finally {
+      _inflightHierarchy = null;
+    }
+  })();
+
+  return _inflightHierarchy;
 }
 
 /**
