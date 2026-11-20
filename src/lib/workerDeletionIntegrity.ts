@@ -584,3 +584,323 @@ export async function fetchAuthoritativeDeletedTombstones(
 
   return inflightAuthoritativeFetch;
 }
+
+// ─── Hard-delete integrity & tombstone protection for `worker_registrations` ──
+
+const REG_TOMBSTONE_STORAGE_KEY = 'ktx_hard_deleted_registration_tombstones_v1';
+const REG_TOMBSTONE_CHANNEL_NAME = 'ktx_registration_tombstones_channel';
+const REG_TOMBSTONE_TTL_MS = 24 * 60 * 60 * 1000;
+
+const memoryRegTombstones = new Map<string, number>();
+let rpcRegDeleteAvailable: boolean | null = null;
+let rpcRegTombstonesAvailable: boolean | null = null;
+let cachedRegTombstones: Map<string, number> | null = null;
+let cachedRegTombstonesAt = 0;
+let inflightRegTombstoneFetch: Promise<Map<string, number>> | null = null;
+
+export interface RegistrationDeletionTarget {
+  id: string;
+  worker_id?: string | null;
+  ho_va_ten?: string | null;
+  ma_nv?: string | null;
+  so_cccd?: string | null;
+  ktx?: string | null;
+  day?: string | null;
+  phong_so?: string | null;
+  giuong?: string | null;
+  ghi_chu?: string | null;
+}
+
+export function getLocalDeletedRegistrationTombstones(): Map<string, number> {
+  const now = Date.now();
+  pruneTombstoneMap(memoryRegTombstones, now);
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = window.localStorage.getItem(REG_TOMBSTONE_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, number>;
+        if (parsed && typeof parsed === 'object') {
+          for (const [id, ts] of Object.entries(parsed)) {
+            if (id && typeof ts === 'number' && now - ts <= REG_TOMBSTONE_TTL_MS) {
+              const existing = memoryRegTombstones.get(id) ?? 0;
+              if (ts > existing) memoryRegTombstones.set(id, ts);
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignore malformed storage JSON
+    }
+  }
+  return new Map(memoryRegTombstones);
+}
+
+export function recordLocalDeletedRegistrationTombstones(ids: string[], deletedAtMs = Date.now()): void {
+  const cleanIds = Array.from(new Set(ids.map(id => String(id || '').trim()).filter(Boolean)));
+  if (cleanIds.length === 0) return;
+
+  const merged = getLocalDeletedRegistrationTombstones();
+  cleanIds.forEach(id => {
+    const nextTs = Math.max(merged.get(id) ?? 0, deletedAtMs);
+    merged.set(id, nextTs);
+    memoryRegTombstones.set(id, nextTs);
+    if (cachedRegTombstones) {
+      cachedRegTombstones.set(id, Math.max(cachedRegTombstones.get(id) ?? 0, nextTs));
+    }
+  });
+  pruneTombstoneMap(merged, Date.now());
+
+  if (typeof window !== 'undefined') {
+    try {
+      const obj: Record<string, number> = {};
+      merged.forEach((ts, id) => {
+        obj[id] = ts;
+      });
+      window.localStorage.setItem(REG_TOMBSTONE_STORAGE_KEY, JSON.stringify(obj));
+    } catch {
+      // Ignore storage quota errors
+    }
+
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const ch = new BroadcastChannel(REG_TOMBSTONE_CHANNEL_NAME);
+        ch.postMessage({ type: 'REGISTRATION_HARD_DELETE', ids: cleanIds, deletedAtMs });
+        ch.close();
+      }
+    } catch {
+      // Ignore BroadcastChannel errors
+    }
+  }
+}
+
+export function isRegistrationTombstoned(
+  registrationId?: string | null,
+  createdAtIso?: string | null,
+  tombstones?: Map<string, number>
+): boolean {
+  const id = String(registrationId || '').trim();
+  if (!id) return false;
+  const map = tombstones ?? getLocalDeletedRegistrationTombstones();
+  const tombstoneAt = map.get(id);
+  if (!tombstoneAt) return false;
+  if (createdAtIso) {
+    const createdMs = new Date(createdAtIso).getTime();
+    if (!Number.isNaN(createdMs)) {
+      return tombstoneAt >= createdMs - 1000;
+    }
+  }
+  return true;
+}
+
+export async function fetchAuthoritativeDeletedRegistrationTombstones(
+  supabase: SupabaseClient,
+  sinceHours = 48,
+  forceRefresh = false
+): Promise<Map<string, number>> {
+  const now = Date.now();
+  if (!forceRefresh && cachedRegTombstones && now - cachedRegTombstonesAt < AUTHORITATIVE_CACHE_TTL_MS) {
+    const merged = getLocalDeletedRegistrationTombstones();
+    cachedRegTombstones.forEach((ts, id) => {
+      merged.set(id, Math.max(merged.get(id) ?? 0, ts));
+    });
+    return merged;
+  }
+
+  if (!forceRefresh && inflightRegTombstoneFetch) {
+    return inflightRegTombstoneFetch;
+  }
+
+  inflightRegTombstoneFetch = (async () => {
+    const merged = getLocalDeletedRegistrationTombstones();
+    const sinceIso = new Date(Date.now() - sinceHours * 60 * 60 * 1000).toISOString();
+
+    if (rpcRegTombstonesAvailable !== false) {
+      try {
+        const { data, error } = await supabase.rpc('get_deleted_registration_tombstones', {
+          p_since: sinceIso,
+        });
+        if (!error && Array.isArray(data)) {
+          rpcRegTombstonesAvailable = true;
+          data.forEach((row: { registration_id?: string; deleted_at?: string }) => {
+            const rid = String(row?.registration_id || '').trim();
+            const ts = row?.deleted_at ? new Date(row.deleted_at).getTime() : Date.now();
+            if (rid && !Number.isNaN(ts)) {
+              merged.set(rid, Math.max(merged.get(rid) ?? 0, ts));
+            }
+          });
+          cachedRegTombstones = new Map(merged);
+          cachedRegTombstonesAt = Date.now();
+          return merged;
+        }
+        if (error && isMissingRpcError(error)) {
+          rpcRegTombstonesAvailable = false;
+        }
+      } catch {
+        // Fallback to direct audit_logs query
+      }
+    }
+
+    try {
+      const { data: auditRows } = await supabase
+        .from('audit_logs')
+        .select('timestamp, detail')
+        .eq('action', 'REGISTRATION_HARD_DELETE')
+        .gte('timestamp', sinceIso)
+        .order('timestamp', { ascending: false })
+        .limit(200);
+
+      (auditRows || []).forEach((row: { timestamp?: string; detail?: string }) => {
+        try {
+          const raw = String(row?.detail || '').trim();
+          if (!raw.startsWith('{')) return;
+          const parsed = JSON.parse(raw);
+          const rid = String(parsed?.registration_id || '').trim();
+          const ts = row?.timestamp ? new Date(row.timestamp).getTime() : Date.now();
+          if (rid && !Number.isNaN(ts)) {
+            merged.set(rid, Math.max(merged.get(rid) ?? 0, ts));
+          }
+        } catch {
+          // Ignore malformed JSON
+        }
+      });
+    } catch {
+      // Preserve local tombstones
+    }
+
+    cachedRegTombstones = new Map(merged);
+    cachedRegTombstonesAt = Date.now();
+    return merged;
+  })().finally(() => {
+    inflightRegTombstoneFetch = null;
+  });
+
+  return inflightRegTombstoneFetch;
+}
+
+/**
+ * Hard-deletes a record from `worker_registrations`, verifies 0 surviving rows in Postgres
+ * (preventing silent RLS 0-row deletions), writes REGISTRATION_HARD_DELETE audit log,
+ * and records tombstones so stale syncs cannot restore the row.
+ */
+export async function hardDeleteWorkerRegistration(
+  supabase: SupabaseClient,
+  params: {
+    registration: RegistrationDeletionTarget;
+    account: string;
+    sourceContext: string;
+  }
+): Promise<{ deletedId: string; verifiedClean: boolean }> {
+  const reg = params.registration;
+  const regId = String(reg?.id || '').trim();
+  if (!regId) {
+    throw new Error('Thiếu ID bản ghi worker_registrations cần xóa.');
+  }
+
+  let usedRpc = false;
+  let deletedViaClient = false;
+
+  if (rpcRegDeleteAvailable !== false) {
+    try {
+      const { data, error } = await supabase.rpc('hard_delete_worker_registration', {
+        p_registration_id: regId,
+      });
+      if (!error && data) {
+        rpcRegDeleteAvailable = true;
+        usedRpc = true;
+      } else if (error && isMissingRpcError(error)) {
+        rpcRegDeleteAvailable = false;
+      } else if (error) {
+        throw new Error(error.message || 'Không thể xóa bản ghi khỏi worker_registrations qua RPC.');
+      }
+    } catch (rpcEx: any) {
+      if (rpcRegDeleteAvailable !== false) {
+        throw rpcEx;
+      }
+    }
+  }
+
+  if (!usedRpc) {
+    const { data: deletedRows, error: delErr } = await supabase
+      .from('worker_registrations')
+      .delete()
+      .eq('id', regId)
+      .select('id');
+
+    if (delErr) {
+      throw new Error(`Không thể xóa bản ghi trong worker_registrations: ${delErr.message}`);
+    }
+    deletedViaClient = Array.isArray(deletedRows) && deletedRows.some((r: { id?: string }) => String(r?.id) === regId);
+
+    // Strict Postgres verification: catches silent RLS rejections where error is null but 0 rows were deleted
+    const { data: survivor, error: verifyErr } = await supabase
+      .from('worker_registrations')
+      .select('id')
+      .eq('id', regId)
+      .maybeSingle();
+
+    if (verifyErr) {
+      throw new Error(`Không thể xác minh trạng thái xóa bản ghi worker_registrations: ${verifyErr.message}`);
+    }
+    if (survivor?.id) {
+      throw new Error(
+        `Không thể xóa triệt để bản ghi của "${reg.ho_va_ten || regId}" khỏi bảng worker_registrations (kiểm tra quyền RLS tại ${reg.ktx || 'KTX'} - ${reg.day || 'Dãy'}).`
+      );
+    }
+  }
+
+  const nowMs = Date.now();
+  recordLocalDeletedRegistrationTombstones([regId], nowMs);
+
+  // Ensure audit trail if DB trigger hasn't already recorded REGISTRATION_HARD_DELETE
+  try {
+    let alreadyAudited = false;
+    if (!deletedViaClient && usedRpc) {
+      const recentSince = new Date(nowMs - 20_000).toISOString();
+      const { data: recentAudit } = await supabase
+        .from('audit_logs')
+        .select('detail')
+        .eq('action', 'REGISTRATION_HARD_DELETE')
+        .gte('timestamp', recentSince)
+        .order('timestamp', { ascending: false })
+        .limit(20);
+      alreadyAudited = (recentAudit || []).some((r: { detail?: string }) => {
+        try {
+          const parsed = JSON.parse(String(r?.detail || '{}'));
+          return String(parsed?.registration_id || '') === regId;
+        } catch {
+          return false;
+        }
+      });
+    }
+
+    if (!alreadyAudited) {
+      const nowIso = new Date().toISOString();
+      await supabase.from('audit_logs').insert({
+        timestamp: nowIso,
+        account: params.account || 'system',
+        action: 'REGISTRATION_HARD_DELETE',
+        detail: JSON.stringify({
+          event: 'REGISTRATION_HARD_DELETE',
+          registration_id: regId,
+          worker_id: reg.worker_id || '',
+          ho_va_ten: reg.ho_va_ten || '',
+          ma_nv: reg.ma_nv || '',
+          so_cccd: reg.so_cccd || '',
+          ktx: reg.ktx || '',
+          day: reg.day || '',
+          phong_so: reg.phong_so || '',
+          giuong: reg.giuong || '',
+          is_checkout: String(reg.ghi_chu || '').startsWith('[CHECKOUT]'),
+          source: params.sourceContext,
+          deleted_at: nowIso,
+          integrity_verified: true,
+        }),
+      });
+    }
+  } catch {
+    // Non-fatal audit fallback
+  }
+
+  return { deletedId: regId, verifiedClean: true };
+}
+

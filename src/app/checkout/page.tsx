@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
-import { useKtxStructure } from '@/lib/ktxStructure';
+import { useKtxStructure, normalizeKtxLabel, normalizeDayLabel } from '@/lib/ktxStructure';
 import { fetchWorkerHierarchy, naturalCompare } from '@/lib/workerHierarchy';
 import {
   LogOut,
@@ -36,6 +36,31 @@ interface RoomResident {
   giuong?: string;
   don_vi?: string;
   ngay_ra_ktx?: string;
+}
+
+const SLOW_OP_THRESHOLD_MS = 1000;
+
+function checkoutLog(
+  level: 'info' | 'warn' | 'error',
+  stage: string,
+  detail: Record<string, unknown>,
+  durationMs?: number
+) {
+  const ts = new Date().toISOString().split('T')[1]?.replace('Z', '') || '';
+  const payload = durationMs !== undefined ? { ...detail, durationMs: Number(durationMs.toFixed(1)) } : detail;
+  const prefix = `[Checkout][${ts}][${stage}]`;
+  if (level === 'error') {
+    console.error(prefix, payload);
+  } else if (level === 'warn' || (durationMs !== undefined && durationMs >= SLOW_OP_THRESHOLD_MS)) {
+    console.warn(
+      durationMs !== undefined && durationMs >= SLOW_OP_THRESHOLD_MS
+        ? `${prefix} SLOW_OPERATION (${durationMs.toFixed(1)}ms)`
+        : prefix,
+      payload
+    );
+  } else {
+    console.info(prefix, payload);
+  }
 }
 
 export default function CheckoutPage() {
@@ -85,7 +110,9 @@ export default function CheckoutPage() {
     ghi_chu: '',
   });
 
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
+  const rpcLookupResidentsSupportedRef = useRef<boolean | null>(null);
+  const residentReqSeqRef = useRef(0);
 
   // Load hierarchy and initialize today's date
   useEffect(() => {
@@ -96,19 +123,42 @@ export default function CheckoutPage() {
     }));
 
     let active = true;
+    const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    checkoutLog('info', 'initHierarchy:start', { ktxNamesFromHook: ktxNames.length });
+
     fetchWorkerHierarchy(false).then(data => {
-      if (!active) return;
+      const elapsed = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
+      if (!active) {
+        checkoutLog('info', 'initHierarchy:aborted_unmounted', {}, elapsed);
+        return;
+      }
       if (data) {
+        const nextKtx = data.ktxList || [];
+        const nextDays = data.daysByKtx || {};
+        const nextRooms = data.roomsByKtxDay || {};
         setHierarchy({
-          ktxList: data.ktxList || [],
-          daysByKtx: data.daysByKtx || {},
-          roomsByKtxDay: data.roomsByKtxDay || {},
+          ktxList: nextKtx,
+          daysByKtx: nextDays,
+          roomsByKtxDay: nextRooms,
         });
+        checkoutLog(
+          'info',
+          'initHierarchy:success',
+          {
+            ktxCount: nextKtx.length,
+            daysKeyCount: Object.keys(nextDays).length,
+            roomsKeyCount: Object.keys(nextRooms).length,
+            workerRefsCount: data.workers?.length ?? 0,
+          },
+          elapsed
+        );
       }
     }).catch(err => {
-      console.warn('Failed to load worker hierarchy for checkout:', err);
+      const elapsed = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
+      checkoutLog('error', 'initHierarchy:error', { error: err?.message || String(err) }, elapsed);
     });
     return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Cascading options
@@ -143,34 +193,82 @@ export default function CheckoutPage() {
 
   // Load residents whenever (ktx, day, phong_so) changes
   useEffect(() => {
-    const ktx = form.ktx?.trim();
-    const day = form.day?.trim();
+    const rawKtx = form.ktx?.trim();
+    const rawDay = form.day?.trim();
     const phong = form.phong_so?.trim();
+    const ktx = normalizeKtxLabel(rawKtx || '');
+    const day = normalizeDayLabel(rawDay || '');
 
     if (!ktx || !day || !phong) {
       setResidents([]);
       setSelectedResidentId('');
+      setLoadingResidents(false);
       return;
     }
 
     let active = true;
-    setLoadingResidents(true);
+    const reqId = ++residentReqSeqRef.current;
+    const debounceMs = isCustomKtx || isCustomDay || isCustomPhong ? 180 : 0;
 
     async function loadRoomResidents() {
+      const tStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      setLoadingResidents(true);
+      checkoutLog('info', 'loadRoomResidents:start', {
+        reqId,
+        ktx,
+        day,
+        phong,
+        rpcCachedState: rpcLookupResidentsSupportedRef.current,
+      });
+
       try {
         let rows: any[] = [];
-        const { data: rpcData, error: rpcErr } = await supabase.rpc('lookup_room_residents', {
-          p_ktx: ktx,
-          p_day: day,
-          p_phong: phong,
-        });
+        let usedRpc = false;
 
-        if (!active) return;
+        if (rpcLookupResidentsSupportedRef.current !== false) {
+          const tRpc = typeof performance !== 'undefined' ? performance.now() : Date.now();
+          const { data: rpcData, error: rpcErr } = await supabase.rpc('lookup_room_residents', {
+            p_ktx: ktx,
+            p_day: day,
+            p_phong: phong,
+          });
+          const rpcMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - tRpc;
 
-        if (!rpcErr && Array.isArray(rpcData)) {
-          rows = rpcData;
-        } else {
+          if (!active || reqId !== residentReqSeqRef.current) {
+            checkoutLog('info', 'loadRoomResidents:stale_after_rpc', { reqId }, rpcMs);
+            return;
+          }
+
+          if (!rpcErr && Array.isArray(rpcData)) {
+            rpcLookupResidentsSupportedRef.current = true;
+            usedRpc = true;
+            rows = rpcData;
+            checkoutLog('info', 'loadRoomResidents:rpc_ok', { reqId, rowCount: rows.length }, rpcMs);
+          } else {
+            const errMsg = `${rpcErr?.message || ''} ${rpcErr?.details || ''}`.toLowerCase();
+            if (
+              rpcErr?.code === 'PGRST202' ||
+              errMsg.includes('could not find the function') ||
+              (errMsg.includes('function') && errMsg.includes('does not exist'))
+            ) {
+              rpcLookupResidentsSupportedRef.current = false;
+            }
+            checkoutLog(
+              'warn',
+              'loadRoomResidents:rpc_fallback',
+              {
+                reqId,
+                code: rpcErr?.code || null,
+                message: rpcErr?.message || 'non-array rpcData',
+              },
+              rpcMs
+            );
+          }
+        }
+
+        if (!usedRpc) {
           // Backwards-compatible fallback if RPC migration has not been executed yet
+          const tFallback = typeof performance !== 'undefined' ? performance.now() : Date.now();
           const normTargetRoom = phong.replace(/^(?:phòng|phong|p[.\s]*)\s*/i, '').trim().toLowerCase();
           const { data, error: fetchErr } = await supabase
             .from('workers')
@@ -178,10 +276,19 @@ export default function CheckoutPage() {
             .ilike('ktx', ktx)
             .eq('day', day)
             .range(0, 999);
+          const fallbackMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - tFallback;
 
-          if (!active) return;
+          if (!active || reqId !== residentReqSeqRef.current) {
+            checkoutLog('info', 'loadRoomResidents:stale_after_fallback', { reqId }, fallbackMs);
+            return;
+          }
           if (fetchErr) {
-            console.warn('Error loading residents:', fetchErr.message);
+            checkoutLog(
+              'error',
+              'loadRoomResidents:fallback_error',
+              { reqId, code: fetchErr.code, message: fetchErr.message },
+              fallbackMs
+            );
             setResidents([]);
             return;
           }
@@ -189,6 +296,12 @@ export default function CheckoutPage() {
             const nr = String(r?.phong_so || '').replace(/^(?:phòng|phong|p[.\s]*)\s*/i, '').trim().toLowerCase();
             return nr === normTargetRoom;
           });
+          checkoutLog(
+            'info',
+            'loadRoomResidents:fallback_ok',
+            { reqId, fetchedInBlock: (data || []).length, matchedRoomRows: rows.length },
+            fallbackMs
+          );
         }
 
         // Prioritize active residents who have not checked out
@@ -207,21 +320,50 @@ export default function CheckoutPage() {
           new Map(sorted.map(r => [r.id, r])).values()
         );
         setResidents(deduped);
-      } catch (err) {
-        console.warn('Load residents failed:', err);
+
+        const totalMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - tStart;
+        checkoutLog(
+          'info',
+          'loadRoomResidents:complete',
+          {
+            reqId,
+            usedRpc,
+            totalRows: rows.length,
+            activeRows: activeList.length,
+            dedupedRows: deduped.length,
+          },
+          totalMs
+        );
+      } catch (err: any) {
+        const totalMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - tStart;
+        checkoutLog(
+          'error',
+          'loadRoomResidents:exception',
+          { reqId, error: err?.message || String(err) },
+          totalMs
+        );
         if (active) setResidents([]);
       } finally {
-        if (active) setLoadingResidents(false);
+        if (active && reqId === residentReqSeqRef.current) {
+          setLoadingResidents(false);
+        }
       }
     }
 
-    loadRoomResidents();
-    return () => { active = false; };
-  }, [form.ktx, form.day, form.phong_so, supabase]);
+    const timer = setTimeout(() => {
+      loadRoomResidents();
+    }, debounceMs);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [form.ktx, form.day, form.phong_so, isCustomKtx, isCustomDay, isCustomPhong, supabase]);
 
   // Handlers for location changes
   const handleKtxSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
+    checkoutLog('info', 'selectKtx', { val });
     if (val === '__other__') {
       setIsCustomKtx(true);
       setForm(f => ({ ...f, ktx: customKtx, day: '', phong_so: '', ho_va_ten: '', ma_nv_or_cccd: '', so_dien_thoai: '', giuong: '' }));
@@ -252,6 +394,7 @@ export default function CheckoutPage() {
 
   const handleDaySelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
+    checkoutLog('info', 'selectDay', { ktx: form.ktx, val });
     if (val === '__other__') {
       setIsCustomDay(true);
       setForm(f => ({ ...f, day: customDay, phong_so: '', ho_va_ten: '', ma_nv_or_cccd: '', so_dien_thoai: '', giuong: '' }));
@@ -278,6 +421,7 @@ export default function CheckoutPage() {
 
   const handlePhongSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
+    checkoutLog('info', 'selectPhong', { ktx: form.ktx, day: form.day, val });
     if (val === '__other__') {
       setIsCustomPhong(true);
       setForm(f => ({ ...f, phong_so: customPhong, ho_va_ten: '', ma_nv_or_cccd: '', so_dien_thoai: '', giuong: '' }));
@@ -301,6 +445,7 @@ export default function CheckoutPage() {
   const handleSelectResident = (workerId: string) => {
     setSelectedResidentId(workerId);
     if (!workerId || workerId === '__manual__') {
+      checkoutLog('info', 'selectResident:manual_mode', { workerId });
       return;
     }
     const resident = residents.find(r => r.id === workerId);
@@ -315,6 +460,13 @@ export default function CheckoutPage() {
             .replace(/^(?:giường|giuong|g[.\s]*)\s*/i, '')
             .trim() || resident.giuong.trim()
         : '';
+
+      checkoutLog('info', 'selectResident:autofill', {
+        workerId: resident.id,
+        hoVaTen: resident.ho_va_ten,
+        giuong: bedValue,
+        hasCode: Boolean(codeValue),
+      });
 
       setForm(prev => ({
         ...prev,
@@ -356,6 +508,10 @@ export default function CheckoutPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) {
+      checkoutLog('warn', 'handleSubmit:ignored_duplicate_submit', {});
+      return;
+    }
     setError(null);
 
     // Validation
@@ -368,12 +524,16 @@ export default function CheckoutPage() {
     if (!form.ly_do.trim()) missing.push('Lý do dọn ra');
 
     if (missing.length > 0) {
+      checkoutLog('warn', 'handleSubmit:validation_failed', { missing });
       setError(`Vui lòng điền đầy đủ: ${missing.join(', ')}.`);
       return;
     }
 
+    const tSubmit = typeof performance !== 'undefined' ? performance.now() : Date.now();
     setSubmitting(true);
     try {
+      const normKtx = normalizeKtxLabel(form.ktx.trim());
+      const normDay = normalizeDayLabel(form.day.trim());
       const codeOrCccd = form.ma_nv_or_cccd.trim();
       const isDigitsOnly = /^\d{9,12}$/.test(codeOrCccd);
       const residentCleanMa =
@@ -406,6 +566,16 @@ export default function CheckoutPage() {
         form.ban_giao_chia_khoa ? ' | Đã nộp chìa khóa' : ' | Chưa nộp chìa khóa'
       }${form.ban_giao_tai_san ? ' | Đã vệ sinh & bàn giao tài sản' : ''}`;
 
+      checkoutLog('info', 'handleSubmit:insert_start', {
+        worker_id: selectedResident?.id || null,
+        ho_va_ten: form.ho_va_ten.trim(),
+        ktx: normKtx,
+        day: normDay,
+        phong_so: form.phong_so.trim(),
+        giuong: form.giuong.trim(),
+      });
+
+      const tInsert = typeof performance !== 'undefined' ? performance.now() : Date.now();
       const { error: insertErr } = await supabase.from('worker_registrations').insert({
         type: 'CHECKOUT',
         worker_id: selectedResident?.id || null,
@@ -413,20 +583,47 @@ export default function CheckoutPage() {
         ma_nv: maNvValue,
         so_cccd: cccdValue,
         so_dien_thoai: form.so_dien_thoai.trim(),
-        ktx: form.ktx.trim(),
-        day: form.day.trim(),
+        ktx: normKtx,
+        day: normDay,
         phong_so: form.phong_so.trim(),
         giuong: form.giuong.trim(),
         status: 'pending',
         ghi_chu: fullNote,
       });
+      const insertMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - tInsert;
 
       if (insertErr) {
+        checkoutLog(
+          'error',
+          'handleSubmit:insert_error',
+          {
+            code: insertErr.code,
+            message: insertErr.message,
+            details: insertErr.details,
+            hint: insertErr.hint,
+          },
+          insertMs
+        );
         throw new Error(insertErr.message);
       }
 
+      const totalMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - tSubmit;
+      checkoutLog(
+        'info',
+        'handleSubmit:success',
+        {
+          insertMs: Number(insertMs.toFixed(1)),
+          ktx: normKtx,
+          day: normDay,
+          phong_so: form.phong_so.trim(),
+        },
+        totalMs
+      );
+
       setSubmitted(true);
     } catch (err: any) {
+      const totalMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - tSubmit;
+      checkoutLog('error', 'handleSubmit:failed', { error: err?.message || String(err) }, totalMs);
       setError(`Lỗi khi gửi yêu cầu: ${err?.message || 'Không thể kết nối đến máy chủ'}`);
     } finally {
       setSubmitting(false);

@@ -56,6 +56,11 @@ import {
   normalizeKtxLabel,
   normalizeDayLabel,
 } from '@/lib/ktxStructure';
+import {
+  hardDeleteWorkerRegistration,
+  fetchAuthoritativeDeletedRegistrationTombstones,
+  isRegistrationTombstoned,
+} from '@/lib/workerDeletionIntegrity';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function toValidWorkerUuid(candidate?: string | null): string {
@@ -1078,13 +1083,22 @@ export default function QRPortalClient() {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
-      const { data, error } = await supabase
-        .from('worker_registrations')
-        .select('*')
-        .or('ghi_chu.is.null,ghi_chu.not.like.[CHECKOUT]%')
-        .order('created_at', { ascending: false });
+      const [{ data, error }, tombstones] = await Promise.all([
+        supabase
+          .from('worker_registrations')
+          .select('*')
+          .or('ghi_chu.is.null,ghi_chu.not.like.[CHECKOUT]%')
+          .order('created_at', { ascending: false }),
+        fetchAuthoritativeDeletedRegistrationTombstones(supabase, 48),
+      ]);
       if (!error) {
-        const deduped = Array.from(new Map((data || []).map(r => [r.id, r])).values());
+        const deduped = Array.from(
+          new Map(
+            (data || [])
+              .filter(r => !isRegistrationTombstoned(r.id, r.created_at, tombstones))
+              .map(r => [r.id, r])
+          ).values()
+        );
         setRegistrations(deduped);
       }
     } catch (e: any) {
@@ -1434,18 +1448,36 @@ export default function QRPortalClient() {
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
+    const target = deleteTarget;
     setDeleting(true);
     try {
-      const { error } = await supabase
-        .from('worker_registrations')
-        .delete()
-        .eq('id', deleteTarget.id);
-      if (!error) {
-        setRegistrations(prev => prev.filter(r => r.id !== deleteTarget.id));
-        if (detailReg?.id === deleteTarget.id) setDetailReg(null);
-      }
+      await hardDeleteWorkerRegistration(supabase, {
+        registration: {
+          id: target.id,
+          ho_va_ten: target.ho_va_ten,
+          ma_nv: target.ma_nv,
+          so_cccd: target.so_cccd,
+          ktx: target.ktx,
+          day: target.day,
+          phong_so: target.phong_so,
+          giuong: target.giuong,
+          ghi_chu: target.ghi_chu,
+        },
+        account: currentUser?.name || currentUser?.email || 'Quản trị',
+        sourceContext: 'qr_portal_registration_delete',
+      });
+      setRegistrations(prev => prev.filter(r => r.id !== target.id));
+      setSelectedIds(prev => {
+        if (!prev.has(target.id)) return prev;
+        const next = new Set(prev);
+        next.delete(target.id);
+        return next;
+      });
+      if (detailReg?.id === target.id) setDetailReg(null);
+      toast.success(`Đã xóa triệt để đơn đăng ký của ${target.ho_va_ten || 'công nhân'} khỏi hệ thống.`);
     } catch (e: any) {
-      console.error('Delete error:', e.message);
+      console.error('Delete error:', e?.message || e);
+      toast.error(e?.message || 'Không thể xóa triệt để bản ghi khỏi worker_registrations.');
     } finally {
       setDeleting(false);
       setDeleteTarget(null);

@@ -13,7 +13,12 @@ import {
 import { invalidateKtxStructureCache, normalizeKtxLabel, normalizeDayLabel } from '@/lib/ktxStructure';
 import { releaseBedByLocation, normalizeBedLabel } from '@/lib/bedSync';
 import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
-import { verifyWorkerDeletionIntegrity } from '@/lib/workerDeletionIntegrity';
+import {
+  verifyWorkerDeletionIntegrity,
+  hardDeleteWorkerRegistration,
+  fetchAuthoritativeDeletedRegistrationTombstones,
+  isRegistrationTombstoned,
+} from '@/lib/workerDeletionIntegrity';
 import {
   FacilityItem,
   fetchFacilitiesList,
@@ -287,6 +292,7 @@ export default function CheckoutApprovalPanel({
   const [searchQuery, setSearchQuery] = useState('');
   const [detailReq, setDetailReq] = useState<CheckoutRequest | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CheckoutRequest | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
   const [actionErrorMsg, setActionErrorMsg] = useState<string | null>(null);
@@ -361,14 +367,20 @@ export default function CheckoutApprovalPanel({
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
-      const { data, error } = await supabase
-        .from('worker_registrations')
-        .select('id, worker_id, ho_va_ten, ma_nv, so_cccd, so_dien_thoai, ktx, day, phong_so, giuong, status, reviewed_by, reviewed_at, ghi_chu, created_at')
-        .like('ghi_chu', '[CHECKOUT]%')
-        .order('created_at', { ascending: false });
+      const [{ data, error }, tombstones] = await Promise.all([
+        supabase
+          .from('worker_registrations')
+          .select('id, worker_id, ho_va_ten, ma_nv, so_cccd, so_dien_thoai, ktx, day, phong_so, giuong, status, reviewed_by, reviewed_at, ghi_chu, created_at')
+          .like('ghi_chu', '[CHECKOUT]%')
+          .order('created_at', { ascending: false }),
+        fetchAuthoritativeDeletedRegistrationTombstones(supabase, 48),
+      ]);
 
       if (!error && data) {
-        const deduped = Array.from(new Map((data as CheckoutRequest[]).map(r => [r.id, r])).values());
+        const filtered = (data as CheckoutRequest[]).filter(
+          r => r?.id && !isRegistrationTombstoned(r.id, r.created_at, tombstones)
+        );
+        const deduped = Array.from(new Map(filtered.map(r => [r.id, r])).values());
         setCheckouts(deduped);
       }
     } catch (e: any) {
@@ -1032,29 +1044,38 @@ export default function CheckoutApprovalPanel({
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || deletingId) return;
+    const target = deleteTarget;
+    setDeletingId(target.id);
     try {
-      const { error } = await supabase
-        .from('worker_registrations')
-        .delete()
-        .eq('id', deleteTarget.id);
+      const actor = currentUser?.name || currentUser?.email || 'Admin';
+      await hardDeleteWorkerRegistration(supabase, {
+        registration: {
+          id: target.id,
+          worker_id: target.worker_id,
+          ho_va_ten: target.ho_va_ten,
+          ma_nv: target.ma_nv,
+          so_cccd: target.so_cccd,
+          ktx: target.ktx,
+          day: target.day,
+          phong_so: target.phong_so,
+          giuong: target.giuong,
+          ghi_chu: target.ghi_chu,
+        },
+        account: actor,
+        sourceContext: 'CheckoutApprovalPanel.handleDelete',
+      });
 
-      if (error) throw new Error(error.message);
-
-      setCheckouts(prev => prev.filter(c => c.id !== deleteTarget.id));
-      setDeleteTarget(null);
-
-      // Invalidate caches and refresh hierarchy
-      invalidateWorkerHierarchyCache();
-      invalidateKtxStructureCache();
-      invalidateFacilitiesCache();
-      refreshWorkers().catch(() => {});
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('ktx_workers_updated'));
+      setCheckouts(prev => prev.filter(c => c.id !== target.id));
+      if (detailReq?.id === target.id) {
+        setDetailReq(null);
       }
+      setDeleteTarget(null);
+      toast.success(`Đã xóa triệt để yêu cầu check-out của ${target.ho_va_ten}.`);
     } catch (err: any) {
       toast.error(`Lỗi khi xóa: ${err?.message || 'Không thể xóa'}`);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -1128,17 +1149,22 @@ export default function CheckoutApprovalPanel({
             <div className="flex gap-2 pt-1">
               <button
                 type="button"
-                onClick={() => setDeleteTarget(null)}
-                className="flex-1 py-1.5 border border-bdr rounded text-xs font-semibold hover:bg-act transition-colors cursor-pointer"
+                onClick={() => {
+                  if (!deletingId) setDeleteTarget(null);
+                }}
+                disabled={Boolean(deletingId)}
+                className="flex-1 py-1.5 border border-bdr rounded text-xs font-semibold hover:bg-act transition-colors cursor-pointer disabled:opacity-50"
               >
                 Hủy
               </button>
               <button
                 type="button"
                 onClick={handleDelete}
-                className="flex-1 py-1.5 bg-dgr hover:opacity-90 text-white rounded text-xs font-bold transition-colors cursor-pointer"
+                disabled={Boolean(deletingId)}
+                className="flex-1 py-1.5 bg-dgr hover:opacity-90 text-white rounded text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 inline-flex items-center justify-center gap-1"
               >
-                Xác nhận xóa
+                {deletingId && <Loader2 size={12} className="animate-spin" />}
+                <span>{deletingId ? 'Đang xóa...' : 'Xác nhận xóa'}</span>
               </button>
             </div>
           </div>
