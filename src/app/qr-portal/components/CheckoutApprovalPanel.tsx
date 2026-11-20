@@ -101,6 +101,7 @@ function normalizeDayKey(raw?: string | null): string {
     .trim()
     .replace(/^(?:dãy|day)\s*/i, '')
     .replace(/\s+/g, ' ')
+    .replace(/^0+(\d+)$/, '$1')
     .toLowerCase();
 }
 
@@ -458,6 +459,21 @@ export default function CheckoutApprovalPanel({
           const rpcDeletedIds: string[] = Array.isArray(row?.deleted_worker_ids)
             ? row.deleted_worker_ids.map((id: unknown) => String(id)).filter(Boolean)
             : [];
+
+          // Extra client-side sanity check: if RPC returned 0 deletions, verify req.worker_id doesn't still exist
+          if (rpcDeletedIds.length === 0 && req.worker_id && req.worker_id.trim()) {
+            const { data: strayRow } = await supabase
+              .from('workers')
+              .select('id')
+              .eq('id', req.worker_id.trim())
+              .maybeSingle();
+            if (strayRow?.id) {
+              throw new Error(
+                `Hồ sơ "${req.ho_va_ten}" vẫn còn tồn tại trên máy chủ sau khi gọi RPC. Vui lòng cập nhật lại Mã SQL duyệt check-out mới nhất.`
+              );
+            }
+          }
+
           actuallyDeletedIds = rpcDeletedIds;
           handledByAtomicRpc = true;
 
@@ -478,12 +494,12 @@ export default function CheckoutApprovalPanel({
           }
         } else {
           const errMsg = `${rpcErr.message || ''} ${rpcErr.details || ''}`.toLowerCase();
+          // ONLY fall back when the RPC function itself is missing in PostgREST/Postgres.
+          // Never swallow SQL runtime errors (like 42883 operator mismatch or permission errors).
           const isMissingRpc =
             rpcErr.code === 'PGRST202' ||
-            rpcErr.code === '42883' ||
-            errMsg.includes('approve_checkout_remove_worker') ||
             errMsg.includes('could not find the function') ||
-            errMsg.includes('does not exist');
+            (errMsg.includes('function') && errMsg.includes('approve_checkout_remove_worker') && errMsg.includes('does not exist'));
           if (!isMissingRpc) {
             throw new Error(rpcErr.message || 'Không thể phê duyệt check-out trên máy chủ.');
           }
@@ -492,9 +508,8 @@ export default function CheckoutApprovalPanel({
         const msg = String(rpcException?.message || '');
         const lower = msg.toLowerCase();
         const isMissing =
-          lower.includes('approve_checkout_remove_worker') ||
           lower.includes('could not find the function') ||
-          lower.includes('does not exist');
+          (lower.includes('function') && lower.includes('approve_checkout_remove_worker') && lower.includes('does not exist'));
         if (!isMissing) throw rpcException;
       }
 
@@ -506,7 +521,7 @@ export default function CheckoutApprovalPanel({
         if (req.worker_id && req.worker_id.trim()) {
           const { data: byId, error: byIdErr } = await supabase
             .from('workers')
-            .select('id, ho_va_ten, ma_nv, cccd, ktx, day, phong_so, giuong, created_at')
+            .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, created_at')
             .eq('id', req.worker_id.trim())
             .limit(1);
           if (byIdErr) throw new Error(byIdErr.message);
@@ -541,7 +556,7 @@ export default function CheckoutApprovalPanel({
             if (targetBedRow.worker_id) {
               const { data: byBedWorker } = await supabase
                 .from('workers')
-                .select('id, ho_va_ten, ma_nv, cccd, ktx, day, phong_so, giuong, created_at')
+                .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, created_at')
                 .eq('id', targetBedRow.worker_id)
                 .limit(1);
               (byBedWorker || []).forEach((w: any) => {
@@ -557,7 +572,7 @@ export default function CheckoutApprovalPanel({
         if (!isPlaceholderCode(req.ma_nv)) {
           const { data: byCode } = await supabase
             .from('workers')
-            .select('id, ho_va_ten, ma_nv, cccd, ktx, day, phong_so, giuong, created_at')
+            .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, created_at')
             .eq('ma_nv', req.ma_nv.trim());
           (byCode || []).forEach((w: any) => {
             if (
@@ -575,16 +590,17 @@ export default function CheckoutApprovalPanel({
         if (!isPlaceholderCode(req.so_cccd)) {
           const { data: byCccd } = await supabase
             .from('workers')
-            .select('id, ho_va_ten, ma_nv, cccd, ktx, day, phong_so, giuong, created_at')
+            .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, created_at')
             .eq('cccd', req.so_cccd.trim());
           (byCccd || []).forEach((w: any) => {
             if (w?.id) matchedWorkersMap.set(String(w.id), w);
           });
         }
 
-        // 1e. Match ALL duplicate/primary rows by normalized KTX + normalized Day + normalized Room + NFC Name
-        // Uses both hydrated WorkerContext AND paginated Supabase scan (no 1,000-row truncation!)
+        // 1e. Match ALL duplicate/primary rows by normalized KTX + Day + Room + NFC Name (or KTX + Name + Phone)
+        // Uses hydrated WorkerContext + paginated Supabase name & KTX scan (handles NFD/NFC & extra spaces)
         if (normReqName && reqKtxKey) {
+          const reqPhoneDigits = String(req.so_dien_thoai || '').replace(/\D/g, '');
           const matchCandidate = (w: {
             id?: string;
             hoVaTen?: string | null;
@@ -592,13 +608,17 @@ export default function CheckoutApprovalPanel({
             day?: string | null;
             phongSo?: string | null;
             giuong?: string | null;
+            soDienThoai?: string | null;
           }) => {
             if (!w?.id) return false;
             if (normalizeKtxKey(w.ktx) !== reqKtxKey) return false;
             if (normalizeNameForMatch(w.hoVaTen) !== normReqName) return false;
-            if (normReqRoom && normalizeRoomLabel(w.phongSo || '') !== normReqRoom) return false;
-            if (reqDayKey && normalizeDayKey(w.day) && normalizeDayKey(w.day) !== reqDayKey) return false;
-            return true;
+            const wPhoneDigits = String(w.soDienThoai || '').replace(/\D/g, '');
+            const matchesPhone = reqPhoneDigits.length >= 8 && wPhoneDigits === reqPhoneDigits;
+            const matchesRoom =
+              (!normReqRoom || normalizeRoomLabel(w.phongSo || '') === normReqRoom) &&
+              (!reqDayKey || !normalizeDayKey(w.day) || normalizeDayKey(w.day) === reqDayKey);
+            return matchesRoom || matchesPhone;
           };
 
           const contextCandidates = (workers || []).filter(w => matchCandidate(w));
@@ -608,6 +628,7 @@ export default function CheckoutApprovalPanel({
               ho_va_ten: c.hoVaTen,
               ma_nv: c.maNV,
               cccd: c.cccd,
+              so_dien_thoai: c.soDienThoai,
               ktx: c.ktx,
               day: c.day,
               phong_so: c.phongSo,
@@ -616,14 +637,14 @@ export default function CheckoutApprovalPanel({
             });
           });
 
-          // Paginated DB scan filtered by name pattern (fast + hits rows past 1,000 even if context was stale)
+          // Paginated DB scan filtered by name pattern
           const PAGE = 1000;
           let from = 0;
-          const cleanNameToken = (req.ho_va_ten || '').trim().replace(/[%_]/g, '');
+          const cleanNameToken = (req.ho_va_ten || '').trim().replace(/\s+/g, ' ').replace(/[%_]/g, '');
           while (cleanNameToken) {
             const { data: nameRows, error: nameErr } = await supabase
               .from('workers')
-              .select('id, ho_va_ten, ma_nv, cccd, ktx, day, phong_so, giuong, created_at')
+              .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, created_at')
               .ilike('ho_va_ten', `%${cleanNameToken}%`)
               .order('id', { ascending: true })
               .range(from, from + PAGE - 1);
@@ -638,6 +659,7 @@ export default function CheckoutApprovalPanel({
                   day: w.day,
                   phongSo: w.phong_so,
                   giuong: w.giuong,
+                  soDienThoai: w.so_dien_thoai,
                 })
               ) {
                 matchedWorkersMap.set(String(w.id), w);
@@ -646,6 +668,39 @@ export default function CheckoutApprovalPanel({
 
             if (nameRows.length < PAGE) break;
             from += PAGE;
+          }
+
+          // If name `.ilike` returned 0 matches (e.g., Postgres NFD vs NFC or multi-space), scan KTX rows in JS
+          if (matchedWorkersMap.size === 0 && reqKtx) {
+            let ktxFrom = 0;
+            for (let p = 0; p < 15; p++) {
+              const { data: ktxRows, error: ktxErr } = await supabase
+                .from('workers')
+                .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, created_at')
+                .ilike('ktx', reqKtx)
+                .order('id', { ascending: true })
+                .range(ktxFrom, ktxFrom + PAGE - 1);
+              if (ktxErr || !ktxRows || ktxRows.length === 0) break;
+
+              ktxRows.forEach((w: any) => {
+                if (
+                  matchCandidate({
+                    id: w.id,
+                    hoVaTen: w.ho_va_ten,
+                    ktx: w.ktx,
+                    day: w.day,
+                    phongSo: w.phong_so,
+                    giuong: w.giuong,
+                    soDienThoai: w.so_dien_thoai,
+                  })
+                ) {
+                  matchedWorkersMap.set(String(w.id), w);
+                }
+              });
+
+              if (ktxRows.length < PAGE) break;
+              ktxFrom += PAGE;
+            }
           }
         }
 
@@ -754,11 +809,9 @@ export default function CheckoutApprovalPanel({
         if (updateErr) throw new Error(updateErr.message);
       }
 
-      // 5. Immediate UI & context tombstone synchronization (prevents any stale fetch from restoring)
+      // 5. Immediate UI & context tombstone synchronization ONLY for rows genuinely deleted in Postgres
       if (actuallyDeletedIds.length > 0) {
         markWorkersDeleted(actuallyDeletedIds);
-      } else if (req.worker_id && req.worker_id.trim()) {
-        markWorkersDeleted([req.worker_id.trim()]);
       }
 
       setCheckouts(prev =>

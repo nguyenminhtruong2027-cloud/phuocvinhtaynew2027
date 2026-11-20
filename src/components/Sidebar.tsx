@@ -277,7 +277,7 @@ export default function Sidebar() {
           <div className="mt-4 pt-3 border-t border-bdr space-y-1">
             {!collapsed && <p className="px-3 mb-1 text-[10px] font-bold text-ic uppercase tracking-widest">TIỆN ÍCH</p>}
             <button
-              onClick={refreshWorkers}
+              onClick={() => { void refreshWorkers(); }}
               disabled={refreshing}
               title="Đồng bộ lại toàn bộ dữ liệu"
               className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-nav hover:text-tx hover:bg-act/80 border border-transparent hover:border-bdr2 transition-colors duration-100 active:scale-[0.98] ${

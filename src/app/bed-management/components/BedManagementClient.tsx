@@ -970,18 +970,54 @@ export default function BedManagementClient() {
       const wid = workerRef?.id || bed.worker_id || null;
       const targetName = bed.ho_va_ten || workerRef?.hoVaTen || '';
       const targetMaNv = bed.ma_nv || workerRef?.maNV || '';
-      let deletedWorkerId: string | null = null;
+      const candidateIds = new Set<string>();
+      if (wid) candidateIds.add(wid);
 
-      if (wid) {
+      // Also capture any duplicate row sharing normalized slot/name or non-placeholder ma_nv
+      if (bed.ktx && bed.phong_so) {
+        const cleanMa = targetMaNv.trim().toLowerCase();
+        const isValidMa = Boolean(cleanMa && !['-', '—', 'chờ mã', 'chưa có', 'n/a', 'null'].includes(cleanMa));
+        const normBedTargetName = normNfcLower(targetName);
+        const normRoom = normalizeRoomLabel(bed.phong_so || '');
+        const normDay = normDayValue(bed.day);
+        const normBed = normalizeBedLabel(bed.giuong || '');
+        (workers || []).forEach(w => {
+          if (!w?.id) return;
+          if (isValidMa && (w.maNV || '').trim().toLowerCase() === cleanMa) {
+            candidateIds.add(w.id);
+            return;
+          }
+          if (
+            normBedTargetName &&
+            (w.ktx || '').trim().toLowerCase() === (bed.ktx || '').trim().toLowerCase() &&
+            (!normDay || !normDayValue(w.day) || normDayValue(w.day) === normDay) &&
+            normalizeRoomLabel(w.phongSo || '') === normRoom &&
+            (!normBed || !w.giuong || normalizeBedLabel(w.giuong) === normBed) &&
+            normNfcLower(w.hoVaTen) === normBedTargetName
+          ) {
+            candidateIds.add(w.id);
+          }
+        });
+      }
+
+      const idsToDelete = Array.from(candidateIds);
+      const deletedWorkerIds: string[] = [];
+
+      if (idsToDelete.length > 0) {
         try {
-          await supabase.from('worker_deletion_log').insert({
-            worker_id: wid,
-            ho_va_ten: targetName || null,
-            ma_nv: targetMaNv || null,
-            ktx: bed.ktx || workerRef?.ktx || null,
-            day: bed.day || workerRef?.day || null,
-            deleted_at: now,
-          });
+          await supabase.from('worker_deletion_log').insert(
+            idsToDelete.map(id => {
+              const w = (workers || []).find(wk => wk.id === id);
+              return {
+                worker_id: id,
+                ho_va_ten: w?.hoVaTen || targetName || null,
+                ma_nv: w?.maNV || targetMaNv || null,
+                ktx: w?.ktx || bed.ktx || workerRef?.ktx || null,
+                day: w?.day || bed.day || workerRef?.day || null,
+                deleted_at: now,
+              };
+            })
+          );
         } catch (logErr) {
           console.warn('[bed-management] deletion log failed:', logErr);
         }
@@ -989,31 +1025,49 @@ export default function BedManagementClient() {
         const { data: deletedRows, error: delErr } = await supabase
           .from('workers')
           .delete()
-          .eq('id', wid)
+          .in('id', idsToDelete)
           .select('id');
 
         if (delErr) throw new Error(delErr.message);
         if (!deletedRows || deletedRows.length === 0) {
           throw new Error(
-            `Không thể xóa hồ sơ công nhân "${targetName || wid}" khỏi CSDL (kiểm tra quyền RLS tại ${bed.ktx} · ${bed.day}).`
+            `Không thể xóa hồ sơ công nhân "${targetName || idsToDelete[0]}" khỏi CSDL (kiểm tra quyền RLS tại ${bed.ktx} · ${bed.day}).`
           );
         }
-        deletedWorkerId = String(deletedRows[0].id);
+        deletedRows.forEach((r: any) => {
+          if (r?.id) deletedWorkerIds.push(String(r.id));
+        });
 
-        preserveDeletedWorkerEntries([
-          {
-            id: deletedWorkerId,
-            hoVaTen: targetName,
-            maNV: targetMaNv,
-            ktx: bed.ktx || workerRef?.ktx || '',
-            day: bed.day || workerRef?.day || '',
-          },
-        ]);
+        const { data: survivors } = await supabase
+          .from('workers')
+          .select('id')
+          .in('id', idsToDelete);
+        if (survivors && survivors.length > 0) {
+          throw new Error(
+            `Vẫn còn ${survivors.length} bản ghi của "${targetName}" trên CSDL chưa xóa được.`
+          );
+        }
+
+        preserveDeletedWorkerEntries(
+          deletedWorkerIds.map(id => {
+            const w = (workers || []).find(wk => wk.id === id);
+            return {
+              id,
+              hoVaTen: w?.hoVaTen || targetName,
+              maNV: w?.maNV || targetMaNv,
+              ktx: w?.ktx || bed.ktx || workerRef?.ktx || '',
+              day: w?.day || bed.day || workerRef?.day || '',
+            };
+          })
+        );
       }
+
+      const deletedWorkerId = deletedWorkerIds[0] || null;
+      const deletedSet = new Set(deletedWorkerIds);
 
       // Giải phóng giường chắc chắn bằng cả worker_id lẫn vị trí chuẩn hóa
       await releaseBedByLocation(supabase, {
-        workerIds: wid ? [wid] : [],
+        workerIds: deletedWorkerIds.length > 0 ? deletedWorkerIds : wid ? [wid] : [],
         bedId: bed.id,
         ktx: bed.ktx,
         day: bed.day,
@@ -1023,21 +1077,21 @@ export default function BedManagementClient() {
 
       // Đồng bộ mọi đơn check-out pending còn tồn cho cùng công nhân/vị trí để tránh treo
       try {
-        if (deletedWorkerId) {
+        if (deletedWorkerIds.length > 0) {
           await supabase
             .from('worker_registrations')
             .update({ status: 'approved', reviewed_by: currentUser?.id, reviewed_at: now })
             .eq('status', 'pending')
-            .eq('worker_id', deletedWorkerId)
+            .in('worker_id', deletedWorkerIds)
             .like('ghi_chu', '[CHECKOUT]%');
         }
       } catch {}
 
-      if (deletedWorkerId) {
-        markContextWorkersDeleted([deletedWorkerId]);
-        setContextWorkers(prev => prev.filter(w => w.id !== deletedWorkerId));
+      if (deletedWorkerIds.length > 0) {
+        markContextWorkersDeleted(deletedWorkerIds);
+        setContextWorkers(prev => prev.filter(w => !deletedSet.has(w.id)));
         if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('ktx_workers_deleted', { detail: { ids: [deletedWorkerId] } }));
+          window.dispatchEvent(new CustomEvent('ktx_workers_deleted', { detail: { ids: deletedWorkerIds } }));
           window.dispatchEvent(new Event('ktx_workers_updated'));
         }
       }
@@ -1072,7 +1126,7 @@ export default function BedManagementClient() {
     } finally {
       setBusy(false);
     }
-  }, [drawerBed, canWriteBed, resolveLiveWorkerForBed, supabase, currentUser, markContextWorkersDeleted, setContextWorkers, addLog, refreshWorkers]);
+  }, [drawerBed, canWriteBed, resolveLiveWorkerForBed, workers, supabase, currentUser, markContextWorkersDeleted, setContextWorkers, addLog, refreshWorkers]);
 
   const setBedStatus = useCallback(
     async (bed: BedRow, status: BedStatus) => {

@@ -375,22 +375,35 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
     const workerToDelete = workerMetaByIdRef.current.get(id) || workers.find(w => w.id === id);
     if (workerToDelete) {
       preserveDeletedWorkerEntries([workerToDelete]);
-      await supabase
-        .from('worker_deletion_log')
-        .insert({
-          worker_id: id,
-          ho_va_ten: workerToDelete.hoVaTen || null,
-          ma_nv: workerToDelete.maNV || null,
-          ktx: workerToDelete.ktx || null,
-          day: workerToDelete.day || null,
-          deleted_at: new Date().toISOString(),
-        });
+      try {
+        await supabase
+          .from('worker_deletion_log')
+          .insert({
+            worker_id: id,
+            ho_va_ten: workerToDelete.hoVaTen || null,
+            ma_nv: workerToDelete.maNV || null,
+            ktx: workerToDelete.ktx || null,
+            day: workerToDelete.day || null,
+            deleted_at: new Date().toISOString(),
+          });
+      } catch {}
     }
-    const { error } = await supabase
+    const { data: deletedRows, error } = await supabase
       .from('workers')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .select('id');
     if (error) throw new Error(error.message);
+    if (!deletedRows || deletedRows.length === 0) {
+      const { data: stillExists } = await supabase
+        .from('workers')
+        .select('id')
+        .eq('id', id)
+        .maybeSingle();
+      if (stillExists?.id) {
+        throw new Error('Không đủ quyền hoặc không thể xóa hồ sơ công nhân này trên CSDL.');
+      }
+    }
     await releaseBedsForWorkers(supabase, [id]);
     markWorkersDeleted([id]);
   }, [workers, supabase, markWorkersDeleted]);
@@ -416,15 +429,35 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       };
     });
     if (logRows.length > 0) {
-      await supabase.from('worker_deletion_log').insert(logRows);
+      try {
+        await supabase.from('worker_deletion_log').insert(logRows);
+      } catch {}
     }
-    const { error } = await supabase
+    const deletedSet = new Set<string>();
+    const CHUNK = 200;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      const { data: deletedRows, error } = await supabase
+        .from('workers')
+        .delete()
+        .in('id', chunk)
+        .select('id');
+      if (error) throw new Error(error.message);
+      (deletedRows || []).forEach((r: any) => {
+        if (r?.id) deletedSet.add(String(r.id));
+      });
+    }
+    const { data: survivors, error: verifyErr } = await supabase
       .from('workers')
-      .delete()
-      .in('id', ids);
-    if (error) throw new Error(error.message);
-    await releaseBedsForWorkers(supabase, ids);
-    markWorkersDeleted(ids);
+      .select('id')
+      .in('id', ids.slice(0, 200));
+    if (verifyErr) throw new Error(verifyErr.message);
+    if (survivors && survivors.length > 0) {
+      throw new Error(`Không thể xóa ${survivors.length} hồ sơ khỏi CSDL (kiểm tra quyền dãy/KTX).`);
+    }
+    const verifiedDeletedIds = deletedSet.size > 0 ? Array.from(deletedSet) : ids;
+    await releaseBedsForWorkers(supabase, verifiedDeletedIds);
+    markWorkersDeleted(verifiedDeletedIds);
   }, [workers, supabase, markWorkersDeleted]);
 
   const deleteAllWorkers = useCallback(async () => {

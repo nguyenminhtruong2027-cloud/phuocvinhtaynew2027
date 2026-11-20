@@ -15,6 +15,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { StatusTag, MonoChip } from '@/components/ui/StatusTag';
+import { normalizeBedLabel } from '@/lib/bedSync';
 
 interface Props {
   workers: Worker[];
@@ -315,7 +316,7 @@ export default function WorkerTable({
                     {w.phongSo ? <MonoChip tone="blue">P.{w.phongSo}</MonoChip> : <span className="text-xs text-mu">—</span>}
                   </td>
                   <td className="px-3 py-3">
-                    {w.giuong ? <MonoChip>G{w.giuong}</MonoChip> : <span className="text-xs text-mu">—</span>}
+                    {w.giuong ? <MonoChip>G{normalizeBedLabel(w.giuong) || w.giuong}</MonoChip> : <span className="text-xs text-mu">—</span>}
                   </td>
                   <td className="px-3 py-3">
                     <span className="text-xs font-mono font-tabular text-mu">{w.soDienThoai || '—'}</span>
