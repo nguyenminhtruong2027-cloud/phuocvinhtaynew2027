@@ -26,6 +26,7 @@ import { createClient } from '@/lib/supabase/client';
 import { escapeHtml, printHtmlViaIframe } from '@/lib/printHtml';
 import { SlidingTabs } from '@/components/ui/MotionPrimitives';
 import { StatusTag, MonoChip } from '@/components/ui/StatusTag';
+import { normalizeBedLabel } from '@/lib/bedSync';
 
 interface Props {
   worker: Worker;
@@ -284,7 +285,8 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
     };
   }, [activeTab, workerId, workerMaNV, workerName, workerNgayVao, workerNgayRa, workerKtx, workerDay, workerPhong, workerGiuong]);
 
-  const locLabel = [w.ktx, w.day, w.phongSo ? `P.${w.phongSo}` : '', w.giuong ? `G${w.giuong}` : '']
+  const normBed = normalizeBedLabel(w.giuong);
+  const locLabel = [w.ktx, w.day, w.phongSo ? `P.${w.phongSo}` : '', normBed ? `G${normBed}` : '']
     .filter(Boolean)
     .join(' · ');
 

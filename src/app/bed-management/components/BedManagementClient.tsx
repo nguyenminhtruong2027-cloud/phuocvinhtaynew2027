@@ -57,6 +57,39 @@ interface WorkerLite {
 
 const PAGE = 1000;
 
+function formatGiuongTag(raw?: string | null): string {
+  const norm = normalizeBedLabel(raw);
+  return norm ? `G${norm}` : raw ? `G${raw}` : '—';
+}
+
+function BedHoverSlot({
+  enabled,
+  className,
+  onClick,
+  renderTooltip,
+  children,
+}: {
+  enabled: boolean;
+  className: string;
+  onClick: () => void;
+  renderTooltip?: () => React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type="button"
+      onMouseEnter={enabled ? () => setHovered(true) : undefined}
+      onMouseLeave={enabled ? () => setHovered(false) : undefined}
+      onClick={onClick}
+      className={className}
+    >
+      {children}
+      {enabled && hovered && renderTooltip ? renderTooltip() : null}
+    </button>
+  );
+}
+
 async function fetchAllRows<T extends { id?: unknown }>(
   supabase: ReturnType<typeof createClient>,
   table: string,
@@ -119,7 +152,6 @@ export default function BedManagementClient() {
     refreshWorkers,
   } = useWorkers();
   const [beds, setBeds] = useState<BedRow[]>([]);
-  const [hoveredBedId, setHoveredBedId] = useState<string | null>(null);
   const workers = useMemo<WorkerLite[]>(
     () =>
       (contextWorkers || []).map(w => ({
@@ -1178,7 +1210,7 @@ export default function BedManagementClient() {
         'KTX': b.ktx || '—',
         'Dãy': b.day || '—',
         'Phòng': b.phong_so ? `Phòng ${b.phong_so}` : '—',
-        'Giường': b.giuong ? `G${b.giuong}` : '—',
+        'Giường': b.giuong ? formatGiuongTag(b.giuong) : '—',
         'Trạng thái': b.status === 'occupied' ? 'Đã ở' : b.status === 'maintenance' ? 'Đang bảo trì' : 'Còn trống',
         'Họ và tên': b.ho_va_ten || w?.hoVaTen || '',
         'Mã NV': b.ma_nv || w?.maNV || '',
@@ -1285,7 +1317,7 @@ export default function BedManagementClient() {
                   <dt className="flex items-center gap-1 text-ic"><Briefcase size={10} /> Đơn vị</dt>
                   <dd className="truncate">{w?.donVi || '—'}</dd>
                   <dt className="flex items-center gap-1 text-ic"><Building2 size={10} /> Giường</dt>
-                  <dd className="truncate font-tabular">{[bed?.ktx, bed?.day, `P${bed?.phong_so}`, `G${bed?.giuong}`].filter(Boolean).join(' · ')}</dd>
+                  <dd className="truncate font-tabular">{[bed?.ktx, bed?.day, `P${bed?.phong_so}`, formatGiuongTag(bed?.giuong)].filter(Boolean).join(' · ')}</dd>
                 </dl>
               )}
             </>
@@ -1607,14 +1639,12 @@ export default function BedManagementClient() {
                             const maintenance = bed?.status === 'maintenance';
                             const female = occupied && isFemale(worker);
                             const unit = worker?.donVi || '';
-                            const bedLabel = `G${bed?.giuong || '?'}`;
-                            const isHovered = occupied && hoveredBedId === bed?.id;
+                            const bedLabel = bed?.giuong ? formatGiuongTag(bed.giuong) : 'G?';
                             return (
-                              <button
-                                type="button"
+                              <BedHoverSlot
                                 key={bed?.id}
-                                onMouseEnter={() => { if (occupied && bed?.id) setHoveredBedId(bed.id); }}
-                                onMouseLeave={() => { if (hoveredBedId === bed?.id) setHoveredBedId(null); }}
+                                enabled={occupied}
+                                renderTooltip={occupied ? () => <BedTooltip bed={bed} worker={worker} /> : undefined}
                                 onClick={() => {
                                   if (occupied || maintenance) {
                                     setDrawerBed(bed);
@@ -1661,8 +1691,7 @@ export default function BedManagementClient() {
                                 ) : (
                                   <p className="text-[11px] font-medium text-mu">Bấm để gán công nhân…</p>
                                 )}
-                                {isHovered && <BedTooltip bed={bed} worker={worker} />}
-                              </button>
+                              </BedHoverSlot>
                             );
                           })}
                         </div>
@@ -1695,7 +1724,7 @@ export default function BedManagementClient() {
                           <td className="px-3 py-2 text-xs font-bold text-tx whitespace-nowrap">{bed?.ktx || '—'}</td>
                           <td className="px-3 py-2 text-xs text-mu whitespace-nowrap">{bed?.day || '—'}</td>
                           <td className="px-3 py-2 text-xs text-mu font-tabular whitespace-nowrap">P{bed?.phong_so || '—'}</td>
-                          <td className="px-3 py-2 text-xs text-tx font-tabular whitespace-nowrap">G{bed?.giuong || '—'}</td>
+                          <td className="px-3 py-2 text-xs text-tx font-tabular whitespace-nowrap">{formatGiuongTag(bed?.giuong)}</td>
                           <td className="px-3 py-2 whitespace-nowrap">
                             {bed?.status === 'occupied'
                               ? <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${female ? 'tint-pink text-pink-tone border-pink-tint' : 'bg-bdg text-lnk border-pri2/40'}`}>{female ? '♀ Nữ · Đã ở' : '♂ Nam · Đã ở'}</span>
@@ -2095,7 +2124,7 @@ export default function BedManagementClient() {
                           {target.ma_nv ? <span className="text-xs text-mu font-mono ml-1.5">#{target.ma_nv}</span> : null}
                         </p>
                         <p className="text-[11px] text-mu font-tabular truncate">
-                          {[target.ktx, target.day, `P${target.phong_so}`, `G${target.giuong}`, w?.donVi].filter(Boolean).join(' · ')}
+                          {[target.ktx, target.day, `P${target.phong_so}`, formatGiuongTag(target.giuong), w?.donVi].filter(Boolean).join(' · ')}
                         </p>
                       </div>
                       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-lnk shrink-0">

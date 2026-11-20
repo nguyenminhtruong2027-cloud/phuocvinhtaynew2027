@@ -14,6 +14,18 @@ export function normalizeBedLabel(raw?: string | null): string {
   return cleaned.toLowerCase();
 }
 
+export function normalizeDayKey(raw?: string | null): string {
+  if (!raw) return '';
+  const cleaned = raw
+    .trim()
+    .replace(/^(?:dãy|day|khu|block)\s*/i, '')
+    .trim();
+  if (/^\d+$/.test(cleaned)) {
+    return String(parseInt(cleaned, 10));
+  }
+  return cleaned.toLowerCase();
+}
+
 const BED_PAGE_SIZE = 1000;
 
 interface BedSyncRow {
@@ -141,20 +153,19 @@ export async function releaseBedByLocation(
 
   // 3. Fallback: release by normalized KTX + Dãy + Phòng + Giường
   const ktx = (params.ktx || '').trim();
-  const day = (params.day || '').trim();
+  const normDay = normalizeDayKey(params.day || '');
   const normRoom = normalizeRoomLabel(params.phongSo || '');
   const normBed = normalizeBedLabel(params.giuong || '');
 
-  if (ktx && day && normRoom && normBed) {
+  if (ktx && normRoom && normBed) {
     const { data: candidateBeds, error: queryErr } = await supabase
       .from('beds')
-      .select('id, phong_so, giuong, status')
-      .eq('ktx', ktx)
-      .eq('day', day)
+      .select('id, day, phong_so, giuong, status')
+      .ilike('ktx', ktx)
       .neq('status', 'maintenance');
 
     if (queryErr) {
-      throw new Error(`Không thể kiểm tra giường tại ${ktx} · ${day}: ${queryErr.message}`);
+      throw new Error(`Không thể kiểm tra giường tại ${ktx}${params.day ? ` · ${params.day}` : ''}: ${queryErr.message}`);
     }
 
     const slotIds = (candidateBeds || [])
@@ -162,6 +173,7 @@ export async function releaseBedByLocation(
         (b: any) =>
           !releasedSet.has(String(b?.id)) &&
           b?.status === 'occupied' &&
+          (!normDay || !b?.day || normalizeDayKey(String(b.day)) === normDay) &&
           normalizeRoomLabel(String(b?.phong_so ?? '')) === normRoom &&
           normalizeBedLabel(String(b?.giuong ?? '')) === normBed
       )
@@ -401,15 +413,16 @@ export async function reconcileBedsWithWorkers(
       continue;
     }
 
-    const wKtx = (w.ktx || '').trim();
-    const wDay = (w.day || '').trim();
+    const wKtx = (w.ktx || '').trim().toLowerCase();
+    const wDay = normalizeDayKey(w.day || '');
     const wRoom = normalizeRoomLabel(w.phong_so || '');
     const wBed = normalizeBedLabel(w.giuong || '');
 
     const bRoom = normalizeRoomLabel(bed.phong_so || '');
     const bBed = normalizeBedLabel(bed.giuong || '');
+    const normBDay = normalizeDayKey(bDay);
 
-    const sameRoom = Boolean(wKtx && wDay && wRoom && wKtx === bKtx && wDay === bDay && wRoom === bRoom);
+    const sameRoom = Boolean(wKtx && wDay && wRoom && wKtx === bKtx.toLowerCase() && wDay === normBDay && wRoom === bRoom);
     const sameBed = !wBed || wBed === bBed;
 
     if (!sameRoom || !sameBed || validLinkedWorkers.has(w.id)) {
@@ -454,7 +467,7 @@ export async function reconcileBedsWithWorkers(
   const emptyBedIndex = new Map<string, BedSyncRow>();
   for (const bed of allBeds) {
     if (bedStatusAfterPass1.get(bed.id) === 'empty') {
-      const key = `${(bed.ktx || '').trim()}||${(bed.day || '').trim()}||${normalizeRoomLabel(bed.phong_so)}||${normalizeBedLabel(bed.giuong)}`;
+      const key = `${(bed.ktx || '').trim().toLowerCase()}||${normalizeDayKey(bed.day)}||${normalizeRoomLabel(bed.phong_so)}||${normalizeBedLabel(bed.giuong)}`;
       if (!emptyBedIndex.has(key)) {
         emptyBedIndex.set(key, bed);
       }
@@ -466,11 +479,12 @@ export async function reconcileBedsWithWorkers(
     if (!w?.id || validLinkedWorkers.has(w.id)) continue;
     const wKtx = (w.ktx || '').trim();
     const wDay = (w.day || '').trim();
+    const wDayNorm = normalizeDayKey(wDay);
     const wRoom = normalizeRoomLabel(w.phong_so || '');
     const wBed = normalizeBedLabel(w.giuong || '');
-    if (!wKtx || !wDay || !wRoom || !wBed) continue;
+    if (!wKtx || !wDayNorm || !wRoom || !wBed) continue;
 
-    const key = `${wKtx}||${wDay}||${wRoom}||${wBed}`;
+    const key = `${wKtx.toLowerCase()}||${wDayNorm}||${wRoom}||${wBed}`;
     const targetBed = emptyBedIndex.get(key);
     if (targetBed && canTouch(targetBed.ktx || wKtx, targetBed.day || wDay)) {
       emptyBedIndex.delete(key);

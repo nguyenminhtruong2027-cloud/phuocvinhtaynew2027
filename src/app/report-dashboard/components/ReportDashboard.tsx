@@ -175,12 +175,28 @@ export default function ReportDashboard() {
   const [facilitiesList, setFacilitiesList] = useState<FacilityItem[]>([]);
   const [capacities, setCapacities] = useState<RoomCapacityMap>({});
 
+  const [visitedBienDong, setVisitedBienDong] = useState(false);
+  const lastFetchedFluctKeyRef = useRef<string>('');
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const tabParam = new URLSearchParams(window.location.search).get('tab');
       if (tabParam === 'bien-dong' || tabParam === 'tong-quan') {
         setActiveTab(tabParam);
+        if (tabParam === 'bien-dong') setVisitedBienDong(true);
       }
+    }
+  }, []);
+
+  const handleTabChange = useCallback((nextTab: ActiveTab) => {
+    setActiveTab(nextTab);
+    if (nextTab === 'bien-dong') setVisitedBienDong(true);
+    if (typeof window !== 'undefined') {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('tab', nextTab);
+        window.history.replaceState(null, '', url.toString());
+      } catch {}
     }
   }, []);
 
@@ -268,30 +284,32 @@ export default function ReportDashboard() {
     }
   }, [flFilter]);
 
-  // Fetch when tab or filter changes
+  // Fetch only when bien-dong has been visited & filter changes (no spinner flicker on tab switch)
   useEffect(() => {
-    if (activeTab === 'bien-dong') {
-      fetchFluctuation();
-    }
-  }, [activeTab, fetchFluctuation]);
+    if (!visitedBienDong) return;
+    const key = JSON.stringify(flFilter);
+    const alreadyFetchedSameKey = lastFetchedFluctKeyRef.current === key && dailyData.length > 0;
+    lastFetchedFluctKeyRef.current = key;
+    fetchFluctuation({ silent: alreadyFetchedSameKey });
+  }, [visitedBienDong, flFilter, fetchFluctuation, dailyData.length]);
 
   // Auto-sync silently whenever workers context updates (add / import / delete)
   useEffect(() => {
-    if (activeTab === 'bien-dong') {
+    if (visitedBienDong) {
       fetchFluctuation({ silent: true });
     }
-  }, [activeTab, workers.length, fetchFluctuation]);
+  }, [visitedBienDong, workers.length, fetchFluctuation]);
 
-  // Instant Supabase Realtime subscription on workers & worker_deletion_log
+  // Instant Supabase Realtime subscription on workers & worker_deletion_log once bien-dong is visited
   useEffect(() => {
-    if (activeTab !== 'bien-dong') return;
+    if (!visitedBienDong) return;
     const supabase = createClient();
 
     const scheduleSilentRefresh = () => {
       if (realtimeTimerRef.current) clearTimeout(realtimeTimerRef.current);
       realtimeTimerRef.current = setTimeout(() => {
         fetchFluctuation({ silent: true });
-      }, 250);
+      }, 300);
     };
 
     const channel = supabase
@@ -307,7 +325,7 @@ export default function ReportDashboard() {
       }
       supabase.removeChannel(channel);
     };
-  }, [activeTab, fetchFluctuation]);
+  }, [visitedBienDong, fetchFluctuation]);
 
   const applyQuickRange = useCallback((days: number) => {
     const r = getDefaultVNDateRange(days);
@@ -771,7 +789,7 @@ export default function ReportDashboard() {
         <SlidingTabs
           layoutId="report-dashboard-tabs"
           value={activeTab}
-          onChange={setActiveTab}
+          onChange={handleTabChange}
           tabs={[
             { id: 'tong-quan', label: 'Tổng quan đa chiều', icon: BarChart2 },
             { id: 'bien-dong', label: 'Biến động vào / ra', icon: ArrowRightLeft },
@@ -781,8 +799,7 @@ export default function ReportDashboard() {
         {/* ══════════════════════════════════════════════════════════════════════ */}
         {/* TAB 1: TỔNG QUAN                                                      */}
         {/* ══════════════════════════════════════════════════════════════════════ */}
-        {activeTab === 'tong-quan' && (
-          <div className="space-y-6">
+        <div className={activeTab === 'tong-quan' ? 'space-y-6 block' : 'hidden'}>
             {/* Filter Bar */}
             <div className="bg-surf rounded-2xl border border-bdr/60 p-4 sm:p-5 shadow-xl">
               <div className="flex flex-wrap gap-3 items-end">
@@ -1065,14 +1082,13 @@ export default function ReportDashboard() {
                 })}
               </div>
             </div>
-          </div>
-        )}
+        </div>
 
         {/* ══════════════════════════════════════════════════════════════════════ */}
         {/* TAB 2: BIẾN ĐỘNG VÀO / RA                                             */}
         {/* ══════════════════════════════════════════════════════════════════════ */}
-        {activeTab === 'bien-dong' && (
-          <div className="space-y-6">
+        {visitedBienDong && (
+          <div className={activeTab === 'bien-dong' ? 'space-y-6 block' : 'hidden'}>
 
             {/* ── Today Live Real-Time Summary Strip ── */}
             {todayFluctuation && (

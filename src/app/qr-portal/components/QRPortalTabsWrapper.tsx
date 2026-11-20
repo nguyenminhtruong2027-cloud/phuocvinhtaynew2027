@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import QRPortalClient from './QRPortalClient';
 import AttendancePortalClient from './AttendancePortalClient';
 import CheckoutPortalClient from './CheckoutPortalClient';
@@ -13,44 +13,91 @@ import { SlidingTabs } from '@/components/ui/MotionPrimitives';
 
 type PortalTab = 'attendance' | 'registration' | 'checkout_approval' | 'checkout' | 'bed_inspect';
 
+const VALID_TABS: readonly PortalTab[] = [
+  'attendance',
+  'registration',
+  'bed_inspect',
+  'checkout_approval',
+  'checkout',
+];
+
 export default function QRPortalTabsWrapper() {
   const [isMounted, setIsMounted] = useState(false);
   const [activeTab, setActiveTab] = useState<PortalTab>('attendance');
+  const [visitedTabs, setVisitedTabs] = useState<Set<PortalTab>>(() => new Set(['attendance']));
   const [pendingCheckoutCount, setPendingCheckoutCount] = useState<number>(0);
   const { isAdmin, canWriteBlock } = useAuth();
 
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
-  // QR scan links land with ?tab=bed_inspect&bed_qr=... — open the right tab directly.
+  // QR scan links land with ?tab=bed_inspect&bed_qr=... or ?tab=checkout_approval — open the right tab directly.
   useEffect(() => {
     setIsMounted(true);
     try {
-      const tab = new URLSearchParams(window.location.search).get('tab');
-      if (tab === 'bed_inspect') setActiveTab('bed_inspect');
+      const tab = new URLSearchParams(window.location.search).get('tab') as PortalTab | null;
+      if (tab && VALID_TABS.includes(tab)) {
+        setActiveTab(tab);
+        setVisitedTabs(prev => {
+          const next = new Set(prev);
+          next.add(tab);
+          return next;
+        });
+      }
     } catch {}
   }, []);
 
-  useEffect(() => {
-    const fetchPendingCount = async () => {
+  const handleTabChange = useCallback((nextTab: PortalTab) => {
+    setActiveTab(nextTab);
+    setVisitedTabs(prev => {
+      if (prev.has(nextTab)) return prev;
+      const next = new Set(prev);
+      next.add(nextTab);
+      return next;
+    });
+    if (typeof window !== 'undefined') {
       try {
-        const { data } = await supabase
-          .from('worker_registrations')
-          .select('id, status, ghi_chu, day, ktx')
-          .eq('status', 'pending');
+        const url = new URL(window.location.href);
+        url.searchParams.set('tab', nextTab);
+        window.history.replaceState(null, '', url.toString());
+      } catch {}
+    }
+  }, []);
 
-        if (data) {
-          const count = data.filter(r =>
-            r.ghi_chu?.startsWith('[CHECKOUT]') &&
-            (isAdmin || canWriteBlock(r.day, r.ktx))
-          ).length;
-          setPendingCheckoutCount(count);
-        }
-      } catch (e) {
-        // non-blocking
+  const fetchPendingCount = useCallback(async () => {
+    try {
+      const { data } = await supabase
+        .from('worker_registrations')
+        .select('id, status, ghi_chu, day, ktx')
+        .eq('status', 'pending');
+
+      if (data) {
+        const count = data.filter(r =>
+          r.ghi_chu?.startsWith('[CHECKOUT]') &&
+          (isAdmin || canWriteBlock(r.day, r.ktx))
+        ).length;
+        setPendingCheckoutCount(count);
       }
-    };
-    fetchPendingCount();
+    } catch {
+      // non-blocking
+    }
   }, [supabase, isAdmin, canWriteBlock]);
+
+  useEffect(() => {
+    fetchPendingCount();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleFetch = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => { fetchPendingCount(); }, 300);
+    };
+    const channel = supabase
+      .channel('qr_portal_pending_checkout_badge')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_registrations' }, scheduleFetch)
+      .subscribe();
+    return () => {
+      if (timer) clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
+  }, [fetchPendingCount, supabase]);
 
   // Prevent React Hydration Mismatch by rendering matching skeleton until client mount
   if (!isMounted) {
@@ -80,7 +127,7 @@ export default function QRPortalTabsWrapper() {
             layoutId="qr-portal-tabs"
             compact
             value={activeTab}
-            onChange={setActiveTab}
+            onChange={handleTabChange}
             tabs={[
               { id: 'attendance', label: 'QR Điểm Danh', icon: ClipboardList },
               { id: 'registration', label: 'Đăng ký cư trú', icon: QrCode },
@@ -103,15 +150,33 @@ export default function QRPortalTabsWrapper() {
         </div>
       </header>
 
-      {/* Main Tab Content */}
+      {/* Main Tab Content — lazy-mounted on first visit and kept alive for instant switching */}
       <main className="max-w-7xl mx-auto">
-        {activeTab === 'attendance' && <AttendancePortalClient />}
-        {activeTab === 'registration' && <QRPortalClient />}
-        {activeTab === 'bed_inspect' && <BedInspectClient />}
-        {activeTab === 'checkout_approval' && (
-          <CheckoutApprovalPanel onCountChange={setPendingCheckoutCount} />
+        {visitedTabs.has('attendance') && (
+          <div className={activeTab === 'attendance' ? 'block' : 'hidden'}>
+            <AttendancePortalClient />
+          </div>
         )}
-        {activeTab === 'checkout' && <CheckoutPortalClient />}
+        {visitedTabs.has('registration') && (
+          <div className={activeTab === 'registration' ? 'block' : 'hidden'}>
+            <QRPortalClient />
+          </div>
+        )}
+        {visitedTabs.has('bed_inspect') && (
+          <div className={activeTab === 'bed_inspect' ? 'block' : 'hidden'}>
+            <BedInspectClient />
+          </div>
+        )}
+        {visitedTabs.has('checkout_approval') && (
+          <div className={activeTab === 'checkout_approval' ? 'block' : 'hidden'}>
+            <CheckoutApprovalPanel onCountChange={setPendingCheckoutCount} />
+          </div>
+        )}
+        {visitedTabs.has('checkout') && (
+          <div className={activeTab === 'checkout' ? 'block' : 'hidden'}>
+            <CheckoutPortalClient />
+          </div>
+        )}
       </main>
     </div>
   );

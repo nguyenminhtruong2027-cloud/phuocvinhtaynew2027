@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { compareKtxNames } from '@/data/workers';
 import { fetchFacilitiesList } from '@/lib/facilityCapacity';
@@ -242,6 +242,8 @@ export async function fetchDynamicKtxStructure(forceRefresh = false): Promise<Kt
 const _structureListeners = new Set<(groups: KtxBlockGroup[]) => void>();
 let _sharedRealtimeCleanup: (() => void) | null = null;
 let _reloadDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let _lastWorkerInsertTriggerAt = 0;
+const WORKER_INSERT_COOLDOWN_MS = 15_000;
 
 function notifyStructureListeners(groups: KtxBlockGroup[]) {
   _structureListeners.forEach(listener => {
@@ -257,7 +259,26 @@ function scheduleSharedStructureReload() {
     _reloadDebounceTimer = null;
     const data = await fetchDynamicKtxStructure(true);
     notifyStructureListeners(data || []);
-  }, 350);
+  }, 400);
+}
+
+function handleWorkerInsertRealtime(payload: { new?: Record<string, unknown> }) {
+  const row = payload?.new;
+  if (row && _cachedKtxStructure) {
+    const ktx = normalizeKtxLabel(String(row.ktx || ''));
+    const day = normalizeDayLabel(String(row.day || ''));
+    if (ktx) {
+      const existingGroup = _cachedKtxStructure.find(g => g.ktx === ktx);
+      const dayKnown = !day || Boolean(existingGroup?.days.includes(day));
+      if (existingGroup && dayKnown) {
+        return; // Structure already includes this KTX & Dãy — avoid expensive full-table refetch
+      }
+    }
+  }
+  const now = Date.now();
+  if (now - _lastWorkerInsertTriggerAt < WORKER_INSERT_COOLDOWN_MS) return;
+  _lastWorkerInsertTriggerAt = now;
+  scheduleSharedStructureReload();
 }
 
 function ensureSharedRealtimeSubscription() {
@@ -274,7 +295,7 @@ function ensureSharedRealtimeSubscription() {
   try {
     channel = supabase
       .channel('ktx_structure_realtime_shared')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'workers' }, scheduleSharedStructureReload)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'workers' }, handleWorkerInsertRealtime)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, scheduleSharedStructureReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'room_units' }, scheduleSharedStructureReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, scheduleSharedStructureReload)
@@ -283,10 +304,9 @@ function ensureSharedRealtimeSubscription() {
     console.warn('[ktxStructure] Realtime subscribe failed (table may be missing):', err);
   }
 
-  const onUpdated = () => scheduleSharedStructureReload();
+  const onFacilitiesUpdated = () => scheduleSharedStructureReload();
   if (typeof window !== 'undefined') {
-    window.addEventListener('ktx_workers_updated', onUpdated);
-    window.addEventListener('ktx_facilities_updated', onUpdated);
+    window.addEventListener('ktx_facilities_updated', onFacilitiesUpdated);
   }
 
   _sharedRealtimeCleanup = () => {
@@ -298,8 +318,7 @@ function ensureSharedRealtimeSubscription() {
       if (channel && supabase) supabase.removeChannel(channel);
     } catch {}
     if (typeof window !== 'undefined') {
-      window.removeEventListener('ktx_workers_updated', onUpdated);
-      window.removeEventListener('ktx_facilities_updated', onUpdated);
+      window.removeEventListener('ktx_facilities_updated', onFacilitiesUpdated);
     }
     _sharedRealtimeCleanup = null;
   };
@@ -346,7 +365,7 @@ export function useKtxStructure() {
     };
   }, []);
 
-  const ktxNames = ktxGroups.map(g => g.ktx);
+  const ktxNames = useMemo(() => ktxGroups.map(g => g.ktx), [ktxGroups]);
 
   return {
     ktxGroups,

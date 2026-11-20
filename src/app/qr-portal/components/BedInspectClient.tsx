@@ -9,7 +9,7 @@ import {
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
-import { releaseBedsForWorkers, releaseBedByLocation, normalizeBedLabel } from '@/lib/bedSync';
+import { releaseBedsForWorkers, releaseBedByLocation, normalizeBedLabel, normalizeDayKey } from '@/lib/bedSync';
 import { normalizeRoomLabel, invalidateFacilitiesCache } from '@/lib/facilityCapacity';
 import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
 import { invalidateWorkerHierarchyCache } from '@/lib/workerHierarchy';
@@ -353,42 +353,108 @@ export default function BedInspectClient() {
       const targetMaNv = bed.ma_nv || worker?.maNV || '';
       const now = new Date().toISOString();
 
+      // Thu thập đầy đủ ID hồ sơ công nhân (kể cả trùng Mã NV hoặc trùng slot + họ tên nếu bed.worker_id bị null)
+      const collectedMap = new Map<string, { id: string; hoVaTen: string; maNV: string; ktx: string; day: string }>();
       if (targetWorkerId) {
+        collectedMap.set(targetWorkerId, {
+          id: targetWorkerId,
+          hoVaTen: targetName,
+          maNV: targetMaNv,
+          ktx: bed.ktx || '',
+          day: bed.day || '',
+        });
+      }
+
+      const cleanMaNv = targetMaNv.trim();
+      if (cleanMaNv && !['-', '—', 'chờ mã', 'chưa có'].includes(cleanMaNv.toLowerCase())) {
+        const { data: sameCode } = await supabase
+          .from('workers')
+          .select('id, ho_va_ten, ma_nv, ktx, day')
+          .eq('ma_nv', cleanMaNv);
+        (sameCode || []).forEach((r: any) => {
+          if (r?.id) {
+            collectedMap.set(String(r.id), {
+              id: String(r.id),
+              hoVaTen: r.ho_va_ten || targetName,
+              maNV: r.ma_nv || cleanMaNv,
+              ktx: r.ktx || bed.ktx || '',
+              day: r.day || bed.day || '',
+            });
+          }
+        });
+      }
+
+      const normKtx = (bed.ktx || '').trim().toLowerCase();
+      const normDay = normalizeDayKey(bed.day || '');
+      const normRoom = normalizeRoomLabel(bed.phong_so || '');
+      const normBed = normalizeBedLabel(bed.giuong || '');
+      const normTargetName = targetName.normalize('NFC').trim().toLowerCase().replace(/\s+/g, ' ');
+      if (normKtx && normRoom) {
+        const { data: ktxRows } = await supabase
+          .from('workers')
+          .select('id, ho_va_ten, ma_nv, ktx, day, phong_so, giuong')
+          .ilike('ktx', bed.ktx.trim());
+        (ktxRows || []).forEach((r: any) => {
+          if (!r?.id) return;
+          const sameDay = !normDay || !r.day || normalizeDayKey(String(r.day)) === normDay;
+          const sameRoom = normalizeRoomLabel(String(r.phong_so || '')) === normRoom;
+          const sameBed = normBed && normalizeBedLabel(String(r.giuong || '')) === normBed;
+          const rName = String(r.ho_va_ten || '').normalize('NFC').trim().toLowerCase().replace(/\s+/g, ' ');
+          const sameName = normTargetName && rName === normTargetName;
+          if (sameDay && sameRoom && ((sameBed && (!normTargetName || sameName)) || (sameName && !r.giuong))) {
+            collectedMap.set(String(r.id), {
+              id: String(r.id),
+              hoVaTen: r.ho_va_ten || targetName,
+              maNV: r.ma_nv || cleanMaNv,
+              ktx: r.ktx || bed.ktx || '',
+              day: r.day || bed.day || '',
+            });
+          }
+        });
+      }
+
+      const idsToDelete = Array.from(collectedMap.keys());
+      let verifiedDeletedIds: string[] = [];
+
+      if (idsToDelete.length > 0) {
         try {
-          await supabase.from('worker_deletion_log').insert({
-            worker_id: targetWorkerId,
-            ho_va_ten: targetName || null,
-            ma_nv: targetMaNv || null,
-            ktx: bed.ktx || null,
-            day: bed.day || null,
-            deleted_at: now,
-          });
+          await supabase.from('worker_deletion_log').insert(
+            Array.from(collectedMap.values()).map(item => ({
+              worker_id: item.id,
+              ho_va_ten: item.hoVaTen || null,
+              ma_nv: item.maNV || null,
+              ktx: item.ktx || null,
+              day: item.day || null,
+              deleted_at: now,
+            }))
+          );
         } catch {}
 
         const { data: deletedRows, error: delErr } = await supabase
           .from('workers')
           .delete()
-          .eq('id', targetWorkerId)
+          .in('id', idsToDelete)
           .select('id');
 
         if (delErr) throw new Error(delErr.message);
-        if (!deletedRows || deletedRows.length === 0) {
-          throw new Error(`Không thể xóa hồ sơ công nhân khỏi CSDL (kiểm tra quyền RLS tại ${bed.ktx} · ${bed.day}).`);
+
+        const { data: survivors, error: verifyErr } = await supabase
+          .from('workers')
+          .select('id')
+          .in('id', idsToDelete);
+        if (verifyErr) throw new Error(verifyErr.message);
+        if (survivors && survivors.length > 0) {
+          throw new Error(`Không thể xóa ${survivors.length} hồ sơ công nhân khỏi CSDL (kiểm tra quyền RLS tại ${bed.ktx} · ${bed.day}).`);
         }
 
-        preserveDeletedWorkerEntries([
-          {
-            id: targetWorkerId,
-            hoVaTen: targetName,
-            maNV: targetMaNv,
-            ktx: bed.ktx || '',
-            day: bed.day || '',
-          },
-        ]);
+        verifiedDeletedIds = (deletedRows || []).map((r: any) => String(r.id)).filter(Boolean);
+        if (verifiedDeletedIds.length === 0) verifiedDeletedIds = idsToDelete;
+
+        preserveDeletedWorkerEntries(Array.from(collectedMap.values()));
       }
 
       await releaseBedByLocation(supabase, {
-        workerIds: targetWorkerId ? [targetWorkerId] : [],
+        workerIds: verifiedDeletedIds,
         bedId: bed.id,
         ktx: bed.ktx,
         day: bed.day,
@@ -400,19 +466,20 @@ export default function BedInspectClient() {
       addLog(
         actor,
         'CHECKOUT_APPROVED',
-        `Check-out qua QR Giường: ${targetName || '—'} (${targetMaNv || '—'}) tại ${bed.ktx} · ${bed.day} · P${bed.phong_so} · G${bed.giuong}`
+        `Check-out qua QR Giường: ${targetName || '—'} (${targetMaNv || '—'}) tại ${bed.ktx} · ${bed.day} · P${bed.phong_so} · G${normalizeBedLabel(bed.giuong) || bed.giuong}`
       );
 
       invalidateWorkerHierarchyCache();
       invalidateKtxStructureCache();
       invalidateFacilitiesCache();
-      if (typeof window !== 'undefined' && targetWorkerId) {
-        window.dispatchEvent(new CustomEvent('ktx_workers_deleted', { detail: { ids: [targetWorkerId] } }));
+      if (typeof window !== 'undefined' && verifiedDeletedIds.length > 0) {
+        window.dispatchEvent(new CustomEvent('ktx_workers_deleted', { detail: { ids: verifiedDeletedIds } }));
         window.dispatchEvent(new CustomEvent('ktx_workers_updated'));
       }
 
-      setMessage(`✓ Đã check-out "${targetName || 'công nhân'}" và giải phóng Giường ${bed.giuong} tức thì!`);
-      toast.success(`Đã giải phóng Giường ${bed.giuong}!`);
+      const bedDisp = normalizeBedLabel(bed.giuong) || bed.giuong;
+      setMessage(`✓ Đã check-out "${targetName || 'công nhân'}" và giải phóng Giường ${bedDisp} tức thì!`);
+      toast.success(`Đã giải phóng Giường ${bedDisp}!`);
       await loadBedData(true);
     } catch (err: any) {
       console.error('[bed-inspector] immediate checkout failed:', err);
@@ -611,7 +678,7 @@ export default function BedInspectClient() {
               }`}>
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-extrabold text-lnk font-tabular flex items-center gap-1.5">
-                    <BedDouble size={14} /> Giường {bed.giuong || '—'}
+                    <BedDouble size={14} /> Giường {normalizeBedLabel(bed.giuong) || bed.giuong || '—'}
                   </span>
                   {occupied
                     ? <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-okbg text-ok border border-bdr2">● ĐÃ Ở (OCCUPIED)</span>

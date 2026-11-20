@@ -232,7 +232,7 @@ export default function CommandPalette() {
       .slice(0, 6);
 
     return matched.map(w => {
-      const loc = [w.ktx, w.day, w.phongSo ? `P.${w.phongSo}` : '', w.giuong ? `G${w.giuong}` : '']
+      const loc = [w.ktx, w.day, w.phongSo ? `P.${w.phongSo}` : '', w.giuong ? `G${w.giuong.replace(/^(?:giường|giuong|g[.\s]*)\s*/i, '').trim()}` : '']
         .filter(Boolean)
         .join(' · ');
       return {
