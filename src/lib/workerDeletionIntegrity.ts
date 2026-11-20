@@ -68,6 +68,28 @@ function normalizeCodeBasic(raw?: string | null): string {
   return s;
 }
 
+function compactKtxBasic(raw?: string | null): string {
+  return String(raw || '')
+    .normalize('NFC')
+    .replace(/[\u00A0\u200B-\u200D\uFEFF\s\-_.]+/g, '')
+    .toLowerCase();
+}
+
+function compactRoomBasic(raw?: string | null): string {
+  const stripped = String(raw || '')
+    .normalize('NFC')
+    .replace(/[\u00A0\u200B-\u200D\uFEFF]/g, ' ')
+    .trim()
+    .replace(/^(?:phòng|phong|p[.\s]*)\s*/i, '')
+    .toLowerCase();
+  return stripped.replace(/^0+/, '') || stripped;
+}
+
+export function invalidateDeletedTombstoneCache(): void {
+  cachedAuthoritativeTombstones = null;
+  cachedAuthoritativeAt = 0;
+}
+
 function pruneTombstoneMap(map: Map<string, number>, now = Date.now()) {
   for (const [id, ts] of map.entries()) {
     if (!id || !Number.isFinite(ts) || now - ts > LOCAL_TOMBSTONE_TTL_MS) {
@@ -336,6 +358,8 @@ export async function verifyWorkerDeletionIntegrity(
     codes?: string[];
     hoVaTen?: string | null;
     soDienThoai?: string | null;
+    ktx?: string | null;
+    phongSo?: string | null;
     account?: string;
     sourceContext?: string;
     targets?: WorkerDeletionTarget[];
@@ -359,6 +383,8 @@ export async function verifyWorkerDeletionIntegrity(
         p_ho_va_ten: params.hoVaTen || null,
         p_so_dien_thoai: params.soDienThoai || null,
         p_since: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+        p_ktx: params.ktx || null,
+        p_phong_so: params.phongSo || null,
       });
 
       if (!error && data) {
@@ -387,13 +413,16 @@ export async function verifyWorkerDeletionIntegrity(
     const bedSet = new Set<string>();
     const CHUNK = 200;
     const normTargetName = normalizeNameBasic(params.hoVaTen);
+    const targetKtxCompact = compactKtxBasic(params.ktx);
+    const targetRoomCompact = compactRoomBasic(params.phongSo);
+    const rawNameToken = String(params.hoVaTen || '').trim().replace(/\s+/g, ' ').replace(/[%_]/g, '');
 
     const idChunks: string[][] = [];
     for (let i = 0; i < cleanIds.length; i += CHUNK) {
       idChunks.push(cleanIds.slice(i, i + CHUNK));
     }
 
-    await Promise.all([
+    const checks: Promise<void>[] = [
       ...idChunks.map(async chunk => {
         const [{ data: wRows }, { data: bRows }] = await Promise.all([
           supabase.from('workers').select('id').in('id', chunk),
@@ -419,7 +448,33 @@ export async function verifyWorkerDeletionIntegrity(
           }
         });
       }),
-    ]);
+    ];
+
+    if (rawNameToken && targetKtxCompact && targetRoomCompact) {
+      checks.push(
+        (async () => {
+          const { data: sameNameRows } = await supabase
+            .from('workers')
+            .select('id, ho_va_ten, ktx, phong_so')
+            .ilike('ho_va_ten', `%${rawNameToken}%`)
+            .limit(50);
+          (sameNameRows || []).forEach(
+            (r: { id?: string; ho_va_ten?: string; ktx?: string; phong_so?: string }) => {
+              if (!r?.id) return;
+              if (
+                normalizeNameBasic(r.ho_va_ten) === normTargetName &&
+                compactKtxBasic(r.ktx) === targetKtxCompact &&
+                compactRoomBasic(r.phong_so) === targetRoomCompact
+              ) {
+                survivorSet.add(String(r.id));
+              }
+            }
+          );
+        })()
+      );
+    }
+
+    await Promise.all(checks);
 
     remainingWorkerIds = Array.from(survivorSet);
     orphanBedIds = Array.from(bedSet);

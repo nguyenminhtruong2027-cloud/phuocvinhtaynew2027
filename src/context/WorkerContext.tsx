@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
 import {
   fetchAuthoritativeDeletedTombstones,
+  invalidateDeletedTombstoneCache,
   isWorkerTombstoned,
   recordLocalDeletedTombstones,
   subscribeCrossTabTombstones,
@@ -192,6 +193,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
     const idSet = new Set(cleanIds);
     // Bump fetchSeqRef so any earlier in-flight fetchWorkers resolves as stale and cannot restore these workers.
     fetchSeqRef.current += 1;
+    invalidateDeletedTombstoneCache();
     recordLocalDeletedTombstones(cleanIds, now);
     cleanIds.forEach(id => {
       recentlyDeletedIdsRef.current.set(id, now);
@@ -208,7 +210,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
     const seq = ++fetchSeqRef.current;
     if (isRefresh) setRefreshing(true);
     try {
-      const tombstonesPromise = fetchAuthoritativeDeletedTombstones(supabase, 48);
+      const tombstonesPromise = fetchAuthoritativeDeletedTombstones(supabase, 168, isRefresh);
       const allRows: Worker[] = [];
       let from = 0;
       let hasMore = true;

@@ -17,7 +17,7 @@ import { compareKtxNames, DEFAULT_ROOM_CAPACITY } from '@/data/workers';
 import { fetchRoomCapacities, getRoomCapacity, RoomCapacityMap, formatRoomDisplay, normalizeRoomLabel, invalidateFacilitiesCache } from '@/lib/facilityCapacity';
 import { reconcileBedsWithWorkers, releaseBedsForWorkers, releaseBedByLocation, normalizeBedLabel } from '@/lib/bedSync';
 import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
-import { verifyWorkerDeletionIntegrity } from '@/lib/workerDeletionIntegrity';
+import { verifyWorkerDeletionIntegrity, invalidateDeletedTombstoneCache } from '@/lib/workerDeletionIntegrity';
 import { invalidateWorkerHierarchyCache } from '@/lib/workerHierarchy';
 import { invalidateKtxStructureCache } from '@/lib/ktxStructure';
 import { exportToExcel } from '@/lib/exportExcel';
@@ -1068,6 +1068,31 @@ export default function BedManagementClient() {
         });
       }
 
+      // Live DB sweep for same-name + KTX + room (covers duplicate rows without ma_nv/cccd)
+      const cleanBedNameToken = targetName.trim().replace(/\s+/g, ' ').replace(/[%_]/g, '');
+      const bedKtxCompact = (bed.ktx || '').replace(/[\s\-_.]+/g, '').toLowerCase();
+      if (cleanBedNameToken && bedKtxCompact) {
+        const { data: sameNameDb } = await supabase
+          .from('workers')
+          .select('id, ho_va_ten, ktx, day, phong_so')
+          .ilike('ho_va_ten', `%${cleanBedNameToken}%`)
+          .limit(50);
+        (sameNameDb || []).forEach((r: any) => {
+          if (!r?.id) return;
+          const rKtxCompact = String(r.ktx || '').replace(/[\s\-_.]+/g, '').toLowerCase();
+          const rRoom = normalizeRoomLabel(r.phong_so || '');
+          const rDay = normDayValue(r.day);
+          if (
+            normNfcLower(r.ho_va_ten) === normBedTargetName &&
+            rKtxCompact === bedKtxCompact &&
+            (!normRoom || !rRoom || rRoom === normRoom) &&
+            (!normDay || !rDay || rDay === normDay)
+          ) {
+            candidateIds.add(String(r.id));
+          }
+        });
+      }
+
       const idsToDelete = Array.from(candidateIds);
       const deletedWorkerIds: string[] = [];
 
@@ -1176,6 +1201,8 @@ export default function BedManagementClient() {
         codes: [targetMaNv, targetCccd].filter(Boolean),
         hoVaTen: targetName,
         soDienThoai: workerRef?.soDienThoai,
+        ktx: bed.ktx,
+        phongSo: bed.phong_so,
         account: actor,
         sourceContext: 'BedManagementClient.handleHardDelete',
         targets: deleteTargets,
@@ -1185,6 +1212,7 @@ export default function BedManagementClient() {
       }
 
       if (deletedWorkerIds.length > 0) {
+        invalidateDeletedTombstoneCache();
         markContextWorkersDeleted(deletedWorkerIds);
         setContextWorkers(prev => prev.filter(w => !deletedSet.has(w.id)));
         if (typeof window !== 'undefined') {

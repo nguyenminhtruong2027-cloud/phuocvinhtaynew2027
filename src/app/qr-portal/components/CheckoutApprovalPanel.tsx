@@ -15,6 +15,7 @@ import { releaseBedByLocation, normalizeBedLabel } from '@/lib/bedSync';
 import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
 import {
   verifyWorkerDeletionIntegrity,
+  invalidateDeletedTombstoneCache,
   hardDeleteWorkerRegistration,
   fetchAuthoritativeDeletedRegistrationTombstones,
   isRegistrationTombstoned,
@@ -96,9 +97,8 @@ function normalizeNameForMatch(raw?: string | null): string {
 function normalizeKtxKey(raw?: string | null): string {
   return normalizeKtxLabel(String(raw || ''))
     .normalize('NFC')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ');
+    .replace(/[\u00A0\u200B-\u200D\uFEFF\s\-_.]+/g, '')
+    .toLowerCase();
 }
 
 function normalizeDayKey(raw?: string | null): string {
@@ -305,7 +305,7 @@ export default function CheckoutApprovalPanel({
 
   const { currentUser, isAdmin, canWriteBlock } = useAuth();
   const { addLog } = useAudit();
-  const { workers, markWorkersDeleted, refreshWorkers } = useWorkers();
+  const { workers, markWorkersDeleted, setWorkers: setContextWorkers, refreshWorkers } = useWorkers();
   const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
@@ -498,6 +498,7 @@ export default function CheckoutApprovalPanel({
         )
       );
 
+        const hasStrongIdentity = reqCodeSet.size > 0 || reqPhoneDigits.length >= 8;
         const isMatchingRow = (w: {
           id?: string;
           hoVaTen?: string | null;
@@ -530,6 +531,16 @@ export default function CheckoutApprovalPanel({
               wKtxKey === reqKtxKey &&
               (!normReqRoom || normalizeRoomLabel(w.phongSo || '') === normReqRoom) &&
               (!reqDayKey || !normalizeDayKey(w.day) || normalizeDayKey(w.day) === reqDayKey)
+            ) {
+              return true;
+            }
+            if (
+              !hasStrongIdentity &&
+              reqKtxKey &&
+              wKtxKey === reqKtxKey &&
+              !wMaNorm &&
+              !wCccdNorm &&
+              (!normalizeRoomLabel(w.phongSo || '') || !normReqRoom || normalizeRoomLabel(w.phongSo || '') === normReqRoom)
             ) {
               return true;
             }
@@ -664,9 +675,57 @@ export default function CheckoutApprovalPanel({
               ? row.deleted_worker_ids.map((id: unknown) => String(id)).filter(Boolean)
               : [];
 
-            // Fast in-memory sweep against hydrated WorkerContext for any client-known duplicate IDs
+            // Sweep BOTH hydrated WorkerContext AND live Postgres for any residual duplicate rows
             const rpcDeletedSet = new Set(rpcDeletedIds);
-            const localExtraMatches = (workers || []).filter(c => c?.id && !rpcDeletedSet.has(c.id) && isMatchingRow(c));
+            const extraMatchMap = new Map<string, { id: string; hoVaTen?: string; maNV?: string; ktx?: string; day?: string; createdAt?: string }>();
+            (workers || []).forEach(c => {
+              if (c?.id && !rpcDeletedSet.has(c.id) && isMatchingRow(c)) {
+                extraMatchMap.set(c.id, {
+                  id: c.id,
+                  hoVaTen: c.hoVaTen,
+                  maNV: c.maNV,
+                  ktx: c.ktx,
+                  day: c.day,
+                  createdAt: c.createdAt,
+                });
+              }
+            });
+
+            const cleanNameSweep = (req.ho_va_ten || '').trim().replace(/\s+/g, ' ').replace(/[%_]/g, '');
+            if (cleanNameSweep) {
+              const { data: liveExtraRows } = await supabase
+                .from('workers')
+                .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, created_at')
+                .ilike('ho_va_ten', `%${cleanNameSweep}%`)
+                .limit(50);
+              (liveExtraRows || []).forEach((w: any) => {
+                if (
+                  w?.id &&
+                  !rpcDeletedSet.has(String(w.id)) &&
+                  isMatchingRow({
+                    id: String(w.id),
+                    hoVaTen: w.ho_va_ten,
+                    maNV: w.ma_nv,
+                    cccd: w.cccd,
+                    ktx: w.ktx,
+                    day: w.day,
+                    phongSo: w.phong_so,
+                    soDienThoai: w.so_dien_thoai,
+                  })
+                ) {
+                  extraMatchMap.set(String(w.id), {
+                    id: String(w.id),
+                    hoVaTen: w.ho_va_ten,
+                    maNV: w.ma_nv,
+                    ktx: w.ktx,
+                    day: w.day,
+                    createdAt: w.created_at,
+                  });
+                }
+              });
+            }
+
+            const localExtraMatches = Array.from(extraMatchMap.values());
             let extraDeletedIds: string[] = [];
 
             if (localExtraMatches.length > 0) {
@@ -951,6 +1010,8 @@ export default function CheckoutApprovalPanel({
         codes: rawCodeList,
         hoVaTen: req.ho_va_ten,
         soDienThoai: req.so_dien_thoai,
+        ktx: reqKtx,
+        phongSo: req.phong_so,
         account: actor,
         sourceContext: 'CheckoutApprovalPanel.handleApprove',
         targets: deleteTargets,
@@ -962,7 +1023,10 @@ export default function CheckoutApprovalPanel({
 
       // 6. Immediate UI & context tombstone synchronization ONLY for rows genuinely deleted in Postgres
       if (actuallyDeletedIds.length > 0) {
+        invalidateDeletedTombstoneCache();
         markWorkersDeleted(actuallyDeletedIds);
+        const deletedSet = new Set(actuallyDeletedIds);
+        setContextWorkers(prev => prev.filter(w => !deletedSet.has(w.id)));
       }
 
       setCheckouts(prev =>
