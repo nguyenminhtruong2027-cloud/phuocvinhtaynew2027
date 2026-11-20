@@ -24,8 +24,31 @@ export interface WorkerDeletionIntegrityResult {
 const TOMBSTONE_STORAGE_KEY = 'ktx_hard_deleted_worker_tombstones_v1';
 const TOMBSTONE_CHANNEL_NAME = 'ktx_worker_tombstones_channel';
 const LOCAL_TOMBSTONE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const AUTHORITATIVE_CACHE_TTL_MS = 10_000; // 10s
+const RECENT_AUDITED_TTL_MS = 30_000; // 30s
 
 const memoryTombstones = new Map<string, number>();
+const recentlyAuditedIds = new Map<string, number>();
+
+// Session-level caches to avoid repeating 404/PGRST202 calls when optional SQL RPCs aren't deployed yet
+let rpcVerifyAvailable: boolean | null = null;
+let rpcTombstonesAvailable: boolean | null = null;
+
+// Short-lived cache + inflight deduplication for authoritative tombstone sync
+let cachedAuthoritativeTombstones: Map<string, number> | null = null;
+let cachedAuthoritativeAt = 0;
+let inflightAuthoritativeFetch: Promise<Map<string, number>> | null = null;
+
+function isMissingRpcError(err: { code?: string; message?: string; details?: string } | null | undefined): boolean {
+  if (!err) return false;
+  if (err.code === 'PGRST202') return true;
+  if (err.code === '42883') return false;
+  const msg = `${err.message || ''} ${err.details || ''}`.toLowerCase();
+  return (
+    msg.includes('could not find the function') ||
+    (msg.includes('function') && msg.includes('does not exist'))
+  );
+}
 
 function normalizeNameBasic(raw?: string | null): string {
   return String(raw || '')
@@ -87,6 +110,9 @@ export function recordLocalDeletedTombstones(ids: string[], deletedAtMs = Date.n
     const nextTs = Math.max(prev, deletedAtMs);
     merged.set(id, nextTs);
     memoryTombstones.set(id, nextTs);
+    if (cachedAuthoritativeTombstones) {
+      cachedAuthoritativeTombstones.set(id, Math.max(cachedAuthoritativeTombstones.get(id) ?? 0, nextTs));
+    }
   });
   pruneTombstoneMap(merged, Date.now());
 
@@ -210,26 +236,44 @@ export async function ensureWorkerHardDeleteAuditLogged(
   const cleanTargets = targets.filter(t => Boolean(t?.id && String(t.id).trim()));
   if (cleanTargets.length === 0) return [];
 
+  const nowMs = Date.now();
   const targetIds = Array.from(new Set(cleanTargets.map(t => String(t.id).trim())));
-  recordLocalDeletedTombstones(targetIds);
+  recordLocalDeletedTombstones(targetIds, nowMs);
 
   const alreadyLoggedIds = new Set<string>();
+  cleanTargets.forEach(t => {
+    const tid = String(t.id).trim();
+    const cachedTs = recentlyAuditedIds.get(tid);
+    if (cachedTs && nowMs - cachedTs < RECENT_AUDITED_TTL_MS) {
+      alreadyLoggedIds.add(tid);
+    }
+  });
+
+  const uncheckedTargets = cleanTargets.filter(t => !alreadyLoggedIds.has(String(t.id).trim()));
+  if (uncheckedTargets.length === 0) {
+    return Array.from(alreadyLoggedIds);
+  }
+
   try {
-    const recentSince = new Date(Date.now() - 20_000).toISOString();
+    const recentSince = new Date(nowMs - 20_000).toISOString();
     const { data: recentLogs } = await supabase
       .from('audit_logs')
       .select('detail')
       .eq('action', 'WORKER_HARD_DELETE')
       .gte('timestamp', recentSince)
       .order('timestamp', { ascending: false })
-      .limit(200);
+      .limit(50);
 
     (recentLogs || []).forEach((row: { detail?: string }) => {
       try {
         const raw = String(row?.detail || '').trim();
         if (raw.startsWith('{')) {
           const parsed = JSON.parse(raw);
-          if (parsed?.worker_id) alreadyLoggedIds.add(String(parsed.worker_id));
+          if (parsed?.worker_id) {
+            const wid = String(parsed.worker_id);
+            alreadyLoggedIds.add(wid);
+            recentlyAuditedIds.set(wid, nowMs);
+          }
         }
       } catch {
         // Ignore unparseable row
@@ -271,7 +315,11 @@ export async function ensureWorkerHardDeleteAuditLogged(
         // Non-fatal fallback
       }
     }
-    missingTargets.forEach(t => alreadyLoggedIds.add(String(t.id).trim()));
+    missingTargets.forEach(t => {
+      const tid = String(t.id).trim();
+      alreadyLoggedIds.add(tid);
+      recentlyAuditedIds.set(tid, nowMs);
+    });
   }
 
   return Array.from(alreadyLoggedIds);
@@ -303,70 +351,75 @@ export async function verifyWorkerDeletionIntegrity(
   let auditedDeletedIds: string[] = [];
   let usedRpc = false;
 
-  try {
-    const { data, error } = await supabase.rpc('verify_worker_deletion_integrity', {
-      p_worker_ids: cleanIds,
-      p_codes: cleanCodes,
-      p_ho_va_ten: params.hoVaTen || null,
-      p_so_dien_thoai: params.soDienThoai || null,
-      p_since: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-    });
+  if (rpcVerifyAvailable !== false) {
+    try {
+      const { data, error } = await supabase.rpc('verify_worker_deletion_integrity', {
+        p_worker_ids: cleanIds,
+        p_codes: cleanCodes,
+        p_ho_va_ten: params.hoVaTen || null,
+        p_so_dien_thoai: params.soDienThoai || null,
+        p_since: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      });
 
-    if (!error && data) {
-      const row = Array.isArray(data) ? data[0] : data;
-      remainingWorkerIds = Array.isArray(row?.remaining_worker_ids)
-        ? row.remaining_worker_ids.map((x: unknown) => String(x)).filter(Boolean)
-        : [];
-      orphanBedIds = Array.isArray(row?.orphan_bed_ids)
-        ? row.orphan_bed_ids.map((x: unknown) => String(x)).filter(Boolean)
-        : [];
-      auditedDeletedIds = Array.isArray(row?.audited_deleted_ids)
-        ? row.audited_deleted_ids.map((x: unknown) => String(x)).filter(Boolean)
-        : [];
-      usedRpc = true;
+      if (!error && data) {
+        rpcVerifyAvailable = true;
+        const row = Array.isArray(data) ? data[0] : data;
+        remainingWorkerIds = Array.isArray(row?.remaining_worker_ids)
+          ? row.remaining_worker_ids.map((x: unknown) => String(x)).filter(Boolean)
+          : [];
+        orphanBedIds = Array.isArray(row?.orphan_bed_ids)
+          ? row.orphan_bed_ids.map((x: unknown) => String(x)).filter(Boolean)
+          : [];
+        auditedDeletedIds = Array.isArray(row?.audited_deleted_ids)
+          ? row.audited_deleted_ids.map((x: unknown) => String(x)).filter(Boolean)
+          : [];
+        usedRpc = true;
+      } else if (error && isMissingRpcError(error)) {
+        rpcVerifyAvailable = false;
+      }
+    } catch {
+      usedRpc = false;
     }
-  } catch {
-    usedRpc = false;
   }
 
   if (!usedRpc) {
     const survivorSet = new Set<string>();
-    const CHUNK = 200;
-    for (let i = 0; i < cleanIds.length; i += CHUNK) {
-      const { data: rows } = await supabase
-        .from('workers')
-        .select('id')
-        .in('id', cleanIds.slice(i, i + CHUNK));
-      (rows || []).forEach((r: { id?: string }) => {
-        if (r?.id) survivorSet.add(String(r.id));
-      });
-    }
-
-    const normTargetName = normalizeNameBasic(params.hoVaTen);
-    for (const code of cleanCodes) {
-      const [{ data: byMa }, { data: byCccd }] = await Promise.all([
-        supabase.from('workers').select('id, ho_va_ten').eq('ma_nv', code),
-        supabase.from('workers').select('id, ho_va_ten').eq('cccd', code),
-      ]);
-      [...(byMa || []), ...(byCccd || [])].forEach((r: { id?: string; ho_va_ten?: string }) => {
-        if (!r?.id) return;
-        const rName = normalizeNameBasic(r.ho_va_ten);
-        if (!normTargetName || rName === normTargetName || code.replace(/\D/g, '').length >= 9) {
-          survivorSet.add(String(r.id));
-        }
-      });
-    }
-
     const bedSet = new Set<string>();
+    const CHUNK = 200;
+    const normTargetName = normalizeNameBasic(params.hoVaTen);
+
+    const idChunks: string[][] = [];
     for (let i = 0; i < cleanIds.length; i += CHUNK) {
-      const { data: bedRows } = await supabase
-        .from('beds')
-        .select('id')
-        .in('worker_id', cleanIds.slice(i, i + CHUNK));
-      (bedRows || []).forEach((b: { id?: string }) => {
-        if (b?.id) bedSet.add(String(b.id));
-      });
+      idChunks.push(cleanIds.slice(i, i + CHUNK));
     }
+
+    await Promise.all([
+      ...idChunks.map(async chunk => {
+        const [{ data: wRows }, { data: bRows }] = await Promise.all([
+          supabase.from('workers').select('id').in('id', chunk),
+          supabase.from('beds').select('id').in('worker_id', chunk),
+        ]);
+        (wRows || []).forEach((r: { id?: string }) => {
+          if (r?.id) survivorSet.add(String(r.id));
+        });
+        (bRows || []).forEach((b: { id?: string }) => {
+          if (b?.id) bedSet.add(String(b.id));
+        });
+      }),
+      ...cleanCodes.map(async code => {
+        const [{ data: byMa }, { data: byCccd }] = await Promise.all([
+          supabase.from('workers').select('id, ho_va_ten').eq('ma_nv', code),
+          supabase.from('workers').select('id, ho_va_ten').eq('cccd', code),
+        ]);
+        [...(byMa || []), ...(byCccd || [])].forEach((r: { id?: string; ho_va_ten?: string }) => {
+          if (!r?.id) return;
+          const rName = normalizeNameBasic(r.ho_va_ten);
+          if (!normTargetName || rName === normTargetName || code.replace(/\D/g, '').length >= 9) {
+            survivorSet.add(String(r.id));
+          }
+        });
+      }),
+    ]);
 
     remainingWorkerIds = Array.from(survivorSet);
     orphanBedIds = Array.from(bedSet);
@@ -429,71 +482,105 @@ export async function verifyWorkerDeletionIntegrity(
  */
 export async function fetchAuthoritativeDeletedTombstones(
   supabase: SupabaseClient,
-  sinceHours = 48
+  sinceHours = 48,
+  forceRefresh = false
 ): Promise<Map<string, number>> {
-  const merged = getLocalDeletedTombstones();
-  const sinceIso = new Date(Date.now() - sinceHours * 60 * 60 * 1000).toISOString();
-
-  try {
-    const { data, error } = await supabase.rpc('get_deleted_worker_tombstones', {
-      p_since: sinceIso,
+  const now = Date.now();
+  if (
+    !forceRefresh &&
+    cachedAuthoritativeTombstones &&
+    now - cachedAuthoritativeAt < AUTHORITATIVE_CACHE_TTL_MS
+  ) {
+    const merged = getLocalDeletedTombstones();
+    cachedAuthoritativeTombstones.forEach((ts, id) => {
+      merged.set(id, Math.max(merged.get(id) ?? 0, ts));
     });
-    if (!error && Array.isArray(data)) {
-      data.forEach((row: { worker_id?: string; deleted_at?: string }) => {
+    return merged;
+  }
+
+  if (!forceRefresh && inflightAuthoritativeFetch) {
+    return inflightAuthoritativeFetch;
+  }
+
+  inflightAuthoritativeFetch = (async () => {
+    const merged = getLocalDeletedTombstones();
+    const sinceIso = new Date(Date.now() - sinceHours * 60 * 60 * 1000).toISOString();
+
+    if (rpcTombstonesAvailable !== false) {
+      try {
+        const { data, error } = await supabase.rpc('get_deleted_worker_tombstones', {
+          p_since: sinceIso,
+        });
+        if (!error && Array.isArray(data)) {
+          rpcTombstonesAvailable = true;
+          data.forEach((row: { worker_id?: string; deleted_at?: string }) => {
+            const wid = String(row?.worker_id || '').trim();
+            const ts = row?.deleted_at ? new Date(row.deleted_at).getTime() : Date.now();
+            if (wid && !Number.isNaN(ts)) {
+              merged.set(wid, Math.max(merged.get(wid) ?? 0, ts));
+            }
+          });
+          cachedAuthoritativeTombstones = new Map(merged);
+          cachedAuthoritativeAt = Date.now();
+          return merged;
+        }
+        if (error && isMissingRpcError(error)) {
+          rpcTombstonesAvailable = false;
+        }
+      } catch {
+        // Fallback to direct table queries if RPC isn't deployed yet
+      }
+    }
+
+    try {
+      const [auditRes, delLogRes] = await Promise.all([
+        supabase
+          .from('audit_logs')
+          .select('timestamp, detail')
+          .eq('action', 'WORKER_HARD_DELETE')
+          .gte('timestamp', sinceIso)
+          .order('timestamp', { ascending: false })
+          .limit(250),
+        supabase
+          .from('worker_deletion_log')
+          .select('worker_id, deleted_at')
+          .gte('deleted_at', sinceIso)
+          .order('deleted_at', { ascending: false })
+          .limit(250),
+      ]);
+
+      (auditRes.data || []).forEach((row: { timestamp?: string; detail?: string }) => {
+        try {
+          const raw = String(row?.detail || '').trim();
+          if (!raw.startsWith('{')) return;
+          const parsed = JSON.parse(raw);
+          const wid = String(parsed?.worker_id || '').trim();
+          const ts = row?.timestamp ? new Date(row.timestamp).getTime() : Date.now();
+          if (wid && !Number.isNaN(ts)) {
+            merged.set(wid, Math.max(merged.get(wid) ?? 0, ts));
+          }
+        } catch {
+          // Ignore non-JSON audit detail
+        }
+      });
+
+      (delLogRes.data || []).forEach((row: { worker_id?: string; deleted_at?: string }) => {
         const wid = String(row?.worker_id || '').trim();
         const ts = row?.deleted_at ? new Date(row.deleted_at).getTime() : Date.now();
         if (wid && !Number.isNaN(ts)) {
           merged.set(wid, Math.max(merged.get(wid) ?? 0, ts));
         }
       });
-      return merged;
+    } catch {
+      // Keep local tombstones if network query fails
     }
-  } catch {
-    // Fallback to direct table queries if RPC isn't deployed yet
-  }
 
-  try {
-    const [auditRes, delLogRes] = await Promise.all([
-      supabase
-        .from('audit_logs')
-        .select('timestamp, detail')
-        .eq('action', 'WORKER_HARD_DELETE')
-        .gte('timestamp', sinceIso)
-        .order('timestamp', { ascending: false })
-        .limit(1000),
-      supabase
-        .from('worker_deletion_log')
-        .select('worker_id, deleted_at')
-        .gte('deleted_at', sinceIso)
-        .order('deleted_at', { ascending: false })
-        .limit(1000),
-    ]);
+    cachedAuthoritativeTombstones = new Map(merged);
+    cachedAuthoritativeAt = Date.now();
+    return merged;
+  })().finally(() => {
+    inflightAuthoritativeFetch = null;
+  });
 
-    (auditRes.data || []).forEach((row: { timestamp?: string; detail?: string }) => {
-      try {
-        const raw = String(row?.detail || '').trim();
-        if (!raw.startsWith('{')) return;
-        const parsed = JSON.parse(raw);
-        const wid = String(parsed?.worker_id || '').trim();
-        const ts = row?.timestamp ? new Date(row.timestamp).getTime() : Date.now();
-        if (wid && !Number.isNaN(ts)) {
-          merged.set(wid, Math.max(merged.get(wid) ?? 0, ts));
-        }
-      } catch {
-        // Ignore non-JSON audit detail
-      }
-    });
-
-    (delLogRes.data || []).forEach((row: { worker_id?: string; deleted_at?: string }) => {
-      const wid = String(row?.worker_id || '').trim();
-      const ts = row?.deleted_at ? new Date(row.deleted_at).getTime() : Date.now();
-      if (wid && !Number.isNaN(ts)) {
-        merged.set(wid, Math.max(merged.get(wid) ?? 0, ts));
-      }
-    });
-  } catch {
-    // Keep local tombstones if network query fails
-  }
-
-  return merged;
+  return inflightAuthoritativeFetch;
 }

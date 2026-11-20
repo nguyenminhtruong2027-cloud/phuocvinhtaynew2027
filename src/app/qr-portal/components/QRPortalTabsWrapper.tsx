@@ -87,11 +87,16 @@ export default function QRPortalTabsWrapper() {
     let timer: ReturnType<typeof setTimeout> | null = null;
     const scheduleFetch = () => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => { fetchPendingCount(); }, 300);
+      timer = setTimeout(() => { fetchPendingCount(); }, 450);
     };
     const channel = supabase
       .channel('qr_portal_pending_checkout_badge')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_registrations' }, scheduleFetch)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_registrations' }, (payload: any) => {
+        const note = String(payload?.new?.ghi_chu ?? payload?.old?.ghi_chu ?? '');
+        const regType = String(payload?.new?.type ?? payload?.old?.type ?? '');
+        if (!note.startsWith('[CHECKOUT]') && regType !== 'CHECKOUT') return;
+        scheduleFetch();
+      })
       .subscribe();
     return () => {
       if (timer) clearTimeout(timer);

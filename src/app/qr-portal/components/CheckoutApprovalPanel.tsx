@@ -13,10 +13,7 @@ import {
 import { invalidateKtxStructureCache, normalizeKtxLabel, normalizeDayLabel } from '@/lib/ktxStructure';
 import { releaseBedByLocation, normalizeBedLabel } from '@/lib/bedSync';
 import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
-import {
-  ensureWorkerHardDeleteAuditLogged,
-  verifyWorkerDeletionIntegrity,
-} from '@/lib/workerDeletionIntegrity';
+import { verifyWorkerDeletionIntegrity } from '@/lib/workerDeletionIntegrity';
 import {
   FacilityItem,
   fetchFacilitiesList,
@@ -142,9 +139,25 @@ function CheckoutDetailModal({
   const cfg = STATUS_CONFIG[req.status];
   const cleanNote = parseCheckoutNote(req.ghi_chu);
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isProcessing) onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose, isProcessing]);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop-scrim fade-in p-4">
-      <div className="bg-surf border border-bdr rounded-md w-full max-w-lg max-h-[90vh] overflow-y-auto modal-enter">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop-scrim fade-in p-4"
+      onClick={() => {
+        if (!isProcessing) onClose();
+      }}
+    >
+      <div
+        className="bg-surf border border-bdr rounded-md w-full max-w-lg max-h-[90vh] overflow-y-auto modal-enter"
+        onClick={e => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between p-4 bg-side text-tx border-b border-bdr">
           <div>
             <h3 className="font-bold text-sm tracking-wide">CHI TIẾT YÊU CẦU CHECK-OUT</h3>
@@ -153,6 +166,7 @@ function CheckoutDetailModal({
             </p>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="p-1.5 rounded hover:bg-act text-mu hover:text-tx cursor-pointer"
           >
@@ -340,13 +354,16 @@ export default function CheckoutApprovalPanel({
     };
   }, []);
 
+  const rpcApproveSupportedRef = useRef<boolean | null>(null);
+  const processingIdRef = useRef<string | null>(null);
+
   const fetchCheckouts = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
       const { data, error } = await supabase
         .from('worker_registrations')
-        .select('*')
+        .select('id, worker_id, ho_va_ten, ma_nv, so_cccd, so_dien_thoai, ktx, day, phong_so, giuong, status, reviewed_by, reviewed_at, ghi_chu, created_at')
         .like('ghi_chu', '[CHECKOUT]%')
         .order('created_at', { ascending: false });
 
@@ -368,9 +385,12 @@ export default function CheckoutApprovalPanel({
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const scheduleReload = () => {
+    const scheduleReload = (payload: any) => {
+      if (processingIdRef.current) return;
+      const note = String(payload?.new?.ghi_chu ?? payload?.old?.ghi_chu ?? '');
+      if (note && !note.startsWith('[CHECKOUT]')) return;
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => fetchCheckouts(true), 250);
+      timer = setTimeout(() => fetchCheckouts(true), 450);
     };
     const channel = supabase
       .channel('worker_registrations_checkout_realtime')
@@ -440,6 +460,7 @@ export default function CheckoutApprovalPanel({
    * TUYỆT ĐỐI không đánh dấu 'approved' nếu bước xóa hoặc giải phóng giường thất bại.
    */
   const handleApprove = async (req: CheckoutRequest) => {
+    processingIdRef.current = req.id;
     setProcessingId(req.id);
     setActionSuccessMsg(null);
     setActionErrorMsg(null);
@@ -464,6 +485,45 @@ export default function CheckoutApprovalPanel({
             .filter(v => Boolean(v) && !isPlaceholderCode(v))
         )
       );
+
+        const isMatchingRow = (w: {
+          id?: string;
+          hoVaTen?: string | null;
+          maNV?: string | null;
+          cccd?: string | null;
+          ktx?: string | null;
+          day?: string | null;
+          phongSo?: string | null;
+          soDienThoai?: string | null;
+        }) => {
+          if (!w?.id) return false;
+          const wMaNorm = normalizeCodeForMatch(w.maNV);
+          const wCccdNorm = normalizeCodeForMatch(w.cccd);
+          const wNameNorm = normalizeNameForMatch(w.hoVaTen);
+          const wKtxKey = normalizeKtxKey(w.ktx);
+
+          if (wCccdNorm && reqCodeSet.has(wCccdNorm)) {
+            if (!normReqName || wNameNorm === normReqName || wCccdNorm.replace(/\D/g, '').length >= 9) return true;
+          }
+          if (wMaNorm && reqCodeSet.has(wMaNorm)) {
+            if (!normReqName || wNameNorm === normReqName || wKtxKey === reqKtxKey || wMaNorm.replace(/\D/g, '').length >= 9) {
+              return true;
+            }
+          }
+          if (normReqName && wNameNorm === normReqName) {
+            const wPhoneDigits = String(w.soDienThoai || '').replace(/\D/g, '');
+            if (reqPhoneDigits.length >= 8 && wPhoneDigits === reqPhoneDigits) return true;
+            if (
+              reqKtxKey &&
+              wKtxKey === reqKtxKey &&
+              (!normReqRoom || normalizeRoomLabel(w.phongSo || '') === normReqRoom) &&
+              (!reqDayKey || !normalizeDayKey(w.day) || normalizeDayKey(w.day) === reqDayKey)
+            ) {
+              return true;
+            }
+          }
+          return false;
+        };
 
       /**
        * Thu thập toàn bộ bản ghi `workers` khớp với yêu cầu check-out
@@ -519,46 +579,6 @@ export default function CheckoutApprovalPanel({
             }
           });
         }
-
-        // Match via normalized (KTX + Day + Room + Name) OR (Name + Phone >= 8 digits across any KTX) OR normalized codes
-        const isMatchingRow = (w: {
-          id?: string;
-          hoVaTen?: string | null;
-          maNV?: string | null;
-          cccd?: string | null;
-          ktx?: string | null;
-          day?: string | null;
-          phongSo?: string | null;
-          soDienThoai?: string | null;
-        }) => {
-          if (!w?.id) return false;
-          const wMaNorm = normalizeCodeForMatch(w.maNV);
-          const wCccdNorm = normalizeCodeForMatch(w.cccd);
-          const wNameNorm = normalizeNameForMatch(w.hoVaTen);
-          const wKtxKey = normalizeKtxKey(w.ktx);
-
-          if (wCccdNorm && reqCodeSet.has(wCccdNorm)) {
-            if (!normReqName || wNameNorm === normReqName || wCccdNorm.replace(/\D/g, '').length >= 9) return true;
-          }
-          if (wMaNorm && reqCodeSet.has(wMaNorm)) {
-            if (!normReqName || wNameNorm === normReqName || wKtxKey === reqKtxKey || wMaNorm.replace(/\D/g, '').length >= 9) {
-              return true;
-            }
-          }
-          if (normReqName && wNameNorm === normReqName) {
-            const wPhoneDigits = String(w.soDienThoai || '').replace(/\D/g, '');
-            if (reqPhoneDigits.length >= 8 && wPhoneDigits === reqPhoneDigits) return true;
-            if (
-              reqKtxKey &&
-              wKtxKey === reqKtxKey &&
-              (!normReqRoom || normalizeRoomLabel(w.phongSo || '') === normReqRoom) &&
-              (!reqDayKey || !normalizeDayKey(w.day) || normalizeDayKey(w.day) === reqDayKey)
-            ) {
-              return true;
-            }
-          }
-          return false;
-        };
 
         const PAGE = 1000;
         let from = 0;
@@ -618,121 +638,100 @@ export default function CheckoutApprovalPanel({
       let handledByAtomicRpc = false;
 
       // Step 0: Prefer atomic SECURITY DEFINER SQL RPC when migration is deployed
-      try {
-        const { data: rpcData, error: rpcErr } = await supabase.rpc('approve_checkout_remove_worker', {
-          p_registration_id: req.id,
-          p_reviewed_by: currentUser?.id || null,
-        });
+      if (rpcApproveSupportedRef.current !== false) {
+        try {
+          const { data: rpcData, error: rpcErr } = await supabase.rpc('approve_checkout_remove_worker', {
+            p_registration_id: req.id,
+            p_reviewed_by: currentUser?.id || null,
+          });
 
-        if (!rpcErr) {
-          const row = Array.isArray(rpcData) ? rpcData[0] : rpcData;
-          const rpcDeletedIds: string[] = Array.isArray(row?.deleted_worker_ids)
-            ? row.deleted_worker_ids.map((id: unknown) => String(id)).filter(Boolean)
-            : [];
+          if (!rpcErr) {
+            rpcApproveSupportedRef.current = true;
+            const row = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+            const rpcDeletedIds: string[] = Array.isArray(row?.deleted_worker_ids)
+              ? row.deleted_worker_ids.map((id: unknown) => String(id)).filter(Boolean)
+              : [];
 
-          // Post-RPC strict residual sweep: ensure ZERO primary/duplicate/cross-field rows remain in public.workers
-          const residualRows = await findMatchingWorkerRowsInDb();
-          const rpcDeletedSet = new Set(rpcDeletedIds);
-          const unremovedRows = residualRows.filter(w => w?.id && !rpcDeletedSet.has(String(w.id)));
-          let extraDeletedIds: string[] = [];
+            // Fast in-memory sweep against hydrated WorkerContext for any client-known duplicate IDs
+            const rpcDeletedSet = new Set(rpcDeletedIds);
+            const localExtraMatches = (workers || []).filter(c => c?.id && !rpcDeletedSet.has(c.id) && isMatchingRow(c));
+            let extraDeletedIds: string[] = [];
 
-          if (unremovedRows.length > 0) {
-            const unremovedIds = unremovedRows.map(w => String(w.id));
-            try {
-              await supabase.from('worker_deletion_log').insert(
-                unremovedRows.map(w => ({
-                  worker_id: w.id,
-                  ho_va_ten: w.ho_va_ten || req.ho_va_ten,
-                  ma_nv: w.ma_nv || req.ma_nv,
-                  ktx: w.ktx || reqKtx,
-                  day: w.day || reqDay,
-                  deleted_at: nowStr,
-                }))
-              );
-            } catch {
-              // ignore non-fatal deletion log warning
+            if (localExtraMatches.length > 0) {
+              const unremovedIds = localExtraMatches.map(w => String(w.id));
+              const { data: delExtra, error: delExtraErr } = await supabase
+                .from('workers')
+                .delete()
+                .in('id', unremovedIds)
+                .select('id');
+
+              if (delExtraErr) {
+                throw new Error(
+                  `Đã duyệt RPC nhưng vẫn còn ${unremovedIds.length} bản ghi trùng của "${req.ho_va_ten}" không thể xóa: ${delExtraErr.message}`
+                );
+              }
+              extraDeletedIds = (delExtra || []).map((r: any) => String(r.id)).filter(Boolean);
+
+              if (extraDeletedIds.length > 0) {
+                await releaseBedByLocation(supabase, {
+                  workerIds: extraDeletedIds,
+                  ktx: reqKtx,
+                  day: reqDay,
+                  phongSo: req.phong_so,
+                  giuong: req.giuong,
+                });
+
+                preserveDeletedWorkerEntries(
+                  localExtraMatches.map(w => ({
+                    id: String(w.id),
+                    hoVaTen: w.hoVaTen || req.ho_va_ten || '',
+                    maNV: w.maNV || req.ma_nv || '',
+                    ktx: w.ktx || reqKtx || '',
+                    day: w.day || reqDay || '',
+                    createdAt: w.createdAt || undefined,
+                  }))
+                );
+              }
             }
 
-            const { data: delExtra, error: delExtraErr } = await supabase
-              .from('workers')
-              .delete()
-              .in('id', unremovedIds)
-              .select('id');
+            actuallyDeletedIds = Array.from(new Set([...rpcDeletedIds, ...extraDeletedIds]));
+            handledByAtomicRpc = true;
 
-            if (delExtraErr) {
-              throw new Error(
-                `Đã duyệt RPC nhưng vẫn còn ${unremovedIds.length} bản ghi trùng của "${req.ho_va_ten}" không thể xóa: ${delExtraErr.message}`
+            if (rpcDeletedIds.length > 0) {
+              preserveDeletedWorkerEntries(
+                rpcDeletedIds.map(id => {
+                  const w = (workers || []).find(wk => wk.id === id);
+                  return {
+                    id,
+                    hoVaTen: w?.hoVaTen || req.ho_va_ten || '',
+                    maNV: w?.maNV || req.ma_nv || '',
+                    ktx: w?.ktx || reqKtx || '',
+                    day: w?.day || reqDay || '',
+                    createdAt: w?.createdAt || undefined,
+                  };
+                })
               );
             }
-            extraDeletedIds = (delExtra || []).map((r: any) => String(r.id)).filter(Boolean);
-
-            const { data: survivors } = await supabase
-              .from('workers')
-              .select('id')
-              .in('id', unremovedIds);
-            if (survivors && survivors.length > 0) {
-              throw new Error(
-                `Vẫn còn ${survivors.length} bản ghi của "${req.ho_va_ten}" trên CSDL chưa xóa được (kiểm tra phân quyền hoặc chạy lại Mã SQL mới nhất).`
-              );
+          } else {
+            const errMsg = `${rpcErr.message || ''} ${rpcErr.details || ''}`.toLowerCase();
+            const isMissingRpc =
+              rpcErr.code === 'PGRST202' ||
+              errMsg.includes('could not find the function') ||
+              (errMsg.includes('function') && errMsg.includes('approve_checkout_remove_worker') && errMsg.includes('does not exist'));
+            if (!isMissingRpc) {
+              throw new Error(rpcErr.message || 'Không thể phê duyệt check-out trên máy chủ.');
             }
-
-            await releaseBedByLocation(supabase, {
-              workerIds: extraDeletedIds.length > 0 ? extraDeletedIds : unremovedIds,
-              ktx: reqKtx,
-              day: reqDay,
-              phongSo: req.phong_so,
-              giuong: req.giuong,
-            });
-
-            preserveDeletedWorkerEntries(
-              unremovedRows.map(w => ({
-                id: String(w.id),
-                hoVaTen: w.ho_va_ten || req.ho_va_ten || '',
-                maNV: w.ma_nv || req.ma_nv || '',
-                ktx: w.ktx || reqKtx || '',
-                day: w.day || reqDay || '',
-                createdAt: w.created_at || undefined,
-              }))
-            );
+            rpcApproveSupportedRef.current = false;
           }
-
-          actuallyDeletedIds = Array.from(new Set([...rpcDeletedIds, ...extraDeletedIds]));
-          handledByAtomicRpc = true;
-
-          if (rpcDeletedIds.length > 0) {
-            preserveDeletedWorkerEntries(
-              rpcDeletedIds.map(id => {
-                const w = (workers || []).find(wk => wk.id === id);
-                return {
-                  id,
-                  hoVaTen: w?.hoVaTen || req.ho_va_ten || '',
-                  maNV: w?.maNV || req.ma_nv || '',
-                  ktx: w?.ktx || reqKtx || '',
-                  day: w?.day || reqDay || '',
-                  createdAt: w?.createdAt || undefined,
-                };
-              })
-            );
-          }
-        } else {
-          const errMsg = `${rpcErr.message || ''} ${rpcErr.details || ''}`.toLowerCase();
-          // ONLY fall back when the RPC function itself is missing in PostgREST/Postgres.
-          // Never swallow SQL runtime errors (like 42883 operator mismatch or permission errors).
-          const isMissingRpc =
-            rpcErr.code === 'PGRST202' ||
-            errMsg.includes('could not find the function') ||
-            (errMsg.includes('function') && errMsg.includes('approve_checkout_remove_worker') && errMsg.includes('does not exist'));
-          if (!isMissingRpc) {
-            throw new Error(rpcErr.message || 'Không thể phê duyệt check-out trên máy chủ.');
-          }
+        } catch (rpcException: any) {
+          const msg = String(rpcException?.message || '');
+          const lower = msg.toLowerCase();
+          const isMissing =
+            lower.includes('could not find the function') ||
+            (lower.includes('function') && lower.includes('approve_checkout_remove_worker') && lower.includes('does not exist'));
+          if (!isMissing) throw rpcException;
+          rpcApproveSupportedRef.current = false;
         }
-      } catch (rpcException: any) {
-        const msg = String(rpcException?.message || '');
-        const lower = msg.toLowerCase();
-        const isMissing =
-          lower.includes('could not find the function') ||
-          (lower.includes('function') && lower.includes('approve_checkout_remove_worker') && lower.includes('does not exist'));
-        if (!isMissing) throw rpcException;
       }
 
       // Fallback client pipeline (when atomic RPC SQL migration hasn't been executed on remote Supabase yet)
@@ -949,15 +948,6 @@ export default function CheckoutApprovalPanel({
         throw new Error(`Kiểm tra toàn vẹn sau duyệt check-out thất bại: ${integrity.message}`);
       }
 
-      if (deleteTargets.length > 0) {
-        await ensureWorkerHardDeleteAuditLogged(
-          supabase,
-          actor,
-          deleteTargets,
-          'CheckoutApprovalPanel.handleApprove'
-        );
-      }
-
       // 6. Immediate UI & context tombstone synchronization ONLY for rows genuinely deleted in Postgres
       if (actuallyDeletedIds.length > 0) {
         markWorkersDeleted(actuallyDeletedIds);
@@ -969,8 +959,9 @@ export default function CheckoutApprovalPanel({
         )
       );
 
+      // Close detail modal after approval so the fixed overlay never blocks Sidebar navigation
       if (detailReq?.id === req.id) {
-        setDetailReq(prev => (prev ? { ...prev, status: 'approved', reviewed_at: nowStr } : null));
+        setDetailReq(null);
       }
 
       addLog(
@@ -979,17 +970,12 @@ export default function CheckoutApprovalPanel({
         `Duyệt check-out: ${req.ho_va_ten} (${!isPlaceholderCode(req.ma_nv) ? req.ma_nv : 'Không mã NV'}) · ${req.ktx} · ${req.day} · P.${req.phong_so}${req.giuong ? ` · ${formatBedShort(req.giuong)}` : ''}`
       );
 
-      // Invalidate caches and trigger background WorkerContext resync
+      // Invalidate lightweight caches without saturating connections or canceling in-flight updates
       invalidateWorkerHierarchyCache();
       invalidateKtxStructureCache();
       invalidateFacilitiesCache();
-      refreshWorkers().catch(() => {});
-
-      if (typeof window !== 'undefined') {
-        if (actuallyDeletedIds.length > 0) {
-          window.dispatchEvent(new CustomEvent('ktx_workers_deleted', { detail: { ids: actuallyDeletedIds } }));
-        }
-        window.dispatchEvent(new CustomEvent('ktx_workers_updated'));
+      if (actuallyDeletedIds.length === 0) {
+        refreshWorkers().catch(() => {});
       }
 
       const roomLiberatedText = `${req.ktx} - ${req.day} - Phòng ${req.phong_so}`;
@@ -1006,11 +992,13 @@ export default function CheckoutApprovalPanel({
       setActionErrorMsg(msg);
       toast.error(`Lỗi khi phê duyệt: ${msg}`);
     } finally {
+      processingIdRef.current = null;
       setProcessingId(null);
     }
   };
 
   const handleReject = async (id: string) => {
+    processingIdRef.current = id;
     setProcessingId(id);
     try {
       const nowStr = new Date().toISOString();
@@ -1032,11 +1020,13 @@ export default function CheckoutApprovalPanel({
       );
 
       if (detailReq?.id === id) {
-        setDetailReq(prev => (prev ? { ...prev, status: 'rejected', reviewed_at: nowStr } : null));
+        setDetailReq(null);
       }
+      toast.success('Đã từ chối yêu cầu check-out.');
     } catch (err: any) {
       toast.error(`Lỗi khi từ chối: ${err?.message || 'Không thể cập nhật'}`);
     } finally {
+      processingIdRef.current = null;
       setProcessingId(null);
     }
   };
@@ -1115,8 +1105,14 @@ export default function CheckoutApprovalPanel({
 
       {/* Delete Modal */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop-scrim fade-in p-4">
-          <div className="bg-surf border border-bdr rounded-md w-full max-w-sm p-5 space-y-4 modal-enter">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop-scrim fade-in p-4"
+          onClick={() => setDeleteTarget(null)}
+        >
+          <div
+            className="bg-surf border border-bdr rounded-md w-full max-w-sm p-5 space-y-4 modal-enter"
+            onClick={e => e.stopPropagation()}
+          >
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded bg-dgrbg text-dgr flex items-center justify-center shrink-0">
                 <Trash2 size={16} />

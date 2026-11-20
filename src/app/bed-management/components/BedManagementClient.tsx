@@ -17,10 +17,7 @@ import { compareKtxNames, DEFAULT_ROOM_CAPACITY } from '@/data/workers';
 import { fetchRoomCapacities, getRoomCapacity, RoomCapacityMap, formatRoomDisplay, normalizeRoomLabel, invalidateFacilitiesCache } from '@/lib/facilityCapacity';
 import { reconcileBedsWithWorkers, releaseBedsForWorkers, releaseBedByLocation, normalizeBedLabel } from '@/lib/bedSync';
 import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
-import {
-  ensureWorkerHardDeleteAuditLogged,
-  verifyWorkerDeletionIntegrity,
-} from '@/lib/workerDeletionIntegrity';
+import { verifyWorkerDeletionIntegrity } from '@/lib/workerDeletionIntegrity';
 import { invalidateWorkerHierarchyCache } from '@/lib/workerHierarchy';
 import { invalidateKtxStructureCache } from '@/lib/ktxStructure';
 import { exportToExcel } from '@/lib/exportExcel';
@@ -1186,15 +1183,11 @@ export default function BedManagementClient() {
       if (!integrity.isClean) {
         throw new Error(integrity.message);
       }
-      if (deleteTargets.length > 0) {
-        await ensureWorkerHardDeleteAuditLogged(supabase, actor, deleteTargets, 'BedManagementClient.handleHardDelete');
-      }
 
       if (deletedWorkerIds.length > 0) {
         markContextWorkersDeleted(deletedWorkerIds);
         setContextWorkers(prev => prev.filter(w => !deletedSet.has(w.id)));
         if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('ktx_workers_deleted', { detail: { ids: deletedWorkerIds } }));
           window.dispatchEvent(new Event('ktx_workers_updated'));
         }
       }
@@ -1212,7 +1205,9 @@ export default function BedManagementClient() {
       invalidateWorkerHierarchyCache();
       invalidateKtxStructureCache();
       invalidateFacilitiesCache();
-      refreshWorkers().catch(() => {});
+      if (deletedWorkerIds.length === 0) {
+        refreshWorkers().catch(() => {});
+      }
 
       toast.success(
         deletedWorkerId

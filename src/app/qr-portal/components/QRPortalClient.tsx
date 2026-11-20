@@ -1101,11 +1101,16 @@ export default function QRPortalClient() {
     let timer: ReturnType<typeof setTimeout> | null = null;
     const scheduleReload = () => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => fetchRegistrations(true), 250);
+      timer = setTimeout(() => fetchRegistrations(true), 400);
     };
     const channel = supabase
       .channel('worker_registrations_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_registrations' }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_registrations' }, (payload: any) => {
+        const note = String(payload?.new?.ghi_chu ?? payload?.old?.ghi_chu ?? '');
+        const regType = String(payload?.new?.type ?? payload?.old?.type ?? '');
+        if (note.startsWith('[CHECKOUT]') || regType === 'CHECKOUT') return;
+        scheduleReload();
+      })
       .subscribe();
     return () => {
       if (timer) clearTimeout(timer);

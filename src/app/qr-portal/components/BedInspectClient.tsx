@@ -12,10 +12,7 @@ import { useAudit } from '@/context/AuditContext';
 import { releaseBedsForWorkers, releaseBedByLocation, normalizeBedLabel, normalizeDayKey } from '@/lib/bedSync';
 import { normalizeRoomLabel, invalidateFacilitiesCache } from '@/lib/facilityCapacity';
 import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
-import {
-  ensureWorkerHardDeleteAuditLogged,
-  verifyWorkerDeletionIntegrity,
-} from '@/lib/workerDeletionIntegrity';
+import { verifyWorkerDeletionIntegrity } from '@/lib/workerDeletionIntegrity';
 import { invalidateWorkerHierarchyCache } from '@/lib/workerHierarchy';
 import { invalidateKtxStructureCache } from '@/lib/ktxStructure';
 import { toast } from 'sonner';
@@ -522,9 +519,6 @@ export default function BedInspectClient() {
       });
       if (!integrity.isClean) {
         throw new Error(integrity.message);
-      }
-      if (deleteTargets.length > 0) {
-        await ensureWorkerHardDeleteAuditLogged(supabase, actor, deleteTargets, 'BedInspectClient.checkoutImmediate');
       }
 
       addLog(

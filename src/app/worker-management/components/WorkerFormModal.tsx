@@ -9,6 +9,7 @@ import { normalizeRoomLabel } from '@/lib/facilityCapacity';
 import { normalizeBedLabel } from '@/lib/bedSync';
 import { parseVNDateSafe } from '@/lib/vnDate';
 import { loadSavedRoomGenderMap, normalizeGender } from '@/lib/roomGender';
+import { createClient } from '@/lib/supabase/client';
 
 interface Props {
   worker: Worker | null;
@@ -529,6 +530,29 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
     } : { ktx: defaultKtxVal, donVi: 'XD', gioiTinh: 'Nam', day: defaultDayVal, phongSo: '1' },
   });
 
+  useEffect(() => {
+    if (!isEdit || !worker?.id || worker.avatar !== undefined) return;
+    let cancelled = false;
+    const supabase = createClient();
+    void (async () => {
+      try {
+        const { data } = await supabase
+          .from('workers')
+          .select('avatar')
+          .eq('id', worker.id)
+          .maybeSingle();
+        if (!cancelled && data && typeof (data as any).avatar === 'string' && (data as any).avatar) {
+          setValue('avatar', (data as any).avatar, { shouldDirty: false });
+        }
+      } catch {
+        // ignore lazy avatar fetch failure; undefined preserves DB value on submit
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isEdit, worker?.id, worker?.avatar, setValue]);
+
   const watchedCheckIn = watch('ngayVaoKTX');
   const watchedCheckOut = watch('ngayRaKTX');
   const watchedMaNV = watch('maNV') || '';
@@ -741,7 +765,7 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
         id: worker?.id ?? `new-${Date.now()}`,
         stt: worker?.stt ?? 0,
         khoaTraCuu: `${data.ktx || ''}|${data.day || ''}|${data.phongSo || ''}`,
-        avatar: data.avatar || '',
+        avatar: data.avatar !== undefined ? data.avatar : worker?.avatar,
       };
       onSave(saved);
     } finally {

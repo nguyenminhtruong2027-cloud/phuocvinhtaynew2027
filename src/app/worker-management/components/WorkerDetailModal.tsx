@@ -88,6 +88,7 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
   const [activeTab, setActiveTab] = useState<'info' | 'history'>('info');
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [lazyAvatar, setLazyAvatar] = useState<string | undefined>(w.avatar);
 
   const workerId = w.id;
   const workerMaNV = w.maNV || '';
@@ -98,6 +99,30 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
   const workerDay = w.day || '';
   const workerPhong = w.phongSo || '';
   const workerGiuong = w.giuong || '';
+
+  useEffect(() => {
+    setLazyAvatar(w.avatar);
+    if (w.avatar !== undefined || !w.id) return;
+    let cancelled = false;
+    const supabase = createClient();
+    void (async () => {
+      try {
+        const { data } = await supabase
+          .from('workers')
+          .select('avatar')
+          .eq('id', w.id)
+          .maybeSingle();
+        if (!cancelled && data && typeof (data as any).avatar === 'string' && (data as any).avatar) {
+          setLazyAvatar((data as any).avatar);
+        }
+      } catch {
+        // ignore lazy avatar load failures
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [w.id, w.avatar]);
 
   const isFemale =
     (w.gioiTinh || '').toLowerCase().includes('nữ') || (w.gioiTinh || '').toLowerCase() === 'nu';
@@ -456,12 +481,12 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
                 <DetailRow label="Số điện thoại" value={w.soDienThoai} icon={Phone} mono />
                 <DetailRow label="CCCD" value={w.cccd} icon={CreditCard} mono />
                 <DetailRow label="Hộ khẩu Tỉnh/TP" value={w.hoKhauTinh} icon={MapPin} />
-                {w.avatar && (
+                {lazyAvatar && (
                   <div className="py-2.5 border-b border-bdr">
                     <p className="text-xs text-mu font-medium mb-1.5">Ảnh CCCD</p>
-                    <a href={w.avatar} target="_blank" rel="noopener noreferrer">
+                    <a href={lazyAvatar} target="_blank" rel="noopener noreferrer">
                       <img
-                        src={w.avatar}
+                        src={lazyAvatar}
                         alt={`Ảnh CCCD của ${w.hoVaTen}`}
                         className="w-full max-w-[180px] rounded-xl border border-bdr2 object-cover hover:opacity-90 transition-opacity cursor-pointer"
                       />

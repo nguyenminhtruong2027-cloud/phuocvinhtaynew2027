@@ -1,11 +1,12 @@
 'use client';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { QrCode, Calendar, Play, Square, Users, UserCheck, UserX, Download, RefreshCw, Loader2, CheckCircle2, Clock, Edit3, Save, X, AlertCircle, Search, Trash2, Filter, MapPin, Bell, BellRing, UserPlus } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
+import { useWorkers } from '@/context/WorkerContext';
 import { getVNDateString } from '@/lib/vnDate';
 import { QrCodeImage, downloadQrPng } from '@/components/QrCodeImage';
 
@@ -116,27 +117,6 @@ function QRCodeDisplay({ url, sessionDate, zoneLabel }: { url: string; sessionDa
   );
 }
 
-async function fetchAllWorkers(supabase: ReturnType<typeof createClient>): Promise<WorkerInfo[]> {
-  const PAGE = 1000;
-  const byId = new Map<string, WorkerInfo>();
-  let from = 0;
-  while (true) {
-    const { data, error } = await supabase
-      .from('workers')
-      .select('id, ho_va_ten, ma_nv, ktx, day, phong_so, ngay_sinh, don_vi, ho_khau_tinh, cccd, to_truong, sdt_to_truong')
-      .order('ho_va_ten', { ascending: true })
-      .order('id', { ascending: true })
-      .range(from, from + PAGE - 1);
-    if (error || !data || data.length === 0) break;
-    for (const w of data as WorkerInfo[]) {
-      if (w?.id) byId.set(w.id, w);
-    }
-    if (data.length < PAGE) break;
-    from += PAGE;
-  }
-  return Array.from(byId.values());
-}
-
 export default function AttendancePortalClient() {
   const [activeTab, setActiveTab] = useState<'session' | 'records' | 'alerts'>('session');
 
@@ -154,19 +134,7 @@ export default function AttendancePortalClient() {
   const [zoneDay, setZoneDay] = useState('');
   const [zonePhong, setZonePhong] = useState('');
 
-  const [ktxList, setKtxList] = useState<string[]>([]);
-
-  // Cascading lists derived from workers
-  const [dayList, setDayList] = useState<string[]>([]);
-  const [phongList, setPhongList] = useState<string[]>([]);
-
-  // Manual input mode flags for session zone fields
-  const [isManualKtx, setIsManualKtx] = useState(false);
-  const [isManualDay, setIsManualDay] = useState(false);
-  const [isManualPhong, setIsManualPhong] = useState(false);
-
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
-  const [allWorkers, setAllWorkers] = useState<WorkerInfo[]>([]);
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -227,8 +195,18 @@ export default function AttendancePortalClient() {
   const [attendanceUrl, setAttendanceUrl] = useState('');
   const { currentUser } = useAuth();
   const { addLog } = useAudit();
+  const { workers: contextWorkers, setWorkers: setContextWorkers } = useWorkers();
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
+
+  // Cascading lists derived from workers
+  const [dayList, setDayList] = useState<string[]>([]);
+  const [phongList, setPhongList] = useState<string[]>([]);
+
+  // Manual input mode flags for session zone fields
+  const [isManualKtx, setIsManualKtx] = useState(false);
+  const [isManualDay, setIsManualDay] = useState(false);
+  const [isManualPhong, setIsManualPhong] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -236,17 +214,29 @@ export default function AttendancePortalClient() {
     }
   }, []);
 
-  // ─── Load all workers once ────────────────────────────────────────────────
-  useEffect(() => {
-    const load = async () => {
-      const workers = await fetchAllWorkers(supabase);
-      setAllWorkers(workers);
-      const ktxSet = new Set<string>();
-      workers.forEach(w => { if (w.ktx) ktxSet.add(w.ktx); });
-      setKtxList(Array.from(ktxSet).sort());
-    };
-    load();
-  }, [supabase]);
+  const allWorkers = useMemo<WorkerInfo[]>(
+    () =>
+      contextWorkers.map(w => ({
+        id: w.id,
+        ho_va_ten: w.hoVaTen || '',
+        ma_nv: w.maNV || '',
+        ktx: w.ktx || '',
+        day: w.day || '',
+        phong_so: w.phongSo || '',
+        ngay_sinh: w.ngaySinh || '',
+        don_vi: w.donVi || '',
+        ho_khau_tinh: w.hoKhauTinh || '',
+        cccd: w.cccd || '',
+        to_truong: w.toTruong || '',
+        sdt_to_truong: w.sdtToTruong || '',
+      })),
+    [contextWorkers]
+  );
+
+  const ktxList = useMemo(
+    () => Array.from(new Set(allWorkers.map(w => w.ktx).filter(Boolean))).sort(),
+    [allWorkers]
+  );
 
   // ─── Cascade: KTX → Dãy list ─────────────────────────────────────────────
   useEffect(() => {
@@ -586,7 +576,7 @@ export default function AttendancePortalClient() {
         const rec = records.find(r => r.id === recId);
         if (rec?.ma_nv) {
           await supabase.from('workers').update({ ktx: editLocKtx, day: editLocDay, phong_so: editLocPhong }).eq('ma_nv', rec.ma_nv);
-          setAllWorkers(prev => prev.map(w => w.ma_nv === rec.ma_nv ? { ...w, ktx: editLocKtx, day: editLocDay, phong_so: editLocPhong } : w));
+          setContextWorkers(prev => prev.map(w => w.maNV === rec.ma_nv ? { ...w, ktx: editLocKtx, day: editLocDay, phongSo: editLocPhong } : w));
         }
         setEditingLocationId(null);
       }
@@ -613,7 +603,7 @@ export default function AttendancePortalClient() {
     try {
       const { error } = await supabase.from('workers').update({ ktx: editAbsentKtx, day: editAbsentDay, phong_so: editAbsentPhong }).eq('id', workerId);
       if (!error) {
-        setAllWorkers(prev => prev.map(w => w.id === workerId ? { ...w, ktx: editAbsentKtx, day: editAbsentDay, phong_so: editAbsentPhong } : w));
+        setContextWorkers(prev => prev.map(w => w.id === workerId ? { ...w, ktx: editAbsentKtx, day: editAbsentDay, phongSo: editAbsentPhong } : w));
         setEditingAbsentId(null);
       }
     } catch (e: any) {
