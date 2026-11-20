@@ -8,7 +8,7 @@ RETURNS TEXT
 LANGUAGE sql
 IMMUTABLE
 AS $$
-  SELECT LOWER(TRIM(REGEXP_REPLACE(COALESCE(raw, ''), '\s+', ' ', 'g')));
+  SELECT LOWER(TRIM(REGEXP_REPLACE(TRANSLATE(NORMALIZE(COALESCE(raw, ''), NFC), CHR(160) || CHR(8203) || CHR(8204) || CHR(8205) || CHR(65279), '     '), '\s+', ' ', 'g')));
 $$;
 
 CREATE OR REPLACE FUNCTION public._norm_day_text(raw TEXT)
@@ -17,7 +17,7 @@ LANGUAGE sql
 IMMUTABLE
 AS $$
   SELECT REGEXP_REPLACE(
-    LOWER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(COALESCE(raw, ''), '^(?:dãy|day)\s*', '', 'i'), '\s+', ' ', 'g'))),
+    LOWER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(TRANSLATE(NORMALIZE(COALESCE(raw, ''), NFC), CHR(160) || CHR(8203) || CHR(8204) || CHR(8205) || CHR(65279), '     '), '^(?:dãy|day)\s*', '', 'i'), '\s+', ' ', 'g'))),
     '^0+(\d+)$',
     '\1'
   );
@@ -28,7 +28,7 @@ RETURNS TEXT
 LANGUAGE sql
 IMMUTABLE
 AS $$
-  SELECT LTRIM(LOWER(TRIM(REGEXP_REPLACE(COALESCE(raw, ''), '^(?:phòng|phong|p[.\s]*)\s*', '', 'i'))), '0');
+  SELECT LTRIM(LOWER(TRIM(REGEXP_REPLACE(TRANSLATE(NORMALIZE(COALESCE(raw, ''), NFC), CHR(160) || CHR(8203) || CHR(8204) || CHR(8205) || CHR(65279), '     '), '^(?:phòng|phong|p[.\s]*)\s*', '', 'i'))), '0');
 $$;
 
 CREATE OR REPLACE FUNCTION public._norm_bed_text(raw TEXT)
@@ -36,7 +36,7 @@ RETURNS TEXT
 LANGUAGE sql
 IMMUTABLE
 AS $$
-  SELECT LTRIM(LOWER(TRIM(REGEXP_REPLACE(COALESCE(raw, ''), '^(?:giường|giuong|g[.\s]*)\s*', '', 'i'))), '0');
+  SELECT LTRIM(LOWER(TRIM(REGEXP_REPLACE(TRANSLATE(NORMALIZE(COALESCE(raw, ''), NFC), CHR(160) || CHR(8203) || CHR(8204) || CHR(8205) || CHR(65279), '     '), '^(?:giường|giuong|g[.\s]*)\s*', '', 'i'))), '0');
 $$;
 
 CREATE OR REPLACE FUNCTION public._norm_name_text(raw TEXT)
@@ -44,7 +44,15 @@ RETURNS TEXT
 LANGUAGE sql
 IMMUTABLE
 AS $$
-  SELECT LOWER(TRIM(REGEXP_REPLACE(NORMALIZE(COALESCE(raw, ''), NFC), '\s+', ' ', 'g')));
+  SELECT LOWER(TRIM(REGEXP_REPLACE(TRANSLATE(NORMALIZE(COALESCE(raw, ''), NFC), CHR(160) || CHR(8203) || CHR(8204) || CHR(8205) || CHR(65279), '     '), '\s+', ' ', 'g')));
+$$;
+
+CREATE OR REPLACE FUNCTION public._norm_code_text(raw TEXT)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT LOWER(REGEXP_REPLACE(REGEXP_REPLACE(TRANSLATE(NORMALIZE(COALESCE(raw, ''), NFC), CHR(160) || CHR(8203) || CHR(8204) || CHR(8205) || CHR(65279), '     '), '\s+', '', 'g'), '^(?:chờmã|chưacó|n/a|null|-|—)$', '', 'i'));
 $$;
 
 CREATE OR REPLACE FUNCTION public.approve_checkout_remove_worker(
@@ -71,6 +79,7 @@ DECLARE
   v_name_norm TEXT;
   v_ma_nv TEXT;
   v_cccd TEXT;
+  v_codes TEXT[] := ARRAY[]::TEXT[];
   v_phone_digits TEXT;
   v_candidate_ids TEXT[] := ARRAY[]::TEXT[];
   v_deleted_ids TEXT[] := ARRAY[]::TEXT[];
@@ -104,22 +113,22 @@ BEGIN
   v_name_norm := public._norm_name_text(v_reg.ho_va_ten);
   v_phone_digits := REGEXP_REPLACE(COALESCE(v_reg.so_dien_thoai, ''), '\D', '', 'g');
 
-  v_ma_nv := TRIM(COALESCE(v_reg.ma_nv, ''));
-  IF LOWER(v_ma_nv) IN ('', '-', '—', 'chờ mã', 'chưa có', 'n/a', 'null') THEN
-    v_ma_nv := '';
+  v_ma_nv := public._norm_code_text(v_reg.ma_nv);
+  v_cccd := public._norm_code_text(v_reg.so_cccd);
+
+  IF v_ma_nv <> '' THEN
+    v_codes := ARRAY_APPEND(v_codes, v_ma_nv);
+  END IF;
+  IF v_cccd <> '' AND NOT (v_cccd = ANY(v_codes)) THEN
+    v_codes := ARRAY_APPEND(v_codes, v_cccd);
   END IF;
 
-  v_cccd := TRIM(COALESCE(v_reg.so_cccd, ''));
-  IF LOWER(v_cccd) IN ('', '-', '—', 'chờ mã', 'chưa có', 'n/a', 'null') THEN
-    v_cccd := '';
-  END IF;
-
-  -- Collect all matching worker rows using TEXT-safe ID comparison (works whether id is UUID or TEXT):
+  -- Collect ALL matching worker rows (primary + any duplicates across rooms/KTXes):
   -- 1. Explicit worker_id on registration
   -- 2. Linked worker_id from beds at normalized slot (if name matches or name empty)
-  -- 3. Non-placeholder ma_nv / cccd
-  -- 4. Normalized (ktx + day/empty + room + NFC ho_va_ten) (captures duplicates)
-  -- 5. Normalized (ktx + NFC ho_va_ten + phone) (captures workers moved between rooms)
+  -- 3. Cross-matched non-placeholder codes (ma_nv <-> cccd)
+  -- 4. Normalized (ktx + day/empty + room + NFC ho_va_ten)
+  -- 5. Normalized (NFC ho_va_ten + 8+ digit phone) even across KTXes
   SELECT ARRAY_AGG(DISTINCT w.id::TEXT)
   INTO v_candidate_ids
   FROM public.workers w
@@ -141,15 +150,29 @@ BEGIN
         )
     )
     OR (
-      v_ma_nv <> ''
-      AND LOWER(TRIM(COALESCE(w.ma_nv, ''))) = LOWER(v_ma_nv)
+      ARRAY_LENGTH(v_codes, 1) > 0
       AND (
-        v_name_norm = ''
-        OR public._norm_name_text(w.ho_va_ten) = v_name_norm
-        OR public._norm_ktx_text(w.ktx) = v_ktx_norm
+        (
+          public._norm_code_text(w.cccd) <> ''
+          AND public._norm_code_text(w.cccd) = ANY(v_codes)
+          AND (
+            v_name_norm = ''
+            OR public._norm_name_text(w.ho_va_ten) = v_name_norm
+            OR LENGTH(REGEXP_REPLACE(COALESCE(w.cccd, ''), '\D', '', 'g')) >= 9
+          )
+        )
+        OR (
+          public._norm_code_text(w.ma_nv) <> ''
+          AND public._norm_code_text(w.ma_nv) = ANY(v_codes)
+          AND (
+            v_name_norm = ''
+            OR public._norm_name_text(w.ho_va_ten) = v_name_norm
+            OR public._norm_ktx_text(w.ktx) = v_ktx_norm
+            OR LENGTH(public._norm_code_text(w.ma_nv)) >= 9
+          )
+        )
       )
     )
-    OR (v_cccd <> '' AND LOWER(TRIM(COALESCE(w.cccd, ''))) = LOWER(v_cccd))
     OR (
       v_name_norm <> '' AND v_ktx_norm <> '' AND v_room_norm <> ''
       AND public._norm_ktx_text(w.ktx) = v_ktx_norm
@@ -158,8 +181,7 @@ BEGIN
       AND public._norm_name_text(w.ho_va_ten) = v_name_norm
     )
     OR (
-      v_name_norm <> '' AND v_ktx_norm <> '' AND LENGTH(v_phone_digits) >= 8
-      AND public._norm_ktx_text(w.ktx) = v_ktx_norm
+      v_name_norm <> '' AND LENGTH(v_phone_digits) >= 8
       AND public._norm_name_text(w.ho_va_ten) = v_name_norm
       AND REGEXP_REPLACE(COALESCE(w.so_dien_thoai, ''), '\D', '', 'g') = v_phone_digits
     );
@@ -196,11 +218,18 @@ BEGIN
     )
     SELECT ARRAY_AGG(wid) INTO v_deleted_ids FROM del;
 
-    -- Hard verify zero survivors remain
+    -- Hard verify zero candidate IDs OR matching residual rows remain
     SELECT COUNT(*)
     INTO v_remaining_count
     FROM public.workers w
-    WHERE w.id::TEXT = ANY(v_candidate_ids);
+    WHERE w.id::TEXT = ANY(v_candidate_ids)
+       OR (v_reg_worker_id <> '' AND w.id::TEXT = v_reg_worker_id)
+       OR (
+         ARRAY_LENGTH(v_codes, 1) > 0
+         AND public._norm_code_text(w.cccd) <> ''
+         AND public._norm_code_text(w.cccd) = ANY(v_codes)
+         AND LENGTH(REGEXP_REPLACE(COALESCE(w.cccd, ''), '\D', '', 'g')) >= 9
+       );
 
     IF v_remaining_count > 0 THEN
       RAISE EXCEPTION 'Không thể xóa hoàn toàn % bản ghi công nhân "%".', v_remaining_count, v_reg.ho_va_ten;

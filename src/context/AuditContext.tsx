@@ -27,7 +27,8 @@ export type AuditAction =
   | 'FACILITY_DELETE'
   | 'ATTENDANCE_SESSION'
   | 'ATTENDANCE_UPDATE'
-  | 'USER_PASSWORD_RESET';
+  | 'USER_PASSWORD_RESET'
+  | 'WORKER_HARD_DELETE';
 
 export interface AuditEntry {
   id: string;

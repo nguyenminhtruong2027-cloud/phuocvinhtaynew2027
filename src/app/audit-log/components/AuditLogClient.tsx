@@ -32,6 +32,7 @@ const ACTION_COLORS: Record<AuditAction, string> = {
   ATTENDANCE_SESSION: 'bg-bdg text-pri2 border-bdr2',
   ATTENDANCE_UPDATE: 'tint-wn text-wn border-wn',
   USER_PASSWORD_RESET: 'tint-wn text-wn border-wn',
+  WORKER_HARD_DELETE: 'bg-dgrbg text-dgr border-dgr',
 };
 
 const ACTION_LABELS: Record<AuditAction, string> = {
@@ -56,6 +57,7 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   ATTENDANCE_SESSION: 'ATTENDANCE_SESSION — Phiên điểm danh',
   ATTENDANCE_UPDATE: 'ATTENDANCE_UPDATE — Cập nhật điểm danh',
   USER_PASSWORD_RESET: 'USER_PASSWORD_RESET — Đặt lại mật khẩu',
+  WORKER_HARD_DELETE: 'WORKER_HARD_DELETE — Xóa triệt để công nhân',
 };
 
 const ALL_ACTIONS: AuditAction[] = [
@@ -74,6 +76,7 @@ const ALL_ACTIONS: AuditAction[] = [
   'ATTENDANCE_SESSION',
   'ATTENDANCE_UPDATE',
   'USER_PASSWORD_RESET',
+  'WORKER_HARD_DELETE',
   'Đổi trạng thái tạm trú',
   'Chuyển phòng',
   'Thêm',

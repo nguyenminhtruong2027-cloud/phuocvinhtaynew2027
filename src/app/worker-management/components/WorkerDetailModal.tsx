@@ -143,7 +143,14 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
 
       try {
         const supabase = createClient();
-        const searchTerms = [workerMaNV.trim(), workerName.trim()].filter(Boolean);
+        const trimmedMa = workerMaNV.trim();
+        const isPlaceholderMa =
+          !trimmedMa ||
+          ['-', '—', 'chờ mã', 'chưa có', 'n/a', 'null'].includes(trimmedMa.toLowerCase());
+        const searchTerms = [
+          !isPlaceholderMa ? trimmedMa : '',
+          workerName.trim(),
+        ].filter(Boolean);
         const auditRows: Array<{ id: string; timestamp: string; account: string; action: string; detail: string }> = [];
 
         if (searchTerms.length > 0) {
@@ -161,25 +168,21 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
           }
         }
 
+        const safeLogFilter = !isPlaceholderMa
+          ? `worker_id.eq.${workerId},ma_nv.eq.${trimmedMa}`
+          : `worker_id.eq.${workerId}`;
+
         const [delRes, entryRes] = await Promise.all([
           supabase
             .from('worker_deletion_log')
             .select('id, deleted_at, ktx, day')
-            .or(
-              workerMaNV.trim()
-                ? `worker_id.eq.${workerId},ma_nv.eq.${workerMaNV.trim()}`
-                : `worker_id.eq.${workerId}`
-            )
+            .or(safeLogFilter)
             .order('deleted_at', { ascending: false })
             .limit(20),
           supabase
             .from('worker_entry_log')
             .select('id, entered_at, ktx, day')
-            .or(
-              workerMaNV.trim()
-                ? `worker_id.eq.${workerId},ma_nv.eq.${workerMaNV.trim()}`
-                : `worker_id.eq.${workerId}`
-            )
+            .or(safeLogFilter)
             .order('entered_at', { ascending: false })
             .limit(10),
         ]);
@@ -217,6 +220,16 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
                   kind: 'checkout',
                 };
               }
+              if (act === 'WORKER_HARD_DELETE') {
+                prettyDetail = `${parsed.ho_va_ten || ''} (${parsed.ma_nv || parsed.cccd || '—'}) — ${parsed.ktx || ''} · ${
+                  parsed.day || ''
+                } · P${parsed.phong_so || ''}${parsed.giuong ? ` · G${parsed.giuong}` : ''} | Đã xác minh toàn vẹn xóa khỏi hệ thống`;
+                return {
+                  title: 'Xóa triệt để khỏi hệ thống',
+                  detail: prettyDetail,
+                  kind: 'checkout',
+                };
+              }
             }
           } catch {
             // Keep raw detail text
@@ -225,7 +238,7 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
           const kind: TimelineEvent['kind'] =
             act.includes('Chuyển') || act.includes('giường') || act === 'BED_REASSIGN'
               ? 'transfer'
-              : act.includes('Trả') || act.includes('Xóa') || act.includes('CHECKOUT') || act === 'DELETE'
+              : act.includes('Trả') || act.includes('Xóa') || act.includes('CHECKOUT') || act === 'DELETE' || act === 'WORKER_HARD_DELETE'
               ? 'checkout'
               : act.includes('Thêm') || act.includes('Duyệt') || act === 'CREATE' || act === 'APPROVE_REGISTRATION'
               ? 'checkin'

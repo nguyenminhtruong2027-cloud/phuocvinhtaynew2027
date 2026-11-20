@@ -5,6 +5,14 @@ import { Worker } from '@/data/workers';
 import { createClient } from '@/lib/supabase/client';
 import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
 import {
+  ensureWorkerHardDeleteAuditLogged,
+  fetchAuthoritativeDeletedTombstones,
+  isWorkerTombstoned,
+  recordLocalDeletedTombstones,
+  subscribeCrossTabTombstones,
+  verifyWorkerDeletionIntegrity,
+} from '@/lib/workerDeletionIntegrity';
+import {
   reconcileBedsWithWorkers,
   releaseAllOccupiedBeds,
   releaseBedsForWorkers,
@@ -169,6 +177,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
     const idSet = new Set(cleanIds);
     // Bump fetchSeqRef so any earlier in-flight fetchWorkers resolves as stale and cannot restore these workers.
     fetchSeqRef.current += 1;
+    recordLocalDeletedTombstones(cleanIds, now);
     cleanIds.forEach(id => {
       recentlyDeletedIdsRef.current.set(id, now);
       workerMetaByIdRef.current.delete(id);
@@ -185,6 +194,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
     const seq = ++fetchSeqRef.current;
     if (isRefresh) setRefreshing(true);
     try {
+      const tombstonesPromise = fetchAuthoritativeDeletedTombstones(supabase, 48);
       const allRows: Worker[] = [];
       let from = 0;
       let hasMore = true;
@@ -211,6 +221,8 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
+      const authoritativeTombstones = await tombstonesPromise;
+
       // Discard stale fetch if another mutation / newer fetch happened while this request was in-flight
       if (seq !== fetchSeqRef.current) return;
 
@@ -219,7 +231,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       const noIdRows: Worker[] = [];
       allRows.forEach(w => {
         if (w.id) {
-          if (isRecentlyDeleted(w.id)) return;
+          if (isRecentlyDeleted(w.id) || isWorkerTombstoned(w.id, w.createdAt, authoritativeTombstones)) return;
           metaMap.set(w.id, w);
         } else {
           noIdRows.push(w);
@@ -271,7 +283,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
         (payload) => {
           if (payload.eventType === 'INSERT') {
             const newWorker = dbRowToWorker(payload.new as Record<string, unknown>);
-            if (newWorker.id && isRecentlyDeleted(newWorker.id)) return;
+            if (newWorker.id && (isRecentlyDeleted(newWorker.id) || isWorkerTombstoned(newWorker.id, newWorker.createdAt))) return;
             if (newWorker.id) workerMetaByIdRef.current.set(newWorker.id, newWorker);
             setWorkers(prev => {
               if (prev.some(w => w.id === newWorker.id)) return prev;
@@ -285,7 +297,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
             });
           } else if (payload.eventType === 'UPDATE') {
             const updated = dbRowToWorker(payload.new as Record<string, unknown>);
-            if (updated.id && isRecentlyDeleted(updated.id)) return;
+            if (updated.id && (isRecentlyDeleted(updated.id) || isWorkerTombstoned(updated.id, updated.createdAt))) return;
             if (updated.id) workerMetaByIdRef.current.set(updated.id, updated);
             setWorkers(prev => prev.map(w => w.id === updated.id ? updated : w));
           } else if (payload.eventType === 'DELETE') {
@@ -313,12 +325,18 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
         markWorkersDeleted(detail.ids);
       }
     };
+    const unsubscribeCrossTab = subscribeCrossTabTombstones(deletedIds => {
+      if (deletedIds.length > 0) {
+        markWorkersDeleted(deletedIds);
+      }
+    });
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('ktx_workers_deleted', handleExternalDeleted);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('ktx_workers_deleted', handleExternalDeleted);
+      unsubscribeCrossTab();
       supabase.removeChannel(workersChannel);
     };
   }, [shouldLoadWorkers, supabase, fetchWorkers, isRecentlyDeleted, markWorkersDeleted]);
@@ -354,13 +372,22 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
   }, [supabase]);
 
   const updateWorker = useCallback(async (worker: Worker) => {
+    if (isWorkerTombstoned(worker.id, worker.createdAt)) {
+      markWorkersDeleted([worker.id]);
+      throw new Error('Hồ sơ công nhân này đã bị xóa khỏi hệ thống ở phiên khác, không thể ghi đè khôi phục.');
+    }
     const prevWorker = workerMetaByIdRef.current.get(worker.id) || workers.find(w => w.id === worker.id);
     const dbRow = workerToDbRow(worker);
-    const { error } = await supabase
+    const { data: updatedRows, error } = await supabase
       .from('workers')
       .update(dbRow)
-      .eq('id', worker.id);
+      .eq('id', worker.id)
+      .select('id');
     if (error) throw new Error(error.message);
+    if (!updatedRows || updatedRows.length === 0) {
+      markWorkersDeleted([worker.id]);
+      throw new Error('Hồ sơ công nhân không còn tồn tại trên máy chủ (đã bị xóa ở phiên khác).');
+    }
     await syncBedForWorkerSave(supabase, prevWorker, worker);
     const updatedWorker: Worker = {
       ...prevWorker,
@@ -369,9 +396,10 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
     };
     workerMetaByIdRef.current.set(worker.id, updatedWorker);
     setWorkers(prev => prev.map(w => (w.id === worker.id ? updatedWorker : w)));
-  }, [workers, supabase]);
+  }, [workers, supabase, markWorkersDeleted]);
 
   const deleteWorker = useCallback(async (id: string) => {
+    const actorLabel = currentUser?.name || currentUser?.email || 'Admin';
     const workerToDelete = workerMetaByIdRef.current.get(id) || workers.find(w => w.id === id);
     if (workerToDelete) {
       preserveDeletedWorkerEntries([workerToDelete]);
@@ -405,12 +433,39 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       }
     }
     await releaseBedsForWorkers(supabase, [id]);
+    const targetPayload = workerToDelete
+      ? [{
+          id,
+          hoVaTen: workerToDelete.hoVaTen,
+          maNV: workerToDelete.maNV,
+          cccd: workerToDelete.cccd,
+          soDienThoai: workerToDelete.soDienThoai,
+          ktx: workerToDelete.ktx,
+          day: workerToDelete.day,
+          phongSo: workerToDelete.phongSo,
+          giuong: workerToDelete.giuong,
+        }]
+      : [{ id }];
+    await ensureWorkerHardDeleteAuditLogged(supabase, actorLabel, targetPayload, 'WorkerContext.deleteWorker');
+    const integrity = await verifyWorkerDeletionIntegrity(supabase, {
+      workerIds: [id],
+      codes: workerToDelete ? [workerToDelete.maNV, workerToDelete.cccd].filter((v): v is string => Boolean(v)) : [],
+      hoVaTen: workerToDelete?.hoVaTen,
+      soDienThoai: workerToDelete?.soDienThoai,
+      account: actorLabel,
+      sourceContext: 'WorkerContext.deleteWorker',
+      targets: targetPayload,
+    });
+    if (!integrity.isClean) {
+      throw new Error(integrity.message);
+    }
     markWorkersDeleted([id]);
-  }, [workers, supabase, markWorkersDeleted]);
+  }, [workers, supabase, markWorkersDeleted, currentUser]);
 
   const deleteWorkers = useCallback(async (ids: string[]) => {
     if (ids.length === 0) return;
     const now = new Date().toISOString();
+    const actorLabel = currentUser?.name || currentUser?.email || 'Admin';
     const workersToDelete = ids
       .map(id => workerMetaByIdRef.current.get(id) || workers.find(wk => wk.id === id))
       .filter((w): w is Worker => Boolean(w));
@@ -457,11 +512,36 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
     }
     const verifiedDeletedIds = deletedSet.size > 0 ? Array.from(deletedSet) : ids;
     await releaseBedsForWorkers(supabase, verifiedDeletedIds);
+    const targetPayloads = verifiedDeletedIds.map(id => {
+      const w = workerMetaByIdRef.current.get(id) || workers.find(wk => wk.id === id);
+      return {
+        id,
+        hoVaTen: w?.hoVaTen,
+        maNV: w?.maNV,
+        cccd: w?.cccd,
+        soDienThoai: w?.soDienThoai,
+        ktx: w?.ktx,
+        day: w?.day,
+        phongSo: w?.phongSo,
+        giuong: w?.giuong,
+      };
+    });
+    await ensureWorkerHardDeleteAuditLogged(supabase, actorLabel, targetPayloads, 'WorkerContext.deleteWorkers');
+    const integrity = await verifyWorkerDeletionIntegrity(supabase, {
+      workerIds: verifiedDeletedIds,
+      account: actorLabel,
+      sourceContext: 'WorkerContext.deleteWorkers',
+      targets: targetPayloads,
+    });
+    if (!integrity.isClean) {
+      throw new Error(integrity.message);
+    }
     markWorkersDeleted(verifiedDeletedIds);
-  }, [workers, supabase, markWorkersDeleted]);
+  }, [workers, supabase, markWorkersDeleted, currentUser]);
 
   const deleteAllWorkers = useCallback(async () => {
     const now = new Date().toISOString();
+    const actorLabel = currentUser?.name || currentUser?.email || 'Admin';
     if (workers && workers.length > 0) {
       preserveDeletedWorkerEntries(workers);
     }
@@ -507,13 +587,45 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
     }
 
     await releaseAllOccupiedBeds(supabase);
+    const targetPayloads = ids.map(id => {
+      const w = workers.find(wk => wk.id === id);
+      return {
+        id,
+        hoVaTen: w?.hoVaTen,
+        maNV: w?.maNV,
+        cccd: w?.cccd,
+        soDienThoai: w?.soDienThoai,
+        ktx: w?.ktx,
+        day: w?.day,
+        phongSo: w?.phongSo,
+        giuong: w?.giuong,
+      };
+    });
+    await ensureWorkerHardDeleteAuditLogged(supabase, actorLabel, targetPayloads, 'WorkerContext.deleteAllWorkers');
+    const integrity = await verifyWorkerDeletionIntegrity(supabase, {
+      workerIds: ids,
+      account: actorLabel,
+      sourceContext: 'WorkerContext.deleteAllWorkers',
+      targets: targetPayloads,
+    });
+    if (!integrity.isClean) {
+      throw new Error(integrity.message);
+    }
     markWorkersDeleted(ids);
-  }, [workers, supabase, markWorkersDeleted]);
+  }, [workers, supabase, markWorkersDeleted, currentUser]);
 
   const importWorkers = useCallback(async (rows: Worker[]) => {
     if (rows.length === 0) return;
+    // Block stale sessions/imports from resurrecting worker_ids with a WORKER_HARD_DELETE tombstone
+    const tombstones = await fetchAuthoritativeDeletedTombstones(supabase, 72);
+    const safeRows = rows.filter(r => !r.id || !isWorkerTombstoned(r.id, r.createdAt, tombstones));
+    if (safeRows.length === 0) {
+      await fetchWorkers(true);
+      return;
+    }
+
     let nextStt = workers.length > 0 ? Math.max(...workers.map(w => w.stt || 0)) : 0;
-    const rowsWithStt = rows.map(r => {
+    const rowsWithStt = safeRows.map(r => {
       if (r.stt && r.stt > 0) return r;
       nextStt += 1;
       return { ...r, stt: nextStt };
@@ -536,7 +648,7 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       if (error) throw new Error(error.message);
     }
 
-    if (rows.some(r => (r.giuong || '').trim() !== '' || workers.some(existing => existing.id === r.id))) {
+    if (safeRows.some(r => (r.giuong || '').trim() !== '' || workers.some(existing => existing.id === r.id))) {
       try {
         await reconcileBedsWithWorkers(supabase, { isAdmin, canWriteBlock });
       } catch (syncErr) {

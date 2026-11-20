@@ -14,6 +14,10 @@ import { invalidateKtxStructureCache, normalizeKtxLabel, normalizeDayLabel } fro
 import { releaseBedByLocation, normalizeBedLabel } from '@/lib/bedSync';
 import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
 import {
+  ensureWorkerHardDeleteAuditLogged,
+  verifyWorkerDeletionIntegrity,
+} from '@/lib/workerDeletionIntegrity';
+import {
   FacilityItem,
   fetchFacilitiesList,
   invalidateFacilitiesCache,
@@ -111,8 +115,13 @@ function formatBedShort(raw?: string | null): string {
 }
 
 function isPlaceholderCode(raw?: string | null): boolean {
-  const s = String(raw || '').trim().toLowerCase();
-  return !s || s === '-' || s === '—' || s === 'chờ mã' || s === 'chưa có' || s === 'n/a' || s === 'null';
+  const s = String(raw || '').normalize('NFC').replace(/[\s\u00A0\u200B-\u200D\uFEFF]+/g, '').toLowerCase();
+  return !s || s === '-' || s === '—' || s === 'chờmã' || s === 'chưacó' || s === 'n/a' || s === 'null';
+}
+
+function normalizeCodeForMatch(raw?: string | null): string {
+  if (isPlaceholderCode(raw)) return '';
+  return String(raw || '').normalize('NFC').replace(/[\s\u00A0\u200B-\u200D\uFEFF]+/g, '').toLowerCase();
 }
 
 /** Detail Modal - Operations console styling */
@@ -444,6 +453,167 @@ export default function CheckoutApprovalPanel({
       const normReqBed = normalizeBedLabel(req.giuong || '');
       const normReqName = normalizeNameForMatch(req.ho_va_ten);
 
+      const reqPhoneDigits = String(req.so_dien_thoai || '').replace(/\D/g, '');
+      const reqCodeSet = new Set<string>(
+        [normalizeCodeForMatch(req.ma_nv), normalizeCodeForMatch(req.so_cccd)].filter(Boolean)
+      );
+      const rawCodeList = Array.from(
+        new Set(
+          [req.ma_nv, req.so_cccd]
+            .map(v => String(v || '').trim())
+            .filter(v => Boolean(v) && !isPlaceholderCode(v))
+        )
+      );
+
+      /**
+       * Thu thập toàn bộ bản ghi `workers` khớp với yêu cầu check-out
+       * (bao gồm khớp chéo ma_nv <-> cccd, trùng slot, và trùng họ tên + SĐT ở KTX khác).
+       */
+      const findMatchingWorkerRowsInDb = async (): Promise<any[]> => {
+        const foundMap = new Map<string, any>();
+
+        if (req.worker_id && req.worker_id.trim()) {
+          const { data: byId, error: byIdErr } = await supabase
+            .from('workers')
+            .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, created_at')
+            .eq('id', req.worker_id.trim())
+            .limit(5);
+          if (byIdErr) throw new Error(byIdErr.message);
+          (byId || []).forEach((w: any) => {
+            if (w?.id) foundMap.set(String(w.id), w);
+          });
+        }
+
+        // Cross-match non-placeholder req.ma_nv & req.so_cccd against BOTH workers.ma_nv and workers.cccd
+        for (const rawCode of rawCodeList) {
+          const codeDigits = rawCode.replace(/\D/g, '');
+          const [{ data: byMa }, { data: byCccd }] = await Promise.all([
+            supabase
+              .from('workers')
+              .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, created_at')
+              .eq('ma_nv', rawCode),
+            supabase
+              .from('workers')
+              .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, created_at')
+              .eq('cccd', rawCode),
+          ]);
+          (byMa || []).forEach((w: any) => {
+            if (
+              w?.id &&
+              (!normReqName ||
+                normalizeNameForMatch(w.ho_va_ten) === normReqName ||
+                normalizeKtxKey(w.ktx) === reqKtxKey ||
+                codeDigits.length >= 9)
+            ) {
+              foundMap.set(String(w.id), w);
+            }
+          });
+          (byCccd || []).forEach((w: any) => {
+            if (
+              w?.id &&
+              (!normReqName ||
+                normalizeNameForMatch(w.ho_va_ten) === normReqName ||
+                codeDigits.length >= 9)
+            ) {
+              foundMap.set(String(w.id), w);
+            }
+          });
+        }
+
+        // Match via normalized (KTX + Day + Room + Name) OR (Name + Phone >= 8 digits across any KTX) OR normalized codes
+        const isMatchingRow = (w: {
+          id?: string;
+          hoVaTen?: string | null;
+          maNV?: string | null;
+          cccd?: string | null;
+          ktx?: string | null;
+          day?: string | null;
+          phongSo?: string | null;
+          soDienThoai?: string | null;
+        }) => {
+          if (!w?.id) return false;
+          const wMaNorm = normalizeCodeForMatch(w.maNV);
+          const wCccdNorm = normalizeCodeForMatch(w.cccd);
+          const wNameNorm = normalizeNameForMatch(w.hoVaTen);
+          const wKtxKey = normalizeKtxKey(w.ktx);
+
+          if (wCccdNorm && reqCodeSet.has(wCccdNorm)) {
+            if (!normReqName || wNameNorm === normReqName || wCccdNorm.replace(/\D/g, '').length >= 9) return true;
+          }
+          if (wMaNorm && reqCodeSet.has(wMaNorm)) {
+            if (!normReqName || wNameNorm === normReqName || wKtxKey === reqKtxKey || wMaNorm.replace(/\D/g, '').length >= 9) {
+              return true;
+            }
+          }
+          if (normReqName && wNameNorm === normReqName) {
+            const wPhoneDigits = String(w.soDienThoai || '').replace(/\D/g, '');
+            if (reqPhoneDigits.length >= 8 && wPhoneDigits === reqPhoneDigits) return true;
+            if (
+              reqKtxKey &&
+              wKtxKey === reqKtxKey &&
+              (!normReqRoom || normalizeRoomLabel(w.phongSo || '') === normReqRoom) &&
+              (!reqDayKey || !normalizeDayKey(w.day) || normalizeDayKey(w.day) === reqDayKey)
+            ) {
+              return true;
+            }
+          }
+          return false;
+        };
+
+        const PAGE = 1000;
+        let from = 0;
+        const cleanNameToken = (req.ho_va_ten || '').trim().replace(/\s+/g, ' ').replace(/[%_]/g, '');
+        while (cleanNameToken) {
+          const { data: nameRows, error: nameErr } = await supabase
+            .from('workers')
+            .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, created_at')
+            .ilike('ho_va_ten', `%${cleanNameToken}%`)
+            .order('id', { ascending: true })
+            .range(from, from + PAGE - 1);
+          if (nameErr || !nameRows || nameRows.length === 0) break;
+
+          nameRows.forEach((w: any) => {
+            if (
+              isMatchingRow({
+                id: w.id,
+                hoVaTen: w.ho_va_ten,
+                maNV: w.ma_nv,
+                cccd: w.cccd,
+                ktx: w.ktx,
+                day: w.day,
+                phongSo: w.phong_so,
+                soDienThoai: w.so_dien_thoai,
+              })
+            ) {
+              foundMap.set(String(w.id), w);
+            }
+          });
+
+          if (nameRows.length < PAGE) break;
+          from += PAGE;
+        }
+
+        // Also inspect hydrated WorkerContext (covers NFD/whitespace variants not matched by ilike)
+        (workers || []).forEach(c => {
+          if (isMatchingRow(c)) {
+            foundMap.set(String(c.id), {
+              id: c.id,
+              ho_va_ten: c.hoVaTen,
+              ma_nv: c.maNV,
+              cccd: c.cccd,
+              so_dien_thoai: c.soDienThoai,
+              ktx: c.ktx,
+              day: c.day,
+              phong_so: c.phongSo,
+              giuong: c.giuong,
+              created_at: c.createdAt,
+            });
+          }
+        });
+
+        return Array.from(foundMap.values());
+      };
+
       let actuallyDeletedIds: string[] = [];
       let handledByAtomicRpc = false;
 
@@ -460,21 +630,73 @@ export default function CheckoutApprovalPanel({
             ? row.deleted_worker_ids.map((id: unknown) => String(id)).filter(Boolean)
             : [];
 
-          // Extra client-side sanity check: if RPC returned 0 deletions, verify req.worker_id doesn't still exist
-          if (rpcDeletedIds.length === 0 && req.worker_id && req.worker_id.trim()) {
-            const { data: strayRow } = await supabase
+          // Post-RPC strict residual sweep: ensure ZERO primary/duplicate/cross-field rows remain in public.workers
+          const residualRows = await findMatchingWorkerRowsInDb();
+          const rpcDeletedSet = new Set(rpcDeletedIds);
+          const unremovedRows = residualRows.filter(w => w?.id && !rpcDeletedSet.has(String(w.id)));
+          let extraDeletedIds: string[] = [];
+
+          if (unremovedRows.length > 0) {
+            const unremovedIds = unremovedRows.map(w => String(w.id));
+            try {
+              await supabase.from('worker_deletion_log').insert(
+                unremovedRows.map(w => ({
+                  worker_id: w.id,
+                  ho_va_ten: w.ho_va_ten || req.ho_va_ten,
+                  ma_nv: w.ma_nv || req.ma_nv,
+                  ktx: w.ktx || reqKtx,
+                  day: w.day || reqDay,
+                  deleted_at: nowStr,
+                }))
+              );
+            } catch {
+              // ignore non-fatal deletion log warning
+            }
+
+            const { data: delExtra, error: delExtraErr } = await supabase
               .from('workers')
-              .select('id')
-              .eq('id', req.worker_id.trim())
-              .maybeSingle();
-            if (strayRow?.id) {
+              .delete()
+              .in('id', unremovedIds)
+              .select('id');
+
+            if (delExtraErr) {
               throw new Error(
-                `Hồ sơ "${req.ho_va_ten}" vẫn còn tồn tại trên máy chủ sau khi gọi RPC. Vui lòng cập nhật lại Mã SQL duyệt check-out mới nhất.`
+                `Đã duyệt RPC nhưng vẫn còn ${unremovedIds.length} bản ghi trùng của "${req.ho_va_ten}" không thể xóa: ${delExtraErr.message}`
               );
             }
+            extraDeletedIds = (delExtra || []).map((r: any) => String(r.id)).filter(Boolean);
+
+            const { data: survivors } = await supabase
+              .from('workers')
+              .select('id')
+              .in('id', unremovedIds);
+            if (survivors && survivors.length > 0) {
+              throw new Error(
+                `Vẫn còn ${survivors.length} bản ghi của "${req.ho_va_ten}" trên CSDL chưa xóa được (kiểm tra phân quyền hoặc chạy lại Mã SQL mới nhất).`
+              );
+            }
+
+            await releaseBedByLocation(supabase, {
+              workerIds: extraDeletedIds.length > 0 ? extraDeletedIds : unremovedIds,
+              ktx: reqKtx,
+              day: reqDay,
+              phongSo: req.phong_so,
+              giuong: req.giuong,
+            });
+
+            preserveDeletedWorkerEntries(
+              unremovedRows.map(w => ({
+                id: String(w.id),
+                hoVaTen: w.ho_va_ten || req.ho_va_ten || '',
+                maNV: w.ma_nv || req.ma_nv || '',
+                ktx: w.ktx || reqKtx || '',
+                day: w.day || reqDay || '',
+                createdAt: w.created_at || undefined,
+              }))
+            );
           }
 
-          actuallyDeletedIds = rpcDeletedIds;
+          actuallyDeletedIds = Array.from(new Set([...rpcDeletedIds, ...extraDeletedIds]));
           handledByAtomicRpc = true;
 
           if (rpcDeletedIds.length > 0) {
@@ -517,18 +739,10 @@ export default function CheckoutApprovalPanel({
       if (!handledByAtomicRpc) {
         const matchedWorkersMap = new Map<string, any>();
 
-        // 1a. Match by explicit worker_id
-        if (req.worker_id && req.worker_id.trim()) {
-          const { data: byId, error: byIdErr } = await supabase
-            .from('workers')
-            .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, created_at')
-            .eq('id', req.worker_id.trim())
-            .limit(1);
-          if (byIdErr) throw new Error(byIdErr.message);
-          (byId || []).forEach((w: any) => {
-            if (w?.id) matchedWorkersMap.set(String(w.id), w);
-          });
-        }
+        const preMatched = await findMatchingWorkerRowsInDb();
+        preMatched.forEach((w: any) => {
+          if (w?.id) matchedWorkersMap.set(String(w.id), w);
+        });
 
         // 1b. Match via `beds` table at normalized location (ignores strict "Dãy" / room / bed prefixes)
         let targetBedRow: { id: string; worker_id: string | null; ho_va_ten: string | null; status: string } | null = null;
@@ -568,139 +782,34 @@ export default function CheckoutApprovalPanel({
           }
         }
 
-        // 1c. Match by non-placeholder ma_nv
-        if (!isPlaceholderCode(req.ma_nv)) {
-          const { data: byCode } = await supabase
-            .from('workers')
-            .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, created_at')
-            .eq('ma_nv', req.ma_nv.trim());
-          (byCode || []).forEach((w: any) => {
-            if (
-              w?.id &&
-              (!normReqName ||
-                normalizeNameForMatch(w.ho_va_ten) === normReqName ||
-                normalizeKtxKey(w.ktx) === reqKtxKey)
-            ) {
-              matchedWorkersMap.set(String(w.id), w);
-            }
-          });
-        }
-
-        // 1d. Match by non-placeholder so_cccd
-        if (!isPlaceholderCode(req.so_cccd)) {
-          const { data: byCccd } = await supabase
-            .from('workers')
-            .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, created_at')
-            .eq('cccd', req.so_cccd.trim());
-          (byCccd || []).forEach((w: any) => {
-            if (w?.id) matchedWorkersMap.set(String(w.id), w);
-          });
-        }
-
-        // 1e. Match ALL duplicate/primary rows by normalized KTX + Day + Room + NFC Name (or KTX + Name + Phone)
-        // Uses hydrated WorkerContext + paginated Supabase name & KTX scan (handles NFD/NFC & extra spaces)
-        if (normReqName && reqKtxKey) {
-          const reqPhoneDigits = String(req.so_dien_thoai || '').replace(/\D/g, '');
-          const matchCandidate = (w: {
-            id?: string;
-            hoVaTen?: string | null;
-            ktx?: string | null;
-            day?: string | null;
-            phongSo?: string | null;
-            giuong?: string | null;
-            soDienThoai?: string | null;
-          }) => {
-            if (!w?.id) return false;
-            if (normalizeKtxKey(w.ktx) !== reqKtxKey) return false;
-            if (normalizeNameForMatch(w.hoVaTen) !== normReqName) return false;
-            const wPhoneDigits = String(w.soDienThoai || '').replace(/\D/g, '');
-            const matchesPhone = reqPhoneDigits.length >= 8 && wPhoneDigits === reqPhoneDigits;
-            const matchesRoom =
-              (!normReqRoom || normalizeRoomLabel(w.phongSo || '') === normReqRoom) &&
-              (!reqDayKey || !normalizeDayKey(w.day) || normalizeDayKey(w.day) === reqDayKey);
-            return matchesRoom || matchesPhone;
-          };
-
-          const contextCandidates = (workers || []).filter(w => matchCandidate(w));
-          contextCandidates.forEach(c => {
-            matchedWorkersMap.set(String(c.id), {
-              id: c.id,
-              ho_va_ten: c.hoVaTen,
-              ma_nv: c.maNV,
-              cccd: c.cccd,
-              so_dien_thoai: c.soDienThoai,
-              ktx: c.ktx,
-              day: c.day,
-              phong_so: c.phongSo,
-              giuong: c.giuong,
-              created_at: c.createdAt,
-            });
-          });
-
-          // Paginated DB scan filtered by name pattern
+        // If name `.ilike` returned 0 matches (e.g., Postgres NFD vs NFC or multi-space), scan KTX rows in JS
+        if (matchedWorkersMap.size === 0 && reqKtx && normReqName) {
           const PAGE = 1000;
-          let from = 0;
-          const cleanNameToken = (req.ho_va_ten || '').trim().replace(/\s+/g, ' ').replace(/[%_]/g, '');
-          while (cleanNameToken) {
-            const { data: nameRows, error: nameErr } = await supabase
+          let ktxFrom = 0;
+          for (let p = 0; p < 15; p++) {
+            const { data: ktxRows, error: ktxErr } = await supabase
               .from('workers')
               .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, created_at')
-              .ilike('ho_va_ten', `%${cleanNameToken}%`)
+              .ilike('ktx', reqKtx)
               .order('id', { ascending: true })
-              .range(from, from + PAGE - 1);
-            if (nameErr || !nameRows || nameRows.length === 0) break;
+              .range(ktxFrom, ktxFrom + PAGE - 1);
+            if (ktxErr || !ktxRows || ktxRows.length === 0) break;
 
-            nameRows.forEach((w: any) => {
-              if (
-                matchCandidate({
-                  id: w.id,
-                  hoVaTen: w.ho_va_ten,
-                  ktx: w.ktx,
-                  day: w.day,
-                  phongSo: w.phong_so,
-                  giuong: w.giuong,
-                  soDienThoai: w.so_dien_thoai,
-                })
-              ) {
+            ktxRows.forEach((w: any) => {
+              const sameName = normalizeNameForMatch(w.ho_va_ten) === normReqName;
+              const sameRoom =
+                normalizeKtxKey(w.ktx) === reqKtxKey &&
+                (!normReqRoom || normalizeRoomLabel(w.phong_so || '') === normReqRoom) &&
+                (!reqDayKey || !normalizeDayKey(w.day) || normalizeDayKey(w.day) === reqDayKey);
+              const wPhone = String(w.so_dien_thoai || '').replace(/\D/g, '');
+              const samePhone = reqPhoneDigits.length >= 8 && wPhone === reqPhoneDigits;
+              if (sameName && (sameRoom || samePhone)) {
                 matchedWorkersMap.set(String(w.id), w);
               }
             });
 
-            if (nameRows.length < PAGE) break;
-            from += PAGE;
-          }
-
-          // If name `.ilike` returned 0 matches (e.g., Postgres NFD vs NFC or multi-space), scan KTX rows in JS
-          if (matchedWorkersMap.size === 0 && reqKtx) {
-            let ktxFrom = 0;
-            for (let p = 0; p < 15; p++) {
-              const { data: ktxRows, error: ktxErr } = await supabase
-                .from('workers')
-                .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so, giuong, created_at')
-                .ilike('ktx', reqKtx)
-                .order('id', { ascending: true })
-                .range(ktxFrom, ktxFrom + PAGE - 1);
-              if (ktxErr || !ktxRows || ktxRows.length === 0) break;
-
-              ktxRows.forEach((w: any) => {
-                if (
-                  matchCandidate({
-                    id: w.id,
-                    hoVaTen: w.ho_va_ten,
-                    ktx: w.ktx,
-                    day: w.day,
-                    phongSo: w.phong_so,
-                    giuong: w.giuong,
-                    soDienThoai: w.so_dien_thoai,
-                  })
-                ) {
-                  matchedWorkersMap.set(String(w.id), w);
-                }
-              });
-
-              if (ktxRows.length < PAGE) break;
-              ktxFrom += PAGE;
-            }
+            if (ktxRows.length < PAGE) break;
+            ktxFrom += PAGE;
           }
         }
 
@@ -809,7 +918,47 @@ export default function CheckoutApprovalPanel({
         if (updateErr) throw new Error(updateErr.message);
       }
 
-      // 5. Immediate UI & context tombstone synchronization ONLY for rows genuinely deleted in Postgres
+      // 5. Strict post-delete integrity check + idempotent WORKER_HARD_DELETE audit tombstone
+      const actor = currentUser?.name || currentUser?.email || 'Admin';
+      const deleteTargets = actuallyDeletedIds.map(id => {
+        const w = (workers || []).find(wk => wk.id === id);
+        return {
+          id,
+          hoVaTen: w?.hoVaTen || req.ho_va_ten,
+          maNV: w?.maNV || req.ma_nv,
+          cccd: w?.cccd || req.so_cccd,
+          soDienThoai: w?.soDienThoai || req.so_dien_thoai,
+          ktx: w?.ktx || reqKtx,
+          day: w?.day || reqDay,
+          phongSo: w?.phongSo || req.phong_so,
+          giuong: w?.giuong || req.giuong,
+        };
+      });
+
+      const integrity = await verifyWorkerDeletionIntegrity(supabase, {
+        workerIds: actuallyDeletedIds.length > 0 ? actuallyDeletedIds : req.worker_id ? [req.worker_id.trim()] : [],
+        codes: rawCodeList,
+        hoVaTen: req.ho_va_ten,
+        soDienThoai: req.so_dien_thoai,
+        account: actor,
+        sourceContext: 'CheckoutApprovalPanel.handleApprove',
+        targets: deleteTargets,
+      });
+
+      if (!integrity.isClean) {
+        throw new Error(`Kiểm tra toàn vẹn sau duyệt check-out thất bại: ${integrity.message}`);
+      }
+
+      if (deleteTargets.length > 0) {
+        await ensureWorkerHardDeleteAuditLogged(
+          supabase,
+          actor,
+          deleteTargets,
+          'CheckoutApprovalPanel.handleApprove'
+        );
+      }
+
+      // 6. Immediate UI & context tombstone synchronization ONLY for rows genuinely deleted in Postgres
       if (actuallyDeletedIds.length > 0) {
         markWorkersDeleted(actuallyDeletedIds);
       }
@@ -824,7 +973,6 @@ export default function CheckoutApprovalPanel({
         setDetailReq(prev => (prev ? { ...prev, status: 'approved', reviewed_at: nowStr } : null));
       }
 
-      const actor = currentUser?.name || currentUser?.email || 'Admin';
       addLog(
         actor,
         'CHECKOUT_APPROVED',

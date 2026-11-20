@@ -17,6 +17,10 @@ import { compareKtxNames, DEFAULT_ROOM_CAPACITY } from '@/data/workers';
 import { fetchRoomCapacities, getRoomCapacity, RoomCapacityMap, formatRoomDisplay, normalizeRoomLabel, invalidateFacilitiesCache } from '@/lib/facilityCapacity';
 import { reconcileBedsWithWorkers, releaseBedsForWorkers, releaseBedByLocation, normalizeBedLabel } from '@/lib/bedSync';
 import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
+import {
+  ensureWorkerHardDeleteAuditLogged,
+  verifyWorkerDeletionIntegrity,
+} from '@/lib/workerDeletionIntegrity';
 import { invalidateWorkerHierarchyCache } from '@/lib/workerHierarchy';
 import { invalidateKtxStructureCache } from '@/lib/ktxStructure';
 import { exportToExcel } from '@/lib/exportExcel';
@@ -1002,32 +1006,67 @@ export default function BedManagementClient() {
       const wid = workerRef?.id || bed.worker_id || null;
       const targetName = bed.ho_va_ten || workerRef?.hoVaTen || '';
       const targetMaNv = bed.ma_nv || workerRef?.maNV || '';
+      const targetCccd = workerRef?.cccd || '';
+      const targetPhoneDigits = String(workerRef?.soDienThoai || '').replace(/\D/g, '');
       const candidateIds = new Set<string>();
       if (wid) candidateIds.add(wid);
 
-      // Also capture any duplicate row sharing normalized slot/name or non-placeholder ma_nv
-      if (bed.ktx && bed.phong_so) {
-        const cleanMa = targetMaNv.trim().toLowerCase();
-        const isValidMa = Boolean(cleanMa && !['-', '—', 'chờ mã', 'chưa có', 'n/a', 'null'].includes(cleanMa));
-        const normBedTargetName = normNfcLower(targetName);
-        const normRoom = normalizeRoomLabel(bed.phong_so || '');
-        const normDay = normDayValue(bed.day);
-        const normBed = normalizeBedLabel(bed.giuong || '');
-        (workers || []).forEach(w => {
-          if (!w?.id) return;
-          if (isValidMa && (w.maNV || '').trim().toLowerCase() === cleanMa) {
-            candidateIds.add(w.id);
-            return;
+      const isValidCode = (raw?: string | null) => {
+        const s = String(raw || '').normalize('NFC').replace(/[\s\u00A0\u200B-\u200D\uFEFF]+/g, '').toLowerCase();
+        return Boolean(s && !['-', '—', 'chờmã', 'chưacó', 'n/a', 'null'].includes(s));
+      };
+      const codeSet = new Set(
+        [targetMaNv, targetCccd]
+          .filter(v => isValidCode(v))
+          .map(v => String(v).normalize('NFC').replace(/[\s\u00A0\u200B-\u200D\uFEFF]+/g, '').toLowerCase())
+      );
+
+      const normBedTargetName = normNfcLower(targetName);
+      const normRoom = normalizeRoomLabel(bed.phong_so || '');
+      const normDay = normDayValue(bed.day);
+      const normBed = normalizeBedLabel(bed.giuong || '');
+
+      (workers || []).forEach(w => {
+        if (!w?.id) return;
+        const wMa = isValidCode(w.maNV) ? String(w.maNV).normalize('NFC').replace(/[\s\u00A0\u200B-\u200D\uFEFF]+/g, '').toLowerCase() : '';
+        const wCccd = isValidCode(w.cccd) ? String(w.cccd).normalize('NFC').replace(/[\s\u00A0\u200B-\u200D\uFEFF]+/g, '').toLowerCase() : '';
+        if ((wMa && codeSet.has(wMa)) || (wCccd && codeSet.has(wCccd))) {
+          candidateIds.add(w.id);
+          return;
+        }
+        const wPhoneDigits = String(w.soDienThoai || '').replace(/\D/g, '');
+        if (normBedTargetName && normNfcLower(w.hoVaTen) === normBedTargetName && targetPhoneDigits.length >= 8 && wPhoneDigits === targetPhoneDigits) {
+          candidateIds.add(w.id);
+          return;
+        }
+        if (
+          normBedTargetName &&
+          bed.ktx &&
+          bed.phong_so &&
+          (w.ktx || '').trim().toLowerCase() === (bed.ktx || '').trim().toLowerCase() &&
+          (!normDay || !normDayValue(w.day) || normDayValue(w.day) === normDay) &&
+          normalizeRoomLabel(w.phongSo || '') === normRoom &&
+          (!normBed || !w.giuong || normalizeBedLabel(w.giuong) === normBed) &&
+          normNfcLower(w.hoVaTen) === normBedTargetName
+        ) {
+          candidateIds.add(w.id);
+        }
+      });
+
+      // Live DB sweep for non-placeholder codes & cross-field cccd/ma_nv duplicates
+      for (const rawCode of Array.from(new Set([targetMaNv.trim(), targetCccd.trim()].filter(v => isValidCode(v))))) {
+        const [{ data: byMa }, { data: byCccd }] = await Promise.all([
+          supabase.from('workers').select('id, ho_va_ten').eq('ma_nv', rawCode),
+          supabase.from('workers').select('id, ho_va_ten').eq('cccd', rawCode),
+        ]);
+        (byMa || []).forEach((r: any) => {
+          if (r?.id && (!normBedTargetName || normNfcLower(r.ho_va_ten) === normBedTargetName || rawCode.replace(/\D/g, '').length >= 9)) {
+            candidateIds.add(String(r.id));
           }
-          if (
-            normBedTargetName &&
-            (w.ktx || '').trim().toLowerCase() === (bed.ktx || '').trim().toLowerCase() &&
-            (!normDay || !normDayValue(w.day) || normDayValue(w.day) === normDay) &&
-            normalizeRoomLabel(w.phongSo || '') === normRoom &&
-            (!normBed || !w.giuong || normalizeBedLabel(w.giuong) === normBed) &&
-            normNfcLower(w.hoVaTen) === normBedTargetName
-          ) {
-            candidateIds.add(w.id);
+        });
+        (byCccd || []).forEach((r: any) => {
+          if (r?.id && (!normBedTargetName || normNfcLower(r.ho_va_ten) === normBedTargetName || rawCode.replace(/\D/g, '').length >= 9)) {
+            candidateIds.add(String(r.id));
           }
         });
       }
@@ -1119,6 +1158,38 @@ export default function BedManagementClient() {
         }
       } catch {}
 
+      const actor = currentUser?.name || currentUser?.email || 'Admin';
+      const deleteTargets = deletedWorkerIds.map(id => {
+        const w = (workers || []).find(wk => wk.id === id);
+        return {
+          id,
+          hoVaTen: w?.hoVaTen || targetName,
+          maNV: w?.maNV || targetMaNv,
+          cccd: w?.cccd || targetCccd,
+          soDienThoai: w?.soDienThoai || workerRef?.soDienThoai,
+          ktx: w?.ktx || bed.ktx || workerRef?.ktx,
+          day: w?.day || bed.day || workerRef?.day,
+          phongSo: w?.phongSo || bed.phong_so,
+          giuong: w?.giuong || bed.giuong,
+        };
+      });
+
+      const integrity = await verifyWorkerDeletionIntegrity(supabase, {
+        workerIds: deletedWorkerIds.length > 0 ? deletedWorkerIds : wid ? [wid] : [],
+        codes: [targetMaNv, targetCccd].filter(Boolean),
+        hoVaTen: targetName,
+        soDienThoai: workerRef?.soDienThoai,
+        account: actor,
+        sourceContext: 'BedManagementClient.handleHardDelete',
+        targets: deleteTargets,
+      });
+      if (!integrity.isClean) {
+        throw new Error(integrity.message);
+      }
+      if (deleteTargets.length > 0) {
+        await ensureWorkerHardDeleteAuditLogged(supabase, actor, deleteTargets, 'BedManagementClient.handleHardDelete');
+      }
+
       if (deletedWorkerIds.length > 0) {
         markContextWorkersDeleted(deletedWorkerIds);
         setContextWorkers(prev => prev.filter(w => !deletedSet.has(w.id)));
@@ -1132,7 +1203,6 @@ export default function BedManagementClient() {
         prev.map(b => (b.id === bed.id ? { ...b, status: 'empty', worker_id: null, ma_nv: null, ho_va_ten: null } : b))
       );
 
-      const actor = currentUser?.name || currentUser?.email || 'Admin';
       addLog(
         actor,
         'CHECKOUT_APPROVED',

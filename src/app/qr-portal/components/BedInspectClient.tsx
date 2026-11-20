@@ -12,6 +12,10 @@ import { useAudit } from '@/context/AuditContext';
 import { releaseBedsForWorkers, releaseBedByLocation, normalizeBedLabel, normalizeDayKey } from '@/lib/bedSync';
 import { normalizeRoomLabel, invalidateFacilitiesCache } from '@/lib/facilityCapacity';
 import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
+import {
+  ensureWorkerHardDeleteAuditLogged,
+  verifyWorkerDeletionIntegrity,
+} from '@/lib/workerDeletionIntegrity';
 import { invalidateWorkerHierarchyCache } from '@/lib/workerHierarchy';
 import { invalidateKtxStructureCache } from '@/lib/ktxStructure';
 import { toast } from 'sonner';
@@ -351,9 +355,11 @@ export default function BedInspectClient() {
       const targetWorkerId = bed.worker_id || worker?.id || null;
       const targetName = bed.ho_va_ten || worker?.hoVaTen || '';
       const targetMaNv = bed.ma_nv || worker?.maNV || '';
+      const targetCccd = worker?.cccd || '';
+      const targetPhoneDigits = String(worker?.soDienThoai || '').replace(/\D/g, '');
       const now = new Date().toISOString();
 
-      // Thu thập đầy đủ ID hồ sơ công nhân (kể cả trùng Mã NV hoặc trùng slot + họ tên nếu bed.worker_id bị null)
+      // Thu thập đầy đủ ID hồ sơ công nhân (kể cả trùng Mã NV / CCCD / KTX khác hoặc trùng slot + họ tên)
       const collectedMap = new Map<string, { id: string; hoVaTen: string; maNV: string; ktx: string; day: string }>();
       if (targetWorkerId) {
         collectedMap.set(targetWorkerId, {
@@ -365,18 +371,26 @@ export default function BedInspectClient() {
         });
       }
 
-      const cleanMaNv = targetMaNv.trim();
-      if (cleanMaNv && !['-', '—', 'chờ mã', 'chưa có'].includes(cleanMaNv.toLowerCase())) {
-        const { data: sameCode } = await supabase
-          .from('workers')
-          .select('id, ho_va_ten, ma_nv, ktx, day')
-          .eq('ma_nv', cleanMaNv);
-        (sameCode || []).forEach((r: any) => {
-          if (r?.id) {
+      const isValidCode = (raw?: string | null) => {
+        const s = String(raw || '').normalize('NFC').replace(/[\s\u00A0\u200B-\u200D\uFEFF]+/g, '').toLowerCase();
+        return Boolean(s && !['-', '—', 'chờmã', 'chưacó', 'n/a', 'null'].includes(s));
+      };
+      const normTargetName = targetName.normalize('NFC').trim().toLowerCase().replace(/\s+/g, ' ');
+      const rawCodes = Array.from(new Set([targetMaNv.trim(), targetCccd.trim()].filter(v => isValidCode(v))));
+
+      for (const code of rawCodes) {
+        const [{ data: sameMa }, { data: sameCccd }] = await Promise.all([
+          supabase.from('workers').select('id, ho_va_ten, ma_nv, ktx, day').eq('ma_nv', code),
+          supabase.from('workers').select('id, ho_va_ten, ma_nv, ktx, day').eq('cccd', code),
+        ]);
+        [...(sameMa || []), ...(sameCccd || [])].forEach((r: any) => {
+          if (!r?.id) return;
+          const rName = String(r.ho_va_ten || '').normalize('NFC').trim().toLowerCase().replace(/\s+/g, ' ');
+          if (!normTargetName || rName === normTargetName || code.replace(/\D/g, '').length >= 9) {
             collectedMap.set(String(r.id), {
               id: String(r.id),
               hoVaTen: r.ho_va_ten || targetName,
-              maNV: r.ma_nv || cleanMaNv,
+              maNV: r.ma_nv || targetMaNv,
               ktx: r.ktx || bed.ktx || '',
               day: r.day || bed.day || '',
             });
@@ -384,11 +398,34 @@ export default function BedInspectClient() {
         });
       }
 
+      if (normTargetName && targetPhoneDigits.length >= 8) {
+        const cleanToken = targetName.trim().replace(/\s+/g, ' ').replace(/[%_]/g, '');
+        if (cleanToken) {
+          const { data: sameNameRows } = await supabase
+            .from('workers')
+            .select('id, ho_va_ten, ma_nv, so_dien_thoai, ktx, day')
+            .ilike('ho_va_ten', `%${cleanToken}%`);
+          (sameNameRows || []).forEach((r: any) => {
+            if (!r?.id) return;
+            const rName = String(r.ho_va_ten || '').normalize('NFC').trim().toLowerCase().replace(/\s+/g, ' ');
+            const rPhone = String(r.so_dien_thoai || '').replace(/\D/g, '');
+            if (rName === normTargetName && rPhone === targetPhoneDigits) {
+              collectedMap.set(String(r.id), {
+                id: String(r.id),
+                hoVaTen: r.ho_va_ten || targetName,
+                maNV: r.ma_nv || targetMaNv,
+                ktx: r.ktx || bed.ktx || '',
+                day: r.day || bed.day || '',
+              });
+            }
+          });
+        }
+      }
+
       const normKtx = (bed.ktx || '').trim().toLowerCase();
       const normDay = normalizeDayKey(bed.day || '');
       const normRoom = normalizeRoomLabel(bed.phong_so || '');
       const normBed = normalizeBedLabel(bed.giuong || '');
-      const normTargetName = targetName.normalize('NFC').trim().toLowerCase().replace(/\s+/g, ' ');
       if (normKtx && normRoom) {
         const { data: ktxRows } = await supabase
           .from('workers')
@@ -405,7 +442,7 @@ export default function BedInspectClient() {
             collectedMap.set(String(r.id), {
               id: String(r.id),
               hoVaTen: r.ho_va_ten || targetName,
-              maNV: r.ma_nv || cleanMaNv,
+              maNV: r.ma_nv || targetMaNv,
               ktx: r.ktx || bed.ktx || '',
               day: r.day || bed.day || '',
             });
@@ -463,6 +500,33 @@ export default function BedInspectClient() {
       });
 
       const actor = currentUser?.name || currentUser?.email || 'Admin';
+      const deleteTargets = Array.from(collectedMap.values()).map(item => ({
+        id: item.id,
+        hoVaTen: item.hoVaTen,
+        maNV: item.maNV,
+        cccd: targetCccd,
+        soDienThoai: worker?.soDienThoai,
+        ktx: item.ktx,
+        day: item.day,
+        phongSo: bed.phong_so,
+        giuong: bed.giuong,
+      }));
+      const integrity = await verifyWorkerDeletionIntegrity(supabase, {
+        workerIds: verifiedDeletedIds.length > 0 ? verifiedDeletedIds : idsToDelete,
+        codes: rawCodes,
+        hoVaTen: targetName,
+        soDienThoai: worker?.soDienThoai,
+        account: actor,
+        sourceContext: 'BedInspectClient.checkoutImmediate',
+        targets: deleteTargets,
+      });
+      if (!integrity.isClean) {
+        throw new Error(integrity.message);
+      }
+      if (deleteTargets.length > 0) {
+        await ensureWorkerHardDeleteAuditLogged(supabase, actor, deleteTargets, 'BedInspectClient.checkoutImmediate');
+      }
+
       addLog(
         actor,
         'CHECKOUT_APPROVED',
