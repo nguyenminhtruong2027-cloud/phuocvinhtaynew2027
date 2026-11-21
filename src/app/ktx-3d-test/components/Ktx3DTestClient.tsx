@@ -6,6 +6,8 @@ import {
   ArrowLeft,
   BedDouble,
   Box,
+  Building2,
+  Camera,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -14,21 +16,26 @@ import {
   DoorOpen,
   ExternalLink,
   Eye,
+  EyeOff,
   Filter,
   Layers,
   Loader2,
   MapPin,
   Moon,
   QrCode,
+  RefreshCw,
   RotateCcw,
   Search,
   Sun,
+  Tag,
   User,
   Users,
+  Wrench,
   X,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useWorkers } from '@/context/WorkerContext';
 import {
   compareKtxNames,
@@ -59,14 +66,16 @@ import {
   normalizeKtxCompact,
 } from '@/lib/bedSync';
 import { createClient } from '@/lib/supabase/client';
-import Ktx3DViewport from './Ktx3DViewport';
+import Ktx3DViewport, { type Ktx3DViewportHandle } from './Ktx3DViewport';
 import { getRoomUnitMatchCount } from '../scene/campusBuilder';
 import type {
+  BedTierFilter,
   CameraPreset,
   CampusBuildingNode,
   CampusColorMode,
   CampusKtxNode,
   CampusRoomNode,
+  FunctionalAreaNode,
   HoverInfo,
   RenderPerfStats,
   RoomBedSlot,
@@ -74,6 +83,8 @@ import type {
   UnitXRayFilter,
   ViewLevel,
 } from '../types';
+
+const BED_CACHE_TTL_MS = 30_000;
 
 interface RawBedRow {
   id: string;
@@ -123,21 +134,29 @@ export default function Ktx3DTestClient() {
   const [colorMode, setColorMode] = useState<CampusColorMode>('occupancy');
   const [unitXRayFilter, setUnitXRayFilter] = useState<UnitXRayFilter | null>(null);
   const [focusedRoomKey, setFocusedRoomKey] = useState<string | null>(null);
+  const [hideRoofs, setHideRoofs] = useState(false);
+  const [showFunctionalRooms, setShowFunctionalRooms] = useState(true);
 
   // Active Room & Beds state
   const [activeRoomKey, setActiveRoomKey] = useState<string | null>(null);
   const [activeRoomBeds, setActiveRoomBeds] = useState<RoomBedSlot[]>([]);
   const [bedsLoading, setBedsLoading] = useState(false);
   const [selectedBed, setSelectedBed] = useState<RoomBedSlot | null>(null);
+  const [bedTierFilter, setBedTierFilter] = useState<BedTierFilter>('all');
+  const [showBedNames, setShowBedNames] = useState(true);
   const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
 
-  // Quick Search & Room Resident List state
+  // Quick Search, Room Residents & Equipment Popovers + Cache/Refresh
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [residentsPanelOpen, setResidentsPanelOpen] = useState(false);
+  const [equipmentPanelOpen, setEquipmentPanelOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshSeq, setRefreshSeq] = useState(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const viewportRef = useRef<Ktx3DViewportHandle | null>(null);
   const pendingFocusWorkerIdRef = useRef<string | null>(null);
-  const roomBedsCacheRef = useRef<Map<string, RawBedRow[]>>(new Map());
+  const roomBedsCacheRef = useRef<Map<string, { rows: RawBedRow[]; fetchedAt: number }>>(new Map());
 
   // Camera & HUD controls
   const [dockCollapsed, setDockCollapsed] = useState(false);
@@ -156,6 +175,11 @@ export default function Ktx3DTestClient() {
     if (isLightDom) setSceneTheme('light');
   }, []);
 
+  // Auto-invalidate bed cache whenever WorkerContext data refreshes
+  useEffect(() => {
+    roomBedsCacheRef.current.clear();
+  }, [workers]);
+
   // Keyboard shortcuts: H = hide dock, / = search, + / - = zoom, 0 = reset, Esc = close/back
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -172,6 +196,8 @@ export default function Ktx3DTestClient() {
       } else if (e.key === '/') {
         e.preventDefault();
         setSearchOpen(true);
+        setResidentsPanelOpen(false);
+        setEquipmentPanelOpen(false);
         window.setTimeout(() => searchInputRef.current?.focus(), 20);
       } else if (e.key === '+' || e.key === '=') {
         setZoomReq(prev => ({ factor: 0.78, seq: (prev?.seq || 0) + 1 }));
@@ -185,6 +211,8 @@ export default function Ktx3DTestClient() {
           setSearchQuery('');
         } else if (residentsPanelOpen) {
           setResidentsPanelOpen(false);
+        } else if (equipmentPanelOpen) {
+          setEquipmentPanelOpen(false);
         } else if (selectedBed) {
           setSelectedBed(null);
         } else if (focusedRoomKey) {
@@ -192,13 +220,14 @@ export default function Ktx3DTestClient() {
         } else if (viewLevel === 'room') {
           setViewLevel('campus');
           setActiveRoomKey(null);
+          setBedTierFilter('all');
           setHoverInfo(null);
         }
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [searchOpen, residentsPanelOpen, selectedBed, focusedRoomKey, viewLevel]);
+  }, [searchOpen, residentsPanelOpen, equipmentPanelOpen, selectedBed, focusedRoomKey, viewLevel]);
 
   // Load real facilities & room gender labels (Read-Only)
   useEffect(() => {
@@ -224,11 +253,43 @@ export default function Ktx3DTestClient() {
     };
   }, []);
 
-  // Build hierarchical KTX -> Building -> Room model + Unit/Platoon catalogs from real data
+  // Manual Refresh: bypasses facility + bed caches to pull latest real-time state (Read-Only)
+  const handleManualRefresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      roomBedsCacheRef.current.clear();
+      const [facs, genderRes] = await Promise.all([
+        fetchFacilitiesList(true).catch(() => null),
+        fetchRoomLabelsAuthoritative().catch(() => ({ data: roomGenderMap, ok: false })),
+      ]);
+      if (facs) {
+        setFacilities(facs);
+        setCapacities(buildRoomCapacityMapFromFacilities(facs));
+      }
+      if (genderRes.ok) {
+        setRoomGenderMap(genderRes.data);
+      }
+      setRefreshSeq(prev => prev + 1);
+      toast.success('Đã đồng bộ dữ liệu 3D mới nhất');
+    } catch {
+      toast.error('Không thể làm mới dữ liệu lúc này');
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshing, roomGenderMap]);
+
+  // Build hierarchical KTX -> Building -> Room model + Functional Areas + Unit/Platoon catalogs from real data
   const { allKtxNodes, allRoomsFlat, roomByKeyMap, xrayOptions } = useMemo(() => {
     const accFacilities = (facilities || []).filter(
       f => (f.room_type || 'accommodation') === 'accommodation' && f.is_visible !== false
     );
+    const funcFacilities = (facilities || []).filter(
+      f => f.room_type === 'functional' && f.is_visible !== false
+    );
+    const facilityByKey = new Map<string, FacilityItem>();
+    const functionalAreasByKtx = new Map<string, FunctionalAreaNode[]>();
+
     const hiddenKeys = new Set<string>();
     (facilities || []).forEach(f => {
       if ((f.room_type || 'accommodation') !== 'accommodation' || f.is_visible === false) {
@@ -267,7 +328,30 @@ export default function Ktx3DTestClient() {
     };
 
     accFacilities.forEach(f => {
-      ensureRoomSlot(f.ktx || '', f.day || '', f.phong_khu_vuc || '');
+      const fullKey = ensureRoomSlot(f.ktx || '', f.day || '', f.phong_khu_vuc || '');
+      if (fullKey && !facilityByKey.has(fullKey)) {
+        facilityByKey.set(fullKey, f);
+      }
+    });
+
+    funcFacilities.forEach((f, idx) => {
+      const k = (f.ktx || '').trim();
+      const d = (f.day || '').trim();
+      const name = (f.phong_khu_vuc || '').trim() || `Khu chức năng ${idx + 1}`;
+      if (!k) return;
+      if (!ktxBuildingsMap.has(k)) {
+        ktxBuildingsMap.set(k, new Map());
+      }
+      const list = functionalAreasByKtx.get(k) || [];
+      list.push({
+        key: `${k}||${d}||func||${f.id ?? idx}`,
+        ktx: k,
+        day: d,
+        name,
+        ghiChu: (f.ghi_chu || '').trim(),
+        facility: f,
+      });
+      functionalAreasByKtx.set(k, list);
     });
 
     (workers || []).forEach(w => {
@@ -353,6 +437,7 @@ export default function Ktx3DTestClient() {
             dominantUnit,
             platoonCounts,
             unitCounts,
+            facility: facilityByKey.get(key) || null,
           };
           flatRooms.push(roomNode);
           byKey.set(key, roomNode);
@@ -369,9 +454,14 @@ export default function Ktx3DTestClient() {
         };
       });
 
+      const functionalAreas = (functionalAreasByKtx.get(ktx) || []).sort((a, b) =>
+        naturalSortCompare(a.name, b.name)
+      );
+
       return {
         ktx,
         buildings,
+        functionalAreas,
         totalRooms: buildings.reduce((s, b) => s + b.rooms.length, 0),
         totalCapacity: buildings.reduce((s, b) => s + b.totalCapacity, 0),
         totalOccupied: buildings.reduce((s, b) => s + b.totalOccupied, 0),
@@ -439,9 +529,11 @@ export default function Ktx3DTestClient() {
     setBedsLoading(true);
 
     const loadRoomBeds = async () => {
-      let dbRows: RawBedRow[] = roomBedsCacheRef.current.get(activeRoom.key) || [];
+      const cached = roomBedsCacheRef.current.get(activeRoom.key);
+      const cacheFresh = cached && Date.now() - cached.fetchedAt < BED_CACHE_TTL_MS;
+      let dbRows: RawBedRow[] = cacheFresh ? cached.rows : [];
 
-      if (dbRows.length === 0) {
+      if (!cacheFresh) {
         try {
           const supabase = createClient();
           const targetKtx = normalizeKtxCompact(activeRoom.ktx);
@@ -479,9 +571,10 @@ export default function Ktx3DTestClient() {
           }
 
           dbRows = deduplicateBedRows(collected).kept;
-          if (dbRows.length > 0) {
-            roomBedsCacheRef.current.set(activeRoom.key, dbRows);
-          }
+          roomBedsCacheRef.current.set(activeRoom.key, {
+            rows: dbRows,
+            fetchedAt: Date.now(),
+          });
         } catch (err) {
           console.warn('[ktx-3d-test] fetch room beds warning:', err);
         }
@@ -607,7 +700,7 @@ export default function Ktx3DTestClient() {
     return () => {
       cancelled = true;
     };
-  }, [viewLevel, activeRoom]);
+  }, [viewLevel, activeRoom, refreshSeq]);
 
   // ── Quick Search Results (Rooms + Workers, accent-insensitive) ──
   const searchResults = useMemo(() => {
@@ -643,6 +736,7 @@ export default function Ktx3DTestClient() {
     setSelectedBed(null);
     setFocusedRoomKey(null);
     setResidentsPanelOpen(false);
+    setEquipmentPanelOpen(false);
     setHoverInfo(null);
     setViewLevel('room');
   }, []);
@@ -651,9 +745,34 @@ export default function Ktx3DTestClient() {
     setViewLevel('campus');
     setActiveRoomKey(null);
     setSelectedBed(null);
+    setBedTierFilter('all');
     setResidentsPanelOpen(false);
+    setEquipmentPanelOpen(false);
     setHoverInfo(null);
   }, []);
+
+  const handleCaptureSnapshot = useCallback(() => {
+    const dataUrl = viewportRef.current?.captureSnapshot();
+    if (!dataUrl) {
+      toast.error('Không thể chụp ảnh mô hình 3D lúc này');
+      return;
+    }
+    const rawSlug =
+      viewLevel === 'room' && activeRoom
+        ? `${activeRoom.ktx}_${activeRoom.day}_${activeRoom.roomLabel}`
+        : selectedKtxFilter === 'all'
+          ? 'Toan_Khu_KTX'
+          : selectedKtxFilter;
+    const safeSlug = removeAccents(rawSlug).replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+    const stamp = new Date().toISOString().slice(0, 10);
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = `KTX_3D_${safeSlug}_${stamp}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success('Đã lưu ảnh chụp mô hình 3D (PNG)');
+  }, [viewLevel, activeRoom, selectedKtxFilter]);
 
   const handleLocateRoomOnCampus = useCallback(
     (room: CampusRoomNode) => {
@@ -726,6 +845,7 @@ export default function Ktx3DTestClient() {
   // Aggregate summary stats
   const campusTotals = useMemo(() => {
     const rooms = visibleKtxNodes.reduce((s, n) => s + n.totalRooms, 0);
+    const functionalCount = visibleKtxNodes.reduce((s, n) => s + n.functionalAreas.length, 0);
     const occupied = visibleKtxNodes.reduce((s, n) => s + n.totalOccupied, 0);
     const capacity = visibleKtxNodes.reduce((s, n) => s + n.totalCapacity, 0);
     const vacant = Math.max(0, capacity - occupied);
@@ -733,7 +853,7 @@ export default function Ktx3DTestClient() {
     const xrayMatchedRooms = unitXRayFilter
       ? visibleRoomsFlat.filter(r => getRoomUnitMatchCount(r, unitXRayFilter) > 0).length
       : 0;
-    return { rooms, occupied, capacity, vacant, overloaded, xrayMatchedRooms };
+    return { rooms, functionalCount, occupied, capacity, vacant, overloaded, xrayMatchedRooms };
   }, [visibleKtxNodes, visibleRoomsFlat, unitXRayFilter]);
 
   const roomBedStats = useMemo(() => {
@@ -820,15 +940,21 @@ export default function Ktx3DTestClient() {
         </div>
       ) : (
         <Ktx3DViewport
+          ref={viewportRef}
           viewLevel={viewLevel}
           sceneTheme={sceneTheme}
+          campusScopeKey={selectedKtxFilter}
           ktxNodes={visibleKtxNodes}
           colorMode={colorMode}
           unitXRayFilter={unitXRayFilter}
           focusedRoomKey={focusedRoomKey}
+          hideRoofs={hideRoofs}
+          showFunctionalRooms={showFunctionalRooms}
           activeRoom={activeRoom}
           activeRoomBeds={activeRoomBeds}
           selectedBedId={selectedBed?.id || null}
+          bedTierFilter={bedTierFilter}
+          showBedNames={showBedNames}
           cameraPresetRequest={cameraPresetReq}
           focusRoomRequest={focusRoomReq}
           focusBedRequest={focusBedReq}
@@ -905,7 +1031,7 @@ export default function Ktx3DTestClient() {
               </p>
             </div>
 
-            {/* Quick Action Icons: Search, Room Residents List (in Room view), Day/Night Theme */}
+            {/* Quick Action Icons: Search, Room Residents, Equipment, Refresh, Snapshot, Day/Night Theme */}
             <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
@@ -914,6 +1040,7 @@ export default function Ktx3DTestClient() {
                     const next = !prev;
                     if (next) {
                       setResidentsPanelOpen(false);
+                      setEquipmentPanelOpen(false);
                       window.setTimeout(() => searchInputRef.current?.focus(), 20);
                     }
                     return next;
@@ -929,23 +1056,63 @@ export default function Ktx3DTestClient() {
               </button>
 
               {viewLevel === 'room' && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setResidentsPanelOpen(prev => !prev);
-                    setSearchOpen(false);
-                  }}
-                  title="Xem danh sách giường & cư dân trong phòng"
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-semibold font-tabular transition-colors ${
-                    residentsPanelOpen ? 'bg-blue-600 border-blue-500 text-white' : hudSubtleBtn
-                  }`}
-                >
-                  <Users size={13} />
-                  <span>
-                    {roomBedStats.occupied}/{activeRoomBeds.length}
-                  </span>
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResidentsPanelOpen(prev => !prev);
+                      setEquipmentPanelOpen(false);
+                      setSearchOpen(false);
+                    }}
+                    title="Xem danh sách giường & cư dân trong phòng"
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-semibold font-tabular transition-colors ${
+                      residentsPanelOpen ? 'bg-blue-600 border-blue-500 text-white' : hudSubtleBtn
+                    }`}
+                  >
+                    <Users size={13} />
+                    <span>
+                      {roomBedStats.occupied}/{activeRoomBeds.length}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEquipmentPanelOpen(prev => !prev);
+                      setResidentsPanelOpen(false);
+                      setSearchOpen(false);
+                    }}
+                    title="Xem danh sách thiết bị cơ sở vật chất của phòng"
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition-colors ${
+                      equipmentPanelOpen ? 'bg-blue-600 border-blue-500 text-white' : hudSubtleBtn
+                    }`}
+                  >
+                    <Wrench size={13} />
+                    <span className="hidden sm:inline">Thiết bị</span>
+                  </button>
+                </>
               )}
+
+              <button
+                type="button"
+                onClick={handleManualRefresh}
+                disabled={refreshing}
+                title="Đồng bộ dữ liệu 3D mới nhất"
+                className={`p-1.5 rounded-xl border transition-colors ${hudSubtleBtn}`}
+                aria-label="Làm mới dữ liệu 3D"
+              >
+                <RefreshCw size={14} className={refreshing ? 'animate-spin text-blue-500' : ''} />
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCaptureSnapshot}
+                title="Chụp ảnh mô hình 3D sắc nét (PNG)"
+                className={`p-1.5 rounded-xl border transition-colors ${hudSubtleBtn}`}
+                aria-label="Chụp ảnh 3D"
+              >
+                <Camera size={14} />
+              </button>
 
               <button
                 type="button"
@@ -1172,6 +1339,72 @@ export default function Ktx3DTestClient() {
               </div>
             </div>
           )}
+
+          {/* ── Room Equipment Popover (Synced with real `facilities` table) ── */}
+          {viewLevel === 'room' && equipmentPanelOpen && activeRoom && (
+            <div className={`rounded-2xl border p-3 w-full max-w-sm ${hudCard}`}>
+              <div className={`flex items-center justify-between pb-2 mb-2 border-b ${hudDivider}`}>
+                <span className="text-xs font-bold flex items-center gap-1.5">
+                  <Wrench size={13} className="text-blue-500" />
+                  Cơ sở vật chất phòng ({activeRoom.roomLabel})
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setEquipmentPanelOpen(false)}
+                  className={`p-1 rounded-lg ${hudMuted} hover:text-blue-500`}
+                  aria-label="Đóng bảng thiết bị"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+              {activeRoom.facility ? (
+                <div className="space-y-2.5 text-xs">
+                  <div className="grid grid-cols-3 gap-1.5 font-tabular">
+                    {(
+                      [
+                        { label: 'Giường', val: activeRoom.facility.giuong },
+                        { label: 'Điều hòa', val: activeRoom.facility.dieu_hoa },
+                        { label: 'Quạt', val: activeRoom.facility.quat },
+                        { label: 'Bóng đèn', val: activeRoom.facility.bong_tuyp },
+                        { label: 'Tủ đồ', val: activeRoom.facility.tu },
+                        { label: 'Ổ cắm', val: activeRoom.facility.o_cam_dien },
+                        { label: 'Remote ĐH', val: activeRoom.facility.remote },
+                        { label: 'Bàn ăn', val: activeRoom.facility.ban_an },
+                        { label: 'Ghế ăn', val: activeRoom.facility.ghe_an },
+                      ] as { label: string; val: number | undefined }[]
+                    ).map(item => (
+                      <div
+                        key={item.label}
+                        className={`rounded-xl border px-2 py-1.5 ${
+                          isLight
+                            ? 'bg-slate-50 border-slate-200'
+                            : 'bg-slate-900/75 border-slate-800'
+                        }`}
+                      >
+                        <span className={`block text-[10px] ${hudMuted}`}>{item.label}</span>
+                        <span className="font-bold text-xs">{Number(item.val) || 0}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {activeRoom.facility.ghi_chu && (
+                    <p
+                      className={`text-[11px] rounded-xl border px-2.5 py-1.5 ${
+                        isLight
+                          ? 'bg-amber-50 border-amber-200 text-amber-900'
+                          : 'bg-amber-950/40 border-amber-500/30 text-amber-200'
+                      }`}
+                    >
+                      Ghi chú: {activeRoom.facility.ghi_chu}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className={`text-xs py-2 ${hudMuted}`}>
+                  Phòng này chưa có bản ghi thiết bị trong trang Cơ sở vật chất. Mô hình 3D đang dùng cấu hình mặc định.
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ── Selected Bed Inspector Card (Top-Right, ONLY when a bed is clicked) ── */}
@@ -1345,6 +1578,43 @@ export default function Ktx3DTestClient() {
                   ? `${hoverInfo.bed.hoVaTen}${hoverInfo.bed.maNV ? ` (#${hoverInfo.bed.maNV})` : ''}`
                   : 'Chưa có người ở'}
               </p>
+            </div>
+          )}
+
+          {hoverInfo.type === 'functional' && hoverInfo.functional && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-bold text-violet-500">{hoverInfo.functional.name}</span>
+                <span className="px-1.5 py-0.5 rounded bg-violet-500/15 border border-violet-500/35 text-[10px] font-bold text-violet-400">
+                  Khu chức năng
+                </span>
+              </div>
+              <p className={`text-[11px] ${hudMuted}`}>
+                {hoverInfo.functional.ktx}
+                {hoverInfo.functional.day ? ` · ${hoverInfo.functional.day}` : ''}
+              </p>
+              {(Number(hoverInfo.functional.facility.dieu_hoa) > 0 ||
+                Number(hoverInfo.functional.facility.quat) > 0 ||
+                Number(hoverInfo.functional.facility.ban_an) > 0) && (
+                <p className={`text-[11px] font-tabular ${hudMuted}`}>
+                  {[
+                    Number(hoverInfo.functional.facility.dieu_hoa) > 0
+                      ? `${hoverInfo.functional.facility.dieu_hoa} ĐH`
+                      : null,
+                    Number(hoverInfo.functional.facility.quat) > 0
+                      ? `${hoverInfo.functional.facility.quat} quạt`
+                      : null,
+                    Number(hoverInfo.functional.facility.ban_an) > 0
+                      ? `${hoverInfo.functional.facility.ban_an} bàn`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </p>
+              )}
+              {hoverInfo.functional.ghiChu && (
+                <p className={`text-[11px] italic ${hudMuted}`}>{hoverInfo.functional.ghiChu}</p>
+              )}
             </div>
           )}
         </div>
@@ -1565,9 +1835,43 @@ export default function Ktx3DTestClient() {
                         </span>
                       </>
                     )}
+                    {showFunctionalRooms && campusTotals.functionalCount > 0 && (
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-sm bg-violet-500" />
+                        Chức năng ({campusTotals.functionalCount})
+                      </span>
+                    )}
                   </div>
 
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setHideRoofs(prev => !prev)}
+                      title="Ẩn/hiện mái tôn các dãy nhà để quan sát mặt bằng từ trên cao"
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold transition-colors ${
+                        hideRoofs ? 'bg-blue-600 border-blue-500 text-white' : hudSubtleBtn
+                      }`}
+                    >
+                      <EyeOff size={11} />
+                      <span>{hideRoofs ? 'Hiện mái' : 'Ẩn mái'}</span>
+                    </button>
+
+                    {campusTotals.functionalCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowFunctionalRooms(prev => !prev)}
+                        title="Bật/tắt lớp Khu chức năng (Văn phòng, Nhà ăn, WC...)"
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold transition-colors ${
+                          showFunctionalRooms
+                            ? 'bg-violet-600 border-violet-500 text-white'
+                            : hudSubtleBtn
+                        }`}
+                      >
+                        <Building2 size={11} />
+                        <span>Khu CN</span>
+                      </button>
+                    )}
+
                     <div className="flex items-center gap-1">
                       <DoorOpen size={12} className="shrink-0" />
                       <select
@@ -1630,6 +1934,48 @@ export default function Ktx3DTestClient() {
                       title="Phòng kế tiếp"
                     >
                       <ChevronRight size={14} />
+                    </button>
+                  </div>
+
+                  {/* Bunk Tier Filter (Tất cả / Tầng dưới / Tầng trên) + Direct Bed Names */}
+                  <div className="flex items-center gap-1.5">
+                    <div
+                      className={`flex items-center gap-0.5 rounded-xl border p-0.5 text-[11px] ${
+                        isLight ? 'bg-slate-100 border-slate-300' : 'bg-slate-900/90 border-slate-800'
+                      }`}
+                    >
+                      {(
+                        [
+                          { id: 'all', label: 'Tất cả' },
+                          { id: 'bottom', label: 'Tầng dưới' },
+                          { id: 'top', label: 'Tầng trên' },
+                        ] as { id: BedTierFilter; label: string }[]
+                      ).map(opt => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setBedTierFilter(opt.id)}
+                          className={`px-2 py-1 rounded-lg font-semibold transition-colors ${
+                            bedTierFilter === opt.id
+                              ? 'bg-blue-600 text-white'
+                              : `${hudMuted} hover:text-blue-500`
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowBedNames(prev => !prev)}
+                      title="Hiện/ẩn tên ngắn của công nhân ngay trên bảng tên giường 3D"
+                      className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] font-semibold transition-colors ${
+                        showBedNames ? 'bg-blue-600 border-blue-500 text-white' : hudSubtleBtn
+                      }`}
+                    >
+                      <Tag size={11} />
+                      <span className="hidden sm:inline">Tên CN</span>
                     </button>
                   </div>
 

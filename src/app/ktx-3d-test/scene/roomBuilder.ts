@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { CampusRoomNode, RoomBedSlot } from '../types';
+import type { BedTierFilter, CampusRoomNode, RoomBedSlot } from '../types';
 import {
   createPlaqueTexture,
   createRoomTileFloorTexture,
@@ -10,6 +10,9 @@ export interface BedVisualHandle {
   bed: RoomBedSlot;
   mattressMat: THREE.MeshStandardMaterial;
   blanketMat: THREE.MeshStandardMaterial;
+  pillowMat: THREE.MeshStandardMaterial;
+  tagMat: THREE.MeshStandardMaterial;
+  hitMeshes: THREE.Object3D[];
   worldCenter: THREE.Vector3;
 }
 
@@ -39,20 +42,59 @@ function getBedTone(bed: RoomBedSlot) {
   return BED_PALETTE.occupiedUnknown;
 }
 
+/** Formats "Nguyễn Văn Dũng" -> "N.V.Dũng" for crisp compact bed tags */
+function formatShortResidentName(fullName: string | null): string {
+  if (!fullName) return '';
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0].slice(0, 10);
+  const last = parts[parts.length - 1];
+  const initials = parts
+    .slice(0, -1)
+    .map(p => p.charAt(0).toUpperCase())
+    .join('.');
+  return `${initials}.${last}`.slice(0, 14);
+}
+
 export function applyBedHighlights(
   bedVisuals: Map<string, BedVisualHandle>,
   hoveredBedId: string | null,
-  selectedBedId: string | null
+  selectedBedId: string | null,
+  tierFilter: BedTierFilter = 'all'
 ): void {
   bedVisuals.forEach((handle, id) => {
     const tone = getBedTone(handle.bed);
     const isSelected = id === selectedBedId;
     const isHovered = id === hoveredBedId;
+    const isDimmedByTier =
+      (tierFilter === 'bottom' && handle.bed.tier === 'top') ||
+      (tierFilter === 'top' && handle.bed.tier === 'bottom');
+
+    // Dim non-matching tier cleanly & let raycast pass straight through dimmed upper bunks!
+    const targetOpacity = isDimmedByTier ? (handle.bed.tier === 'top' ? 0.12 : 0.18) : 1;
+    const isGhost = isDimmedByTier;
 
     handle.mattressMat.color.setHex(tone.mattress);
     handle.blanketMat.color.setHex(tone.blanket);
 
-    if (isSelected) {
+    [handle.mattressMat, handle.blanketMat, handle.pillowMat, handle.tagMat].forEach(mat => {
+      mat.transparent = isGhost;
+      mat.opacity = targetOpacity;
+      mat.depthWrite = !isGhost;
+    });
+
+    handle.hitMeshes.forEach(mesh => {
+      // Layer 0 = active raycastable; Layer 2 = pass-through while dimmed
+      if (isGhost) mesh.layers.set(2);
+      else mesh.layers.set(0);
+    });
+
+    if (isGhost) {
+      handle.mattressMat.emissive.setHex(0x000000);
+      handle.mattressMat.emissiveIntensity = 0;
+      handle.blanketMat.emissive.setHex(0x000000);
+      handle.blanketMat.emissiveIntensity = 0;
+    } else if (isSelected) {
       handle.mattressMat.emissive.setHex(0x38bdf8);
       handle.mattressMat.emissiveIntensity = 0.58;
       handle.blanketMat.emissive.setHex(0x38bdf8);
@@ -99,7 +141,8 @@ export function buildRoomInteriorScene(
   room: CampusRoomNode,
   beds: RoomBedSlot[],
   maxAnisotropy: number,
-  castShadows: boolean
+  castShadows: boolean,
+  showBedNames = true
 ): RoomBuildResult {
   const group = new THREE.Group();
   group.name = `room-interior-${room.key}`;
@@ -178,12 +221,6 @@ export function buildRoomInteriorScene(
     metalness: 0.02,
   });
 
-  const pillowMat = new THREE.MeshStandardMaterial({
-    color: 0xf8fafc,
-    roughness: 0.9,
-    metalness: 0.0,
-  });
-
   const windowGlassMat = new THREE.MeshStandardMaterial({
     color: 0xbae6fd,
     roughness: 0.12,
@@ -203,6 +240,18 @@ export function buildRoomInteriorScene(
     color: 0xf1f5f9,
     roughness: 0.32,
     metalness: 0.18,
+  });
+
+  const lockerMat = new THREE.MeshStandardMaterial({
+    color: 0x64748b,
+    roughness: 0.42,
+    metalness: 0.55,
+  });
+
+  const fanGuardMat = new THREE.MeshStandardMaterial({
+    color: 0x475569,
+    roughness: 0.36,
+    metalness: 0.65,
   });
 
   const ledMat = new THREE.MeshStandardMaterial({
@@ -259,28 +308,85 @@ export function buildRoomInteriorScene(
   rightWall.receiveShadow = true;
   group.add(rightWall);
 
-  // ── 3. Architectural Fixtures ──
-  [-1.9, 1.9].forEach(wx => {
+  // ── 3. Real Equipment Sync from `facilities` (ACs, LED Tubes, Wall Fans, Lockers) ──
+  const fac = room.facility;
+  const acCount = fac ? Math.min(3, Math.max(0, Number(fac.dieu_hoa ?? 0))) : 1;
+  const fanCount = fac ? Math.min(4, Math.max(0, Number(fac.quat ?? 0))) : 0;
+  const lockerCount = fac ? Math.min(4, Math.max(0, Number(fac.tu ?? 0))) : 0;
+  const rawLights = fac ? Number(fac.bong_tuyp ?? 0) : 0;
+  const lightCount =
+    rawLights > 0 ? Math.min(6, rawLights) : Math.max(2, Math.min(4, Math.ceil(bunksPerSide / 2)));
+
+  // Rear windows
+  [-2.0, 2.0].forEach(wx => {
     const frameGroup = new THREE.Group();
     frameGroup.position.set(wx, 1.85, -ROOM_L / 2 + 0.04);
-
-    const frameOuter = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.15, 0.08), steelFrameMat);
-    const pane = new THREE.Mesh(new THREE.BoxGeometry(1.36, 1.0, 0.04), windowGlassMat);
+    const frameOuter = new THREE.Mesh(new THREE.BoxGeometry(1.45, 1.12, 0.08), steelFrameMat);
+    const pane = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.98, 0.04), windowGlassMat);
     pane.position.z = 0.02;
-    const mullion = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.04, 0.09), steelFrameMat);
+    const mullion = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.02, 0.09), steelFrameMat);
     mullion.position.z = 0.02;
     frameGroup.add(frameOuter, pane, mullion);
     group.add(frameGroup);
   });
 
-  const acGroup = new THREE.Group();
-  acGroup.position.set(0, WALL_H - 0.52, -ROOM_L / 2 + 0.16);
-  const acBox = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.34, 0.26), acBodyMat);
-  const acVent = new THREE.Mesh(new THREE.BoxGeometry(1.08, 0.06, 0.04), steelFrameMat);
-  acVent.position.set(0, -0.09, 0.13);
-  acGroup.add(acBox, acVent);
-  group.add(acGroup);
+  // Real AC units spaced along upper back wall
+  if (acCount > 0) {
+    const acBoxGeo = new THREE.BoxGeometry(1.18, 0.32, 0.24);
+    const acVentGeo = new THREE.BoxGeometry(1.02, 0.06, 0.04);
+    const acPositions =
+      acCount === 1 ? [0] : acCount === 2 ? [-1.85, 1.85] : [-2.2, 0, 2.2];
+    acPositions.forEach(ax => {
+      const acGroup = new THREE.Group();
+      acGroup.position.set(ax, WALL_H - 0.46, -ROOM_L / 2 + 0.15);
+      const acBox = new THREE.Mesh(acBoxGeo, acBodyMat);
+      const acVent = new THREE.Mesh(acVentGeo, steelFrameMat);
+      acVent.position.set(0, -0.09, 0.12);
+      acGroup.add(acBox, acVent);
+      group.add(acGroup);
+    });
+  }
 
+  // Real wall-mounted electric fans along left & right walls
+  if (fanCount > 0) {
+    const fanDiskGeo = new THREE.CylinderGeometry(0.24, 0.24, 0.08, 12);
+    const fanMountGeo = new THREE.BoxGeometry(0.16, 0.14, 0.14);
+    for (let i = 0; i < fanCount; i++) {
+      const onLeft = i % 2 === 0;
+      const tierIdx = Math.floor(i / 2);
+      const zOff =
+        fanCount <= 2 ? 0 : tierIdx === 0 ? -ROOM_L * 0.24 : ROOM_L * 0.24;
+      const fanGroup = new THREE.Group();
+      fanGroup.position.set(
+        onLeft ? -ROOM_W / 2 + 0.14 : ROOM_W / 2 - 0.14,
+        2.15,
+        zOff
+      );
+      const mount = new THREE.Mesh(fanMountGeo, steelFrameMat);
+      const head = new THREE.Mesh(fanDiskGeo, fanGuardMat);
+      head.rotation.z = Math.PI / 2;
+      head.position.x = onLeft ? 0.12 : -0.12;
+      fanGroup.add(mount, head);
+      group.add(fanGroup);
+    }
+  }
+
+  // Real steel locker cabinets along back wall aisle center if `tu > 0`
+  if (lockerCount > 0) {
+    const lockerW = 0.46;
+    const lockerH = 1.38;
+    const lockerD = 0.42;
+    const lockerGeo = new THREE.BoxGeometry(lockerW, lockerH, lockerD);
+    const startLX = -((lockerCount - 1) * (lockerW + 0.06)) / 2;
+    for (let i = 0; i < lockerCount; i++) {
+      const lMesh = new THREE.Mesh(lockerGeo, lockerMat);
+      lMesh.position.set(startLX + i * (lockerW + 0.06), lockerH / 2 + 0.015, -ROOM_L / 2 + 0.26);
+      lMesh.castShadow = castShadows;
+      group.add(lMesh);
+    }
+  }
+
+  // Room info plaque centered on back wall
   const roomSignTex = createPlaqueTexture(
     `${room.ktx} · ${room.day} · ${room.roomLabel}`,
     {
@@ -295,12 +401,13 @@ export function buildRoomInteriorScene(
     plaqueTexCache
   );
   const roomSign = new THREE.Mesh(
-    new THREE.PlaneGeometry(2.6, 0.58),
+    new THREE.PlaneGeometry(2.5, 0.56),
     new THREE.MeshStandardMaterial({ map: roomSignTex, roughness: 0.35 })
   );
-  roomSign.position.set(0, 1.9, -ROOM_L / 2 + 0.05);
+  roomSign.position.set(0, 1.92, -ROOM_L / 2 + 0.05);
   group.add(roomSign);
 
+  // Entrance doorway threshold & open door
   const entryThreshold = new THREE.Mesh(
     new THREE.BoxGeometry(1.4, 0.03, 0.55),
     new THREE.MeshStandardMaterial({ color: 0x3b82f6, roughness: 0.8 })
@@ -313,11 +420,14 @@ export function buildRoomInteriorScene(
   doorLeaf.rotation.y = 0.25;
   group.add(doorLeaf);
 
-  const lightCount = Math.max(2, Math.min(4, Math.ceil(bunksPerSide / 2)));
-  const ledGeo = new THREE.BoxGeometry(0.14, 0.05, 1.15);
+  // Real LED ceiling tubes via InstancedMesh
+  const ledGeo = new THREE.BoxGeometry(0.14, 0.05, 1.05);
   const ledTransforms: { pos: [number, number, number] }[] = [];
   for (let i = 0; i < lightCount; i++) {
-    const lz = -ROOM_L / 2 + 1.4 + (i * (ROOM_L - 2.8)) / Math.max(1, lightCount - 1);
+    const lz =
+      lightCount === 1
+        ? 0
+        : -ROOM_L / 2 + 1.3 + (i * (ROOM_L - 2.6)) / (lightCount - 1);
     ledTransforms.push({ pos: [0, WALL_H + 0.05, lz] });
   }
   addInstancedBatch(group, ledGeo, ledMat, ledTransforms);
@@ -339,7 +449,9 @@ export function buildRoomInteriorScene(
   const mattressGeo = new THREE.BoxGeometry(BUNK_LEN - 0.14, 0.14, BUNK_W - 0.12);
   const blanketGeo = new THREE.BoxGeometry((BUNK_LEN - 0.14) * 0.62, 0.04, BUNK_W - 0.08);
   const pillowGeo = new THREE.BoxGeometry(0.36, 0.11, BUNK_W - 0.32);
-  const tagPlaqueGeo = new THREE.PlaneGeometry(0.38, 0.22);
+  const tagPlaqueGeo = showBedNames
+    ? new THREE.PlaneGeometry(0.76, 0.34)
+    : new THREE.PlaneGeometry(0.42, 0.24);
   const shadowGeo = new THREE.PlaneGeometry(BUNK_LEN + 0.4, BUNK_W + 0.4);
 
   const postInst: { pos: [number, number, number] }[] = [];
@@ -366,10 +478,8 @@ export function buildRoomInteriorScene(
     const zPos = startZ + rowIdx * (BUNK_W + BUNK_GAP_Z);
     const aisleSign = isLeftSide ? 1 : -1;
 
-    // Grounded contact shadow pad
     shadowInst.push({ pos: [xPos, 0.022, zPos], rot: [-Math.PI / 2, 0, 0] });
 
-    // 4 vertical steel posts
     [
       [-halfL, -halfW],
       [-halfL, halfW],
@@ -379,7 +489,6 @@ export function buildRoomInteriorScene(
       postInst.push({ pos: [xPos + px, BUNK_H / 2, zPos + pz] });
     });
 
-    // Horizontal steel rails & wooden deck slats for both tiers
     [LOWER_Y, UPPER_Y].forEach(ty => {
       [-halfW, halfW].forEach(rz => {
         longRailInst.push({ pos: [xPos, ty, zPos + rz] });
@@ -390,7 +499,6 @@ export function buildRoomInteriorScene(
       slatInst.push({ pos: [xPos, ty + 0.015, zPos] });
     });
 
-    // Upper bunk safety guardrails
     [-halfW, halfW].forEach(gz => {
       guardRailInst.push({ pos: [xPos - aisleSign * 0.14, UPPER_Y + 0.34, zPos + gz] });
       [-0.45, 0.25].forEach(gx => {
@@ -398,7 +506,6 @@ export function buildRoomInteriorScene(
       });
     });
 
-    // Front access ladder
     const ladderX = xPos + aisleSign * (halfL - 0.26);
     const ladderZ = zPos + halfW + 0.025;
     [-0.17, 0.17].forEach(lxOff => {
@@ -411,7 +518,6 @@ export function buildRoomInteriorScene(
       });
     }
 
-    // Interactive Bed Slots (Mattress + Folded Blanket + Pillow + Bed Tag)
     const buildBedSlot = (slot: RoomBedSlot | null, tierY: number) => {
       if (!slot) return;
       const tone = getBedTone(slot);
@@ -430,6 +536,12 @@ export function buildRoomInteriorScene(
         metalness: 0.0,
       });
 
+      const pillowMat = new THREE.MeshStandardMaterial({
+        color: 0xf8fafc,
+        roughness: 0.9,
+        metalness: 0.0,
+      });
+
       const slotGroup = new THREE.Group();
       slotGroup.position.set(xPos, tierY + 0.1, zPos);
 
@@ -438,23 +550,31 @@ export function buildRoomInteriorScene(
       mattress.receiveShadow = true;
       mattress.userData = { type: 'bed', bedId: slot.id };
       slotGroup.add(mattress);
-      hitTargets.push(mattress);
 
       const blanket = new THREE.Mesh(blanketGeo, blanketMat);
       blanket.position.set(aisleSign * 0.28, 0.08, 0);
       blanket.userData = { type: 'bed', bedId: slot.id };
       slotGroup.add(blanket);
-      hitTargets.push(blanket);
 
       const pillow = new THREE.Mesh(pillowGeo, pillowMat);
       pillow.position.set(-aisleSign * (BUNK_LEN / 2 - 0.34), 0.11, 0);
       pillow.userData = { type: 'bed', bedId: slot.id };
       slotGroup.add(pillow);
-      hitTargets.push(pillow);
+
+      const shortName = showBedNames
+        ? slot.hoVaTen
+          ? formatShortResidentName(slot.hoVaTen)
+          : slot.status === 'maintenance'
+            ? 'Sửa chữa'
+            : slot.status === 'checkout_pending'
+              ? 'Chờ ra'
+              : 'Trống'
+        : undefined;
 
       const tagTex = createPlaqueTexture(
         slot.bedLabel,
         {
+          subtext: shortName,
           bg: '#0f172a',
           border:
             slot.status === 'empty'
@@ -464,29 +584,32 @@ export function buildRoomInteriorScene(
                 : slot.status === 'checkout_pending'
                   ? '#f59e0b'
                   : '#38bdf8',
-          width: 128,
-          height: 72,
-          fontSize: 36,
+          width: showBedNames ? 224 : 128,
+          height: showBedNames ? 100 : 72,
+          fontSize: showBedNames ? 32 : 36,
           maxAnisotropy,
         },
         plaqueTexCache
       );
-      const tag = new THREE.Mesh(
-        tagPlaqueGeo,
-        new THREE.MeshStandardMaterial({ map: tagTex, roughness: 0.35 })
-      );
-      tag.position.set(aisleSign * (BUNK_LEN / 2 + 0.02), 0.02, 0);
+      const tagMat = new THREE.MeshStandardMaterial({ map: tagTex, roughness: 0.35 });
+      const tag = new THREE.Mesh(tagPlaqueGeo, tagMat);
+      tag.position.set(aisleSign * (BUNK_LEN / 2 + 0.025), 0.04, 0);
       tag.rotation.y = aisleSign > 0 ? Math.PI / 2 : -Math.PI / 2;
       tag.userData = { type: 'bed', bedId: slot.id };
       slotGroup.add(tag);
-      hitTargets.push(tag);
 
       group.add(slotGroup);
+
+      const slotHitMeshes = [mattress, blanket, pillow, tag];
+      hitTargets.push(...slotHitMeshes);
 
       bedVisuals.set(slot.id, {
         bed: slot,
         mattressMat,
         blanketMat,
+        pillowMat,
+        tagMat,
+        hitMeshes: slotHitMeshes,
         worldCenter: new THREE.Vector3(xPos, tierY + 0.2, zPos),
       });
     };
@@ -495,7 +618,7 @@ export function buildRoomInteriorScene(
     buildBedSlot(pair.top, UPPER_Y);
   });
 
-  // ── 6. Commit Batched Structural InstancedMeshes (~270 draw calls -> 9!) ──
+  // ── 6. Commit Batched Structural InstancedMeshes ──
   addInstancedBatch(group, shadowGeo, contactShadowMat, shadowInst, false);
   addInstancedBatch(group, postGeo, steelFrameMat, postInst, castShadows);
   addInstancedBatch(group, longRailGeo, steelFrameMat, longRailInst, false);

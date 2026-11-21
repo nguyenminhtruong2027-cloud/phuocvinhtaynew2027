@@ -1,4 +1,5 @@
 import type { Worker } from '@/data/workers';
+import type { FacilityItem } from '@/lib/facilityCapacity';
 import type { RoomGenderInfo } from '@/lib/roomGender';
 
 export type ViewLevel = 'campus' | 'room';
@@ -12,12 +13,23 @@ export type CampusColorMode =
 
 export type SceneTheme = 'dark' | 'light';
 
+export type BedTierFilter = 'all' | 'bottom' | 'top';
+
 export type CameraPreset = 'overview' | 'top' | 'low' | 'left_row' | 'right_row';
 
 export interface UnitXRayFilter {
   type: 'platoon' | 'unit';
   value: string;
   label: string;
+}
+
+export interface FunctionalAreaNode {
+  key: string;
+  ktx: string;
+  day: string;
+  name: string;
+  ghiChu: string;
+  facility: FacilityItem;
 }
 
 export interface CampusRoomNode {
@@ -37,6 +49,7 @@ export interface CampusRoomNode {
   dominantUnit: string;
   platoonCounts: Record<string, number>;
   unitCounts: Record<string, number>;
+  facility: FacilityItem | null;
 }
 
 export interface CampusBuildingNode {
@@ -51,6 +64,7 @@ export interface CampusBuildingNode {
 export interface CampusKtxNode {
   ktx: string;
   buildings: CampusBuildingNode[];
+  functionalAreas: FunctionalAreaNode[];
   totalRooms: number;
   totalCapacity: number;
   totalOccupied: number;
@@ -74,11 +88,12 @@ export interface RoomBedSlot {
 }
 
 export interface HoverInfo {
-  type: 'room' | 'bed';
+  type: 'room' | 'bed' | 'functional';
   screenX: number;
   screenY: number;
   room?: CampusRoomNode;
   bed?: RoomBedSlot;
+  functional?: FunctionalAreaNode;
 }
 
 export interface RenderPerfStats {

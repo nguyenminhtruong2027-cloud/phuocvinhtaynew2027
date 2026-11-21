@@ -1,15 +1,17 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { AlertTriangle } from 'lucide-react';
 import type {
+  BedTierFilter,
   CameraPreset,
   CampusColorMode,
   CampusKtxNode,
   CampusRoomNode,
+  FunctionalAreaNode,
   HoverInfo,
   RenderPerfStats,
   RoomBedSlot,
@@ -27,18 +29,28 @@ import {
   buildRoomInteriorScene,
   type BedVisualHandle,
 } from '../scene/roomBuilder';
+import { CAMPUS_BLUEPRINT_CONFIG } from '../scene/campusLayoutConfig';
 import { disposeObject3D } from '../scene/materials';
+
+export interface Ktx3DViewportHandle {
+  captureSnapshot: () => string | null;
+}
 
 interface Ktx3DViewportProps {
   viewLevel: ViewLevel;
   sceneTheme: SceneTheme;
+  campusScopeKey: string;
   ktxNodes: CampusKtxNode[];
   colorMode: CampusColorMode;
   unitXRayFilter: UnitXRayFilter | null;
   focusedRoomKey: string | null;
+  hideRoofs: boolean;
+  showFunctionalRooms: boolean;
   activeRoom: CampusRoomNode | null;
   activeRoomBeds: RoomBedSlot[];
   selectedBedId: string | null;
+  bedTierFilter: BedTierFilter;
+  showBedNames: boolean;
   cameraPresetRequest: { preset: CameraPreset; seq: number } | null;
   focusRoomRequest: { roomKey: string; seq: number } | null;
   focusBedRequest: { bedId: string; seq: number } | null;
@@ -119,25 +131,33 @@ function computeCameraForPreset(
   }
 }
 
-export default function Ktx3DViewport({
-  viewLevel,
-  sceneTheme,
-  ktxNodes,
-  colorMode,
-  unitXRayFilter,
-  focusedRoomKey,
-  activeRoom,
-  activeRoomBeds,
-  selectedBedId,
-  cameraPresetRequest,
-  focusRoomRequest,
-  focusBedRequest,
-  zoomRequest,
-  onSelectRoom,
-  onSelectBed,
-  onHoverChange,
-  onPerfStats,
-}: Ktx3DViewportProps) {
+const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(function Ktx3DViewport(
+  {
+    viewLevel,
+    sceneTheme,
+    campusScopeKey,
+    ktxNodes,
+    colorMode,
+    unitXRayFilter,
+    focusedRoomKey,
+    hideRoofs,
+    showFunctionalRooms,
+    activeRoom,
+    activeRoomBeds,
+    selectedBedId,
+    bedTierFilter,
+    showBedNames,
+    cameraPresetRequest,
+    focusRoomRequest,
+    focusBedRequest,
+    zoomRequest,
+    onSelectRoom,
+    onSelectBed,
+    onHoverChange,
+    onPerfStats,
+  },
+  ref
+) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [webglUnsupported, setWebglUnsupported] = useState(false);
 
@@ -150,7 +170,10 @@ export default function Ktx3DViewport({
     colorMode,
     unitXRayFilter,
     focusedRoomKey,
+    hideRoofs,
+    showFunctionalRooms,
     selectedBedId,
+    bedTierFilter,
   });
   stateRef.current = {
     viewLevel,
@@ -158,7 +181,10 @@ export default function Ktx3DViewport({
     colorMode,
     unitXRayFilter,
     focusedRoomKey,
+    hideRoofs,
+    showFunctionalRooms,
     selectedBedId,
+    bedTierFilter,
   };
 
   const engineRef = useRef<{
@@ -170,15 +196,20 @@ export default function Ktx3DViewport({
     keyLight: THREE.DirectionalLight;
     rimLight: THREE.DirectionalLight;
     contentRoot: THREE.Group;
+    roofsGroup: THREE.Group | null;
+    functionalGroup: THREE.Group | null;
     isSoftwareGl: boolean;
     maxAnisotropy: number;
     hitTargets: THREE.Object3D[];
+    functionalHitTargets: THREE.Object3D[];
     roomVisuals: Map<string, RoomVisualHandle>;
+    functionalLookup: Map<string, FunctionalAreaNode>;
     bedVisuals: Map<string, BedVisualHandle>;
     boundsCenter: THREE.Vector3;
     boundsRadius: number;
     hoveredRoomKey: string | null;
     hoveredBedId: string | null;
+    lastCameraScopeKey: string | null;
     cameraTransition: {
       active: boolean;
       targetPos: THREE.Vector3;
@@ -186,6 +217,26 @@ export default function Ktx3DViewport({
     };
     requestRender: () => void;
   } | null>(null);
+
+  // Expose synchronous HUD-free PNG Snapshot export (zero preserveDrawingBuffer perf overhead)
+  useImperativeHandle(
+    ref,
+    () => ({
+      captureSnapshot: () => {
+        const eng = engineRef.current;
+        if (!eng) return null;
+        try {
+          eng.controls.update();
+          eng.renderer.render(eng.scene, eng.camera);
+          return eng.renderer.domElement.toDataURL('image/png');
+        } catch (err) {
+          console.warn('[ktx-3d-test] captureSnapshot error:', err);
+          return null;
+        }
+      },
+    }),
+    []
+  );
 
   // ── 1. Initialize WebGLRenderer, RoomEnvironment, Studio Lighting & OrbitControls ONCE ──
   useEffect(() => {
@@ -207,6 +258,8 @@ export default function Ktx3DViewport({
     scene.fog = new THREE.FogExp2(initBg, 0.0055);
 
     const camera = new THREE.PerspectiveCamera(44, width / height, 0.15, 420);
+    // Enable layer 2 on camera so dimmed ghost bunks render transparently while raycaster (layer 0) passes right through them!
+    camera.layers.enable(2);
     camera.position.set(24, 24, 30);
 
     const renderer = new THREE.WebGLRenderer({
@@ -391,21 +444,30 @@ export default function Ktx3DViewport({
     controls.addEventListener('start', handleControlsStart);
     controls.addEventListener('change', handleControlsChange);
 
-    // Throttled pointermove raycasting + drag-vs-click separation
+    // Throttled pointermove raycasting (Layer 0 only -> ignores dimmed layer-2 upper bunks!)
     const raycaster = new THREE.Raycaster();
+    raycaster.layers.set(0);
     let lastHoverTs = 0;
     let pointerDownX = 0;
     let pointerDownY = 0;
 
     const getHitFromEvent = (e: PointerEvent) => {
       const eng = engineRef.current;
-      if (!eng || eng.hitTargets.length === 0) return null;
+      if (!eng) return null;
+      const targets =
+        stateRef.current.viewLevel === 'campus' &&
+        stateRef.current.showFunctionalRooms &&
+        eng.functionalHitTargets.length > 0
+          ? [...eng.hitTargets, ...eng.functionalHitTargets]
+          : eng.hitTargets;
+      if (targets.length === 0) return null;
+
       const rect = renderer.domElement.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return null;
       _pointerNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       _pointerNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(_pointerNdc, camera);
-      const hits = raycaster.intersectObjects(eng.hitTargets, false);
+      const hits = raycaster.intersectObjects(targets, false);
       return hits.length > 0 ? hits[0].object : null;
     };
 
@@ -425,6 +487,9 @@ export default function Ktx3DViewport({
       const hit = getHitFromEvent(e);
       if (stateRef.current.viewLevel === 'campus') {
         const roomKey = hit?.userData?.type === 'room' ? String(hit.userData.roomKey) : null;
+        const funcKey =
+          hit?.userData?.type === 'functional' ? String(hit.userData.functionalKey) : null;
+
         if (roomKey !== eng.hoveredRoomKey) {
           eng.hoveredRoomKey = roomKey;
           applyCampusColorMode(
@@ -437,8 +502,9 @@ export default function Ktx3DViewport({
           );
           requestRender();
         }
-        renderer.domElement.style.cursor = roomKey ? 'pointer' : 'grab';
+
         if (roomKey) {
+          renderer.domElement.style.cursor = 'pointer';
           const handle = eng.roomVisuals.get(roomKey);
           if (handle) {
             callbacksRef.current.onHoverChange({
@@ -449,13 +515,32 @@ export default function Ktx3DViewport({
             });
             return;
           }
+        } else if (funcKey) {
+          renderer.domElement.style.cursor = 'default';
+          const funcNode = eng.functionalLookup.get(funcKey);
+          if (funcNode) {
+            callbacksRef.current.onHoverChange({
+              type: 'functional',
+              screenX: e.clientX,
+              screenY: e.clientY,
+              functional: funcNode,
+            });
+            return;
+          }
+        } else {
+          renderer.domElement.style.cursor = 'grab';
         }
         callbacksRef.current.onHoverChange(null);
       } else {
         const bedId = hit?.userData?.type === 'bed' ? String(hit.userData.bedId) : null;
         if (bedId !== eng.hoveredBedId) {
           eng.hoveredBedId = bedId;
-          applyBedHighlights(eng.bedVisuals, bedId, stateRef.current.selectedBedId);
+          applyBedHighlights(
+            eng.bedVisuals,
+            bedId,
+            stateRef.current.selectedBedId,
+            stateRef.current.bedTierFilter
+          );
           requestRender();
         }
         renderer.domElement.style.cursor = bedId ? 'pointer' : 'grab';
@@ -492,7 +577,12 @@ export default function Ktx3DViewport({
       }
       if (eng.hoveredBedId) {
         eng.hoveredBedId = null;
-        applyBedHighlights(eng.bedVisuals, null, stateRef.current.selectedBedId);
+        applyBedHighlights(
+          eng.bedVisuals,
+          null,
+          stateRef.current.selectedBedId,
+          stateRef.current.bedTierFilter
+        );
         requestRender();
       }
       callbacksRef.current.onHoverChange(null);
@@ -554,15 +644,20 @@ export default function Ktx3DViewport({
       keyLight,
       rimLight,
       contentRoot,
+      roofsGroup: null,
+      functionalGroup: null,
       isSoftwareGl,
       maxAnisotropy,
       hitTargets: [],
+      functionalHitTargets: [],
       roomVisuals: new Map(),
+      functionalLookup: new Map(),
       bedVisuals: new Map(),
       boundsCenter: new THREE.Vector3(0, 1, 0),
       boundsRadius: 20,
       hoveredRoomKey: null,
       hoveredBedId: null,
+      lastCameraScopeKey: null,
       cameraTransition,
       requestRender,
     };
@@ -625,7 +720,7 @@ export default function Ktx3DViewport({
     eng.requestRender();
   }, [sceneTheme]);
 
-  // ── 3. Rebuild 3D Scene Content when ViewLevel, Campus Data, Theme, or Active Room changes ──
+  // ── 3. Rebuild 3D Scene Content (Camera resets ONLY when scope actually changes — zero snap-back!) ──
   useEffect(() => {
     const eng = engineRef.current;
     if (!eng) return;
@@ -635,13 +730,20 @@ export default function Ktx3DViewport({
       eng.contentRoot.remove(child);
       disposeObject3D(child);
     }
+    eng.roofsGroup = null;
+    eng.functionalGroup = null;
     eng.hitTargets = [];
+    eng.functionalHitTargets = [];
     eng.roomVisuals = new Map();
+    eng.functionalLookup = new Map();
     eng.bedVisuals = new Map();
     eng.hoveredRoomKey = null;
     eng.hoveredBedId = null;
 
     const bgHex = getThemeBgHex(sceneTheme);
+    const nextScopeKey =
+      viewLevel === 'campus' ? `campus::${campusScopeKey}` : `room::${activeRoom?.key || ''}`;
+    const shouldResetCamera = eng.lastCameraScopeKey !== nextScopeKey;
 
     if (viewLevel === 'campus') {
       const built = buildCampusScene(
@@ -650,11 +752,19 @@ export default function Ktx3DViewport({
         stateRef.current.unitXRayFilter,
         sceneTheme,
         eng.maxAnisotropy,
-        !eng.isSoftwareGl
+        !eng.isSoftwareGl,
+        CAMPUS_BLUEPRINT_CONFIG
       );
+      built.roofsGroup.visible = !stateRef.current.hideRoofs;
+      built.functionalGroup.visible = stateRef.current.showFunctionalRooms;
+
       eng.contentRoot.add(built.group);
+      eng.roofsGroup = built.roofsGroup;
+      eng.functionalGroup = built.functionalGroup;
       eng.hitTargets = built.hitTargets;
+      eng.functionalHitTargets = built.functionalHitTargets;
       eng.roomVisuals = built.roomVisuals;
+      eng.functionalLookup = built.functionalLookup;
       eng.boundsCenter.copy(built.boundsCenter);
       eng.boundsRadius = built.boundsRadius;
 
@@ -681,23 +791,26 @@ export default function Ktx3DViewport({
         sceneTheme
       );
 
-      computeCameraForPreset(
-        'campus',
-        'overview',
-        built.boundsCenter,
-        built.boundsRadius,
-        _desiredCamPos,
-        _desiredTarget
-      );
-      eng.cameraTransition.targetPos.copy(_desiredCamPos);
-      eng.cameraTransition.targetLook.copy(_desiredTarget);
-      eng.cameraTransition.active = true;
+      if (shouldResetCamera) {
+        computeCameraForPreset(
+          'campus',
+          'overview',
+          built.boundsCenter,
+          built.boundsRadius,
+          _desiredCamPos,
+          _desiredTarget
+        );
+        eng.cameraTransition.targetPos.copy(_desiredCamPos);
+        eng.cameraTransition.targetLook.copy(_desiredTarget);
+        eng.cameraTransition.active = true;
+      }
     } else if (activeRoom) {
       const built = buildRoomInteriorScene(
         activeRoom,
         activeRoomBeds,
         eng.maxAnisotropy,
-        !eng.isSoftwareGl
+        !eng.isSoftwareGl,
+        showBedNames
       );
       eng.contentRoot.add(built.group);
       eng.hitTargets = built.hitTargets;
@@ -716,28 +829,52 @@ export default function Ktx3DViewport({
       eng.controls.minDistance = 2.6;
       eng.controls.maxDistance = Math.max(24, built.boundsRadius * 3.2);
 
-      applyBedHighlights(eng.bedVisuals, null, stateRef.current.selectedBedId);
-
-      computeCameraForPreset(
-        'room',
-        'overview',
-        built.boundsCenter,
-        built.boundsRadius,
-        _desiredCamPos,
-        _desiredTarget
+      applyBedHighlights(
+        eng.bedVisuals,
+        null,
+        stateRef.current.selectedBedId,
+        stateRef.current.bedTierFilter
       );
-      eng.cameraTransition.targetPos.copy(_desiredCamPos);
-      eng.cameraTransition.targetLook.copy(_desiredTarget);
-      eng.cameraTransition.active = true;
+
+      if (shouldResetCamera) {
+        computeCameraForPreset(
+          'room',
+          'overview',
+          built.boundsCenter,
+          built.boundsRadius,
+          _desiredCamPos,
+          _desiredTarget
+        );
+        eng.cameraTransition.targetPos.copy(_desiredCamPos);
+        eng.cameraTransition.targetLook.copy(_desiredTarget);
+        eng.cameraTransition.active = true;
+      }
     }
+
+    eng.lastCameraScopeKey = nextScopeKey;
 
     if (!eng.isSoftwareGl) {
       eng.renderer.compile(eng.scene, eng.camera);
     }
     eng.requestRender();
-  }, [viewLevel, ktxNodes, activeRoom, activeRoomBeds, sceneTheme]);
+  }, [viewLevel, campusScopeKey, ktxNodes, activeRoom, activeRoomBeds, sceneTheme, showBedNames]);
 
-  // ── 4. Instant Color Mode / Unit X-Ray / Focused Room Re-styling (zero geometry rebuild) ──
+  // ── 4. Instant 0ms Roof Cutaway & Functional Layer Toggles (zero geometry rebuild) ──
+  useEffect(() => {
+    const eng = engineRef.current;
+    if (!eng || viewLevel !== 'campus' || !eng.roofsGroup) return;
+    eng.roofsGroup.visible = !hideRoofs;
+    eng.requestRender();
+  }, [hideRoofs, viewLevel]);
+
+  useEffect(() => {
+    const eng = engineRef.current;
+    if (!eng || viewLevel !== 'campus' || !eng.functionalGroup) return;
+    eng.functionalGroup.visible = showFunctionalRooms;
+    eng.requestRender();
+  }, [showFunctionalRooms, viewLevel]);
+
+  // ── 5. Instant Color Mode / Unit X-Ray / Focused Room Re-styling (zero geometry rebuild) ──
   useEffect(() => {
     const eng = engineRef.current;
     if (!eng || viewLevel !== 'campus') return;
@@ -752,15 +889,15 @@ export default function Ktx3DViewport({
     eng.requestRender();
   }, [colorMode, unitXRayFilter, focusedRoomKey, viewLevel, sceneTheme]);
 
-  // ── 5. Instant Bed Selection Highlight ──
+  // ── 6. Instant Bed Selection & Bunk Tier Filter Highlight (with Layer-2 Click Pass-Through) ──
   useEffect(() => {
     const eng = engineRef.current;
     if (!eng || viewLevel !== 'room') return;
-    applyBedHighlights(eng.bedVisuals, eng.hoveredBedId, selectedBedId);
+    applyBedHighlights(eng.bedVisuals, eng.hoveredBedId, selectedBedId, bedTierFilter);
     eng.requestRender();
-  }, [selectedBedId, viewLevel]);
+  }, [selectedBedId, bedTierFilter, viewLevel]);
 
-  // ── 6. Smooth Camera Preset Transitions ──
+  // ── 7. Smooth Camera Preset Transitions ──
   useEffect(() => {
     const eng = engineRef.current;
     if (!eng || !cameraPresetRequest) return;
@@ -778,7 +915,7 @@ export default function Ktx3DViewport({
     eng.requestRender();
   }, [cameraPresetRequest, viewLevel]);
 
-  // ── 7. Smooth Fly-To Specific Room on Campus (from Quick Search) ──
+  // ── 8. Smooth Fly-To Specific Room on Campus (from Quick Search) ──
   useEffect(() => {
     const eng = engineRef.current;
     if (!eng || !focusRoomRequest || viewLevel !== 'campus') return;
@@ -795,7 +932,7 @@ export default function Ktx3DViewport({
     eng.requestRender();
   }, [focusRoomRequest, viewLevel]);
 
-  // ── 8. Smooth Fly-To Specific Bunk Bed in Room Interior ──
+  // ── 9. Smooth Fly-To Specific Bunk Bed in Room Interior ──
   useEffect(() => {
     const eng = engineRef.current;
     if (!eng || !focusBedRequest || viewLevel !== 'room') return;
@@ -813,7 +950,7 @@ export default function Ktx3DViewport({
     eng.requestRender();
   }, [focusBedRequest, viewLevel]);
 
-  // ── 9. Smooth Zoom In / Out Buttons (for touchpad & mobile) ──
+  // ── 10. Smooth Zoom In / Out Buttons (for touchpad & mobile) ──
   useEffect(() => {
     const eng = engineRef.current;
     if (!eng || !zoomRequest) return;
@@ -865,4 +1002,6 @@ export default function Ktx3DViewport({
       aria-label="Khung hiển thị mô hình 3D Ký Túc Xá"
     />
   );
-}
+});
+
+export default Ktx3DViewport;
