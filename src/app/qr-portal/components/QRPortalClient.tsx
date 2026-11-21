@@ -33,6 +33,7 @@ import { toast } from 'sonner';
 import { syncBedForWorkerSave, normalizeBedLabel } from '@/lib/bedSync';
 import {
   buildRoomKey,
+  extractRoomNumber,
   FacilityItem,
   fetchFacilitiesList,
   invalidateFacilitiesCache,
@@ -1167,8 +1168,10 @@ export default function QRPortalClient() {
     }
 
     const workerId = toValidWorkerUuid(regToApprove.id);
-    const roomVal = (regToApprove.phong_so || '').trim();
-    const bedVal = (regToApprove.giuong || '').trim();
+    const rawRoomVal = (regToApprove.phong_so || '').trim();
+    const roomVal = extractRoomNumber(rawRoomVal) || rawRoomVal;
+    const rawBedVal = (regToApprove.giuong || '').trim();
+    const bedVal = normalizeBedLabel(rawBedVal) || rawBedVal;
 
       // 0a. Live DB duplicate guard against active workers (CCCD & Mã NV)
       const cleanCccd = (regToApprove.so_cccd || '').trim();

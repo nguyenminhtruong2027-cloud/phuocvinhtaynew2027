@@ -4,26 +4,98 @@ import { normalizeRoomLabel } from '@/lib/facilityCapacity';
 
 export function normalizeBedLabel(raw?: string | null): string {
   if (!raw) return '';
-  const cleaned = raw
-    .trim()
-    .replace(/^(?:giường|giuong|g[.\s]*)\s*/i, '')
-    .trim();
+  let cleaned = String(raw).normalize('NFC').trim();
+  let prev = '';
+  while (cleaned !== prev) {
+    prev = cleaned;
+    cleaned = cleaned.replace(/^(?:giường|giuong|g[.\s]*)\s*/i, '').trim();
+  }
   if (/^\d+$/.test(cleaned)) {
     return String(parseInt(cleaned, 10));
   }
   return cleaned.toLowerCase();
 }
 
+export function normalizeKtxCompact(raw?: string | null): string {
+  if (!raw) return '';
+  return String(raw).normalize('NFC').replace(/[\s\-_.]+/g, '').toLowerCase();
+}
+
 export function normalizeDayKey(raw?: string | null): string {
   if (!raw) return '';
-  const cleaned = raw
-    .trim()
-    .replace(/^(?:dãy|day|khu|block)\s*/i, '')
-    .trim();
+  let cleaned = String(raw).normalize('NFC').trim();
+  let prev = '';
+  while (cleaned !== prev) {
+    prev = cleaned;
+    cleaned = cleaned.replace(/^(?:dãy|day|khu|block|d[.\s]*)\s*/i, '').trim();
+  }
   if (/^\d+$/.test(cleaned)) {
     return String(parseInt(cleaned, 10));
   }
   return cleaned.toLowerCase();
+}
+
+export function buildCanonicalBedKey(
+  ktx?: string | null,
+  day?: string | null,
+  phongSo?: string | null,
+  giuong?: string | null
+): string {
+  return `${normalizeKtxCompact(ktx)}||${normalizeDayKey(day)}||${normalizeRoomLabel(String(phongSo || ''))}||${normalizeBedLabel(giuong)}`;
+}
+
+export interface CanonicalBedLike {
+  id: string;
+  ktx: string;
+  day: string;
+  phong_so: string;
+  giuong: string;
+  status: string;
+  worker_id?: string | null;
+}
+
+function bedRowPriority(row: CanonicalBedLike): number {
+  let score = 0;
+  if (row.status === 'occupied') score += 100;
+  else if (row.status === 'maintenance') score += 60;
+  if (row.worker_id && String(row.worker_id).trim()) score += 30;
+  const canonBed = normalizeBedLabel(row.giuong);
+  const canonRoom = normalizeRoomLabel(row.phong_so);
+  if (canonBed && String(row.giuong || '').trim() === canonBed) score += 10;
+  if (canonRoom && String(row.phong_so || '').trim() === canonRoom) score += 5;
+  return score;
+}
+
+/**
+ * Deduplicates bed rows sharing the same canonical (ktx, day, phong_so, giuong) slot.
+ * Always keeps the authoritative row (occupied > maintenance > worker-linked > canonical format).
+ */
+export function deduplicateBedRows<T extends CanonicalBedLike>(
+  rows: T[]
+): { kept: T[]; duplicateRows: T[] } {
+  const byKey = new Map<string, T>();
+  const duplicateRows: T[] = [];
+
+  for (const row of rows) {
+    const key = buildCanonicalBedKey(row.ktx, row.day, row.phong_so, row.giuong);
+    if (!key || key === '||||||') {
+      byKey.set(`__raw__${row.id}`, row);
+      continue;
+    }
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, row);
+      continue;
+    }
+    if (bedRowPriority(row) > bedRowPriority(existing)) {
+      duplicateRows.push(existing);
+      byKey.set(key, row);
+    } else {
+      duplicateRows.push(row);
+    }
+  }
+
+  return { kept: Array.from(byKey.values()), duplicateRows };
 }
 
 const BED_PAGE_SIZE = 1000;
@@ -337,6 +409,7 @@ export async function reconcileBedsWithWorkers(
   releasedCount: number;
   assignedCount: number;
   updatedInfoCount: number;
+  deduplicatedCount: number;
 }> {
   const canTouch = (ktx: string, day: string) => {
     if (!options || options.isAdmin !== false || !options.canWriteBlock) return true;
@@ -360,7 +433,25 @@ export async function reconcileBedsWithWorkers(
     if (list.length < BED_PAGE_SIZE) break;
     from += BED_PAGE_SIZE;
   }
-  const allBeds = Array.from(bedsById.values());
+
+  // Pass 0: Detect & permanently delete duplicate bed rows sharing the same canonical slot
+  const { kept: dedupedBeds, duplicateRows } = deduplicateBedRows(Array.from(bedsById.values()));
+  const duplicateIdsToDelete = duplicateRows
+    .filter(b => canTouch(b.ktx || '', b.day || ''))
+    .map(b => b.id);
+
+  let deduplicatedCount = 0;
+  const DEDUP_CHUNK = 200;
+  for (let i = 0; i < duplicateIdsToDelete.length; i += DEDUP_CHUNK) {
+    const chunk = duplicateIdsToDelete.slice(i, i + DEDUP_CHUNK);
+    const { error: delErr } = await supabase.from('beds').delete().in('id', chunk);
+    if (delErr) {
+      console.warn('[bedSync] duplicate bed delete warning:', delErr.message);
+    } else {
+      deduplicatedCount += chunk.length;
+    }
+  }
+  const allBeds = dedupedBeds;
 
   const workersById = new Map<string, WorkerSyncRow>();
   from = 0;
@@ -467,7 +558,7 @@ export async function reconcileBedsWithWorkers(
   const emptyBedIndex = new Map<string, BedSyncRow>();
   for (const bed of allBeds) {
     if (bedStatusAfterPass1.get(bed.id) === 'empty') {
-      const key = `${(bed.ktx || '').trim().toLowerCase()}||${normalizeDayKey(bed.day)}||${normalizeRoomLabel(bed.phong_so)}||${normalizeBedLabel(bed.giuong)}`;
+      const key = buildCanonicalBedKey(bed.ktx, bed.day, bed.phong_so, bed.giuong);
       if (!emptyBedIndex.has(key)) {
         emptyBedIndex.set(key, bed);
       }
@@ -484,7 +575,7 @@ export async function reconcileBedsWithWorkers(
     const wBed = normalizeBedLabel(w.giuong || '');
     if (!wKtx || !wDayNorm || !wRoom || !wBed) continue;
 
-    const key = `${wKtx.toLowerCase()}||${wDayNorm}||${wRoom}||${wBed}`;
+    const key = buildCanonicalBedKey(wKtx, wDay, wRoom, wBed);
     const targetBed = emptyBedIndex.get(key);
     if (targetBed && canTouch(targetBed.ktx || wKtx, targetBed.day || wDay)) {
       emptyBedIndex.delete(key);
@@ -534,13 +625,15 @@ export async function reconcileBedsWithWorkers(
     releasedCount: idsToRelease.length,
     assignedCount: assignments.length,
     updatedInfoCount: infoUpdates.length,
+    deduplicatedCount,
   };
 }
 
 /**
  * Keeps the `beds` table synchronized when a facility room is created, updated,
  * toggled between accommodation/functional, or toggled visible/hidden.
- * - Accommodation + visible + giuong > 0: ensures beds `1..giuong` exist and deletes extra `empty` beds > `giuong`.
+ * - Accommodation + visible + giuong > 0: ensures beds `1..giuong` exist, deduplicates
+ *   duplicate formatted rows for the same bed number, and deletes extra `empty` beds > `giuong`.
  * - Functional or hidden: cleans up any `empty` beds in that room (never deletes occupied/maintenance beds).
  */
 export async function syncBedsForFacilityRoom(
@@ -559,8 +652,8 @@ export async function syncBedsForFacilityRoom(
   const rawRoom = (room.phong_khu_vuc || '').trim();
   if (!ktx || !day || !rawRoom) return { created: 0, removed: 0 };
 
-  const roomKey = rawRoom.replace(/^(?:Phòng|P[.\s]*)\s*/i, '').trim() || rawRoom;
   const normTarget = normalizeRoomLabel(rawRoom);
+  const roomKey = normTarget || rawRoom;
   const targetCap =
     room.room_type === 'functional' || room.is_visible === false
       ? 0
@@ -569,7 +662,7 @@ export async function syncBedsForFacilityRoom(
   try {
     const { data: existingBeds, error } = await supabase
       .from('beds')
-      .select('id, phong_so, giuong, status')
+      .select('id, ktx, day, phong_so, giuong, status, worker_id')
       .eq('ktx', ktx)
       .eq('day', day);
 
@@ -577,14 +670,22 @@ export async function syncBedsForFacilityRoom(
       return { created: 0, removed: 0 };
     }
 
-    const roomBeds = existingBeds.filter(
-      (b: any) => normalizeRoomLabel(String(b?.phong_so ?? '')) === normTarget
+    const roomBeds = (existingBeds as CanonicalBedLike[]).filter(
+      b => normalizeRoomLabel(String(b?.phong_so ?? '')) === normTarget
     );
 
+    const { kept: uniqueRoomBeds, duplicateRows } = deduplicateBedRows(roomBeds);
     const existingBedNums = new Set<number>();
     const idsToRemove: string[] = [];
 
-    for (const b of roomBeds) {
+    // Delete any duplicate formatted rows for the same bed number (e.g. 'G1' alongside '1')
+    for (const dup of duplicateRows) {
+      if (dup.status === 'empty' || !dup.worker_id) {
+        idsToRemove.push(String(dup.id));
+      }
+    }
+
+    for (const b of uniqueRoomBeds) {
       const bedNum = parseInt(normalizeBedLabel(String(b?.giuong ?? '')), 10);
       if (!isNaN(bedNum) && bedNum > 0) {
         existingBedNums.add(bedNum);

@@ -14,8 +14,8 @@ import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
 import { useWorkers } from '@/context/WorkerContext';
 import { compareKtxNames, DEFAULT_ROOM_CAPACITY } from '@/data/workers';
-import { fetchRoomCapacities, getRoomCapacity, RoomCapacityMap, formatRoomDisplay, normalizeRoomLabel, invalidateFacilitiesCache } from '@/lib/facilityCapacity';
-import { reconcileBedsWithWorkers, releaseBedsForWorkers, releaseBedByLocation, normalizeBedLabel } from '@/lib/bedSync';
+import { fetchRoomCapacities, getRoomCapacity, RoomCapacityMap, formatRoomDisplay, normalizeRoomLabel, extractRoomNumber, invalidateFacilitiesCache } from '@/lib/facilityCapacity';
+import { reconcileBedsWithWorkers, releaseBedsForWorkers, releaseBedByLocation, normalizeBedLabel, deduplicateBedRows } from '@/lib/bedSync';
 import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
 import { verifyWorkerDeletionIntegrity, invalidateDeletedTombstoneCache } from '@/lib/workerDeletionIntegrity';
 import { invalidateWorkerHierarchyCache } from '@/lib/workerHierarchy';
@@ -251,18 +251,23 @@ export default function BedManagementClient() {
           }
           return true;
         })
-        .map((r, i) => ({
-          id: String(r?.id ?? `bed-${i}`),
-          ktx: String(r?.ktx ?? ''),
-          day: String(r?.day ?? ''),
-          phong_so: String(r?.phong_so ?? '').replace(/^(?:phòng|p[.\s]*)\s*/i, '').trim(),
-          giuong: String(r?.giuong ?? ''),
-          status: r?.status === 'occupied' ? 'occupied' : r?.status === 'maintenance' ? 'maintenance' : 'empty',
-          ma_nv: r?.ma_nv ? String(r.ma_nv) : null,
-          ho_va_ten: r?.ho_va_ten ? String(r.ho_va_ten) : null,
-          worker_id: r?.worker_id ? String(r.worker_id) : null,
-        }));
-      setBeds(mapped);
+        .map((r, i) => {
+          const rawRoom = String(r?.phong_so ?? '').trim();
+          const rawBed = String(r?.giuong ?? '').trim();
+          return {
+            id: String(r?.id ?? `bed-${i}`),
+            ktx: String(r?.ktx ?? '').trim(),
+            day: String(r?.day ?? '').trim(),
+            phong_so: extractRoomNumber(rawRoom) || rawRoom,
+            giuong: normalizeBedLabel(rawBed) || rawBed,
+            status: (r?.status === 'occupied' ? 'occupied' : r?.status === 'maintenance' ? 'maintenance' : 'empty') as BedStatus,
+            ma_nv: r?.ma_nv ? String(r.ma_nv) : null,
+            ho_va_ten: r?.ho_va_ten ? String(r.ho_va_ten) : null,
+            worker_id: r?.worker_id ? String(r.worker_id) : null,
+          };
+        });
+      const { kept: deduped } = deduplicateBedRows(mapped);
+      setBeds(deduped);
       setActionError('');
     } catch (err) {
       console.warn('[bed-management] load beds failed:', err);
@@ -301,18 +306,20 @@ export default function BedManagementClient() {
             const r = payload.new as Record<string, unknown>;
             const rid = String(r?.id ?? '');
             if (!rid) return;
+            const rawRoom = String(r?.phong_so ?? '').trim();
+            const rawBed = String(r?.giuong ?? '').trim();
             const mappedRow: BedRow = {
               id: rid,
-              ktx: String(r?.ktx ?? ''),
-              day: String(r?.day ?? ''),
-              phong_so: String(r?.phong_so ?? '').replace(/^(?:phòng|p[.\s]*)\s*/i, '').trim(),
-              giuong: String(r?.giuong ?? ''),
+              ktx: String(r?.ktx ?? '').trim(),
+              day: String(r?.day ?? '').trim(),
+              phong_so: extractRoomNumber(rawRoom) || rawRoom,
+              giuong: normalizeBedLabel(rawBed) || rawBed,
               status: r?.status === 'occupied' ? 'occupied' : r?.status === 'maintenance' ? 'maintenance' : 'empty',
               ma_nv: r?.ma_nv ? String(r.ma_nv) : null,
               ho_va_ten: r?.ho_va_ten ? String(r.ho_va_ten) : null,
               worker_id: r?.worker_id ? String(r.worker_id) : null,
             };
-            setBeds(prev => prev.map(b => (b.id === rid ? mappedRow : b)));
+            setBeds(prev => deduplicateBedRows(prev.map(b => (b.id === rid ? mappedRow : b))).kept);
             setDrawerBed(prev => (prev && prev.id === rid ? mappedRow : prev));
           } else if (payload.eventType === 'DELETE' && payload.old) {
             const rid = String((payload.old as Record<string, unknown>)?.id ?? '');
@@ -573,9 +580,11 @@ export default function BedManagementClient() {
       setBusy(true);
       setActionError('');
       try {
+        const canonicalRoom = extractRoomNumber(bed.phong_so) || bed.phong_so.trim();
+        const canonicalBed = normalizeBedLabel(bed.giuong) || bed.giuong.trim();
         const { error } = await supabase
           .from('workers')
-          .update({ ktx: bed.ktx, day: bed.day, phong_so: bed.phong_so, giuong: bed.giuong })
+          .update({ ktx: bed.ktx.trim(), day: bed.day.trim(), phong_so: canonicalRoom, giuong: canonicalBed })
           .eq('id', workerId);
         if (error) throw new Error(error.message);
         return true;
@@ -818,6 +827,7 @@ export default function BedManagementClient() {
       const res = await reconcileBedsWithWorkers(supabase);
       await Promise.all([loadBeds(true), loadWorkers(), loadCapacities()]);
       const changes: string[] = [];
+      if (res.deduplicatedCount > 0) changes.push(`dọn ${res.deduplicatedCount} giường trùng lặp`);
       if (res.releasedCount > 0) changes.push(`giải phóng ${res.releasedCount} giường trống`);
       if (res.assignedCount > 0) changes.push(`liên kết ${res.assignedCount} giường`);
       if (res.updatedInfoCount > 0) changes.push(`cập nhật ${res.updatedInfoCount} thông tin`);

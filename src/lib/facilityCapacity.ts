@@ -4,10 +4,16 @@ export type RoomCapacityMap = Record<string, number>;
 
 export function normalizeRoomLabel(raw: string): string {
   if (!raw) return '';
-  return raw
-    .trim()
-    .replace(/^(?:Phòng|P[.\s]*)\s*/i, '')
-    .toLowerCase();
+  let cleaned = String(raw).normalize('NFC').trim();
+  let prev = '';
+  while (cleaned !== prev) {
+    prev = cleaned;
+    cleaned = cleaned.replace(/^(?:phòng|phong|p[.\s]*)\s*/i, '').trim();
+  }
+  if (/^\d+$/.test(cleaned)) {
+    return String(parseInt(cleaned, 10));
+  }
+  return cleaned.toLowerCase();
 }
 
 /**
@@ -59,7 +65,16 @@ export function formatRoomDisplay(raw: string): string {
 
 export function extractRoomNumber(raw: string): string {
   if (!raw) return '';
-  return raw.trim().replace(/^(?:Phòng|P[.\s]*)\s*/i, '').trim();
+  let cleaned = String(raw).normalize('NFC').trim();
+  let prev = '';
+  while (cleaned !== prev) {
+    prev = cleaned;
+    cleaned = cleaned.replace(/^(?:phòng|phong|p[.\s]*)\s*/i, '').trim();
+  }
+  if (/^\d+$/.test(cleaned)) {
+    return String(parseInt(cleaned, 10));
+  }
+  return cleaned;
 }
 
 export function buildRoomKey(ktx: string, day: string, phong: string): string {

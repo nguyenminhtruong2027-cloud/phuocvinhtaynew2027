@@ -6,6 +6,8 @@ import { createClient } from '@/lib/supabase/client';
 import { compareKtxNames } from '@/data/workers';
 import { QrCodeImage, generateQrDataUrl } from '@/components/QrCodeImage';
 import { printHtmlViaIframe, escapeHtml } from '@/lib/printHtml';
+import { deduplicateBedRows, normalizeBedLabel } from '@/lib/bedSync';
+import { extractRoomNumber } from '@/lib/facilityCapacity';
 
 interface PrintBedRow {
   id: string;
@@ -63,12 +65,14 @@ export default function BedQrPrintModal({ open, onClose, lockedBed = null }: Pro
           const list = (data ?? []) as Record<string, unknown>[];
           list.forEach((r, i) => {
             const id = String(r?.id ?? `bed-${from}-${i}`);
+            const rawRoom = String(r?.phong_so ?? '').trim();
+            const rawBed = String(r?.giuong ?? '').trim();
             byId.set(id, {
               id,
-              ktx: String(r?.ktx ?? ''),
-              day: String(r?.day ?? ''),
-              phong_so: String(r?.phong_so ?? ''),
-              giuong: String(r?.giuong ?? ''),
+              ktx: String(r?.ktx ?? '').trim(),
+              day: String(r?.day ?? '').trim(),
+              phong_so: extractRoomNumber(rawRoom) || rawRoom,
+              giuong: normalizeBedLabel(rawBed) || rawBed,
               status: r?.status === 'occupied' ? 'occupied' as const : r?.status === 'maintenance' ? 'maintenance' as const : 'empty' as const,
               ma_nv: r?.ma_nv ? String(r.ma_nv) : null,
               ho_va_ten: r?.ho_va_ten ? String(r.ho_va_ten) : null,
@@ -81,10 +85,11 @@ export default function BedQrPrintModal({ open, onClose, lockedBed = null }: Pro
           break;
         }
       }
-      // Only real rows (ktx/day/phong/giuong đầy đủ)
-      setBeds(Array.from(byId.values()).filter(b =>
+      // Only real rows (ktx/day/phong/giuong đầy đủ), deduplicated by canonical bed slot
+      const validBeds = Array.from(byId.values()).filter(b =>
         b.ktx?.trim() && b.day?.trim() && b.phong_so?.trim() && b.giuong?.trim()
-      ));
+      );
+      setBeds(deduplicateBedRows(validBeds).kept);
     } finally {
       setLoading(false);
     }

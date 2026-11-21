@@ -8,7 +8,8 @@ import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
 import { compareKtxNames } from '@/data/workers';
 import { loadSavedRoomGenderMap, normalizeGender } from '@/lib/roomGender';
-import { normalizeRoomLabel } from '@/lib/facilityCapacity';
+import { normalizeRoomLabel, extractRoomNumber } from '@/lib/facilityCapacity';
+import { deduplicateBedRows, normalizeBedLabel } from '@/lib/bedSync';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { MonoChip } from '@/components/ui/StatusTag';
 
@@ -80,8 +81,10 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
           list.forEach((r, i) => {
             const ktx = String(r?.ktx ?? '').trim();
             const day = String(r?.day ?? '').trim();
-            const phong = String(r?.phong_so ?? '').trim();
-            const giuong = String(r?.giuong ?? '').trim();
+            const rawPhong = String(r?.phong_so ?? '').trim();
+            const rawGiuong = String(r?.giuong ?? '').trim();
+            const phong = extractRoomNumber(rawPhong) || rawPhong;
+            const giuong = normalizeBedLabel(rawGiuong) || rawGiuong;
             if (!ktx || !day || !phong || !giuong) return;
             const id = String(r?.id ?? `b-${from}-${i}`);
             byId.set(id, {
@@ -97,7 +100,7 @@ export default function BedTransferModal({ open, onClose, workerId, sourceBed, o
           break;
         }
       }
-      setBeds(Array.from(byId.values()));
+      setBeds(deduplicateBedRows(Array.from(byId.values())).kept);
     } finally {
       setLoading(false);
     }
