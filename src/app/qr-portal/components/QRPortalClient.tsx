@@ -25,6 +25,9 @@ import {
   Check,
   Inbox,
   Sparkles,
+  Copy,
+  FileSpreadsheet,
+  Calendar,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
@@ -40,8 +43,10 @@ import {
   normalizeRoomLabel,
 } from '@/lib/facilityCapacity';
 import { loadSavedRoomGenderMap, normalizeGender } from '@/lib/roomGender';
-import { QrCodeImage, downloadQrPng, generateQrDataUrl } from '@/components/QrCodeImage';
-import { printHtmlViaIframe, escapeHtml } from '@/lib/printHtml';
+import { QrCodeImage, downloadQrPng } from '@/components/QrCodeImage';
+import { printQrBulletinPoster, PosterPaperSize } from '@/lib/qrPosterPrint';
+import { exportToExcel } from '@/lib/exportExcel';
+import { getVNDateString } from '@/lib/vnDate';
 import {
   buildWorkerHierarchyFromWorkers,
   fetchRoomBedAvailability,
@@ -465,18 +470,18 @@ function DetailModal({
             )}
           </div>
 
-          {/* Cảnh báo trùng hồ sơ (Cam + Đỏ) */}
+          {/* Cảnh báo trùng hồ sơ */}
           {dupMatch && (
-            <div className="p-3 border-l-[3px] border-l-wn tint-wn border border-wn/30 rounded text-xs text-wn space-y-1">
+            <div className="p-3 tint-wn border border-wn/50 rounded-lg text-xs text-wn space-y-1">
               <div className="flex items-center gap-1.5 font-bold text-dgr">
                 <AlertTriangle size={14} />
-                <span>⚠ Cảnh báo: Có thể trùng với hồ sơ công nhân đã có trong hệ thống</span>
+                <span>Cảnh báo: Có thể trùng với hồ sơ công nhân đã có trong hệ thống</span>
               </div>
               <p className="font-semibold text-tx">
                 {dupMatch.worker.hoVaTen} — Mã NV [{dupMatch.worker.maNV || 'Chưa có'}]
               </p>
               <p className="text-[11px] text-mu">
-                Vị trí hiện tại: {dupMatch.worker.ktx} - {dupMatch.worker.day} - Phòng {dupMatch.worker.phongSo} · Khớp theo {dupMatch.field}: <span className="font-mono font-bold text-dgr">{dupMatch.matchedValue}</span>
+                Vị trí hiện tại: {dupMatch.worker.ktx} · {dupMatch.worker.day} · P.{extractRoomNumber(dupMatch.worker.phongSo) || dupMatch.worker.phongSo} · Khớp theo {dupMatch.field}: <span className="font-mono font-bold text-dgr">{dupMatch.matchedValue}</span>
               </p>
             </div>
           )}
@@ -937,78 +942,134 @@ function DeleteConfirmModal({
 }
 
 function QRCodeDisplay({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+  const [paperSize, setPaperSize] = useState<PosterPaperSize>('A4');
+
   const handleDownload = async () => {
     const ok = await downloadQrPng(url, 'qr-dang-ky-cu-tru.png', 640);
     if (!ok) toast.error('Không thể tạo file ảnh QR.');
+    else toast.success('Đã tải ảnh QR đăng ký cư trú.');
   };
 
-  const handlePrint = async () => {
-    const qrDataUrl = await generateQrDataUrl(url, { width: 520, margin: 3 });
-    if (!qrDataUrl) return;
-    printHtmlViaIframe(`<!doctype html>
-<html><head><meta charset="utf-8"><title>In QR Đăng Ký Cư Trú</title>
-<style>
-  body { font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 95vh; margin: 0; color: #111; }
-  .card { text-align: center; max-width: 420px; padding: 28px; border: 2px solid #1b2430; border-radius: 14px; }
-  h2 { margin: 0 0 8px; font-size: 18px; text-transform: uppercase; letter-spacing: 0.5px; }
-  p { margin: 6px 0; font-size: 13px; color: #444; }
-  img { width: 260px; height: 260px; margin: 16px auto; display: block; border: 1px solid #ddd; padding: 8px; }
-  .url { font-family: monospace; font-size: 11px; word-break: break-all; color: #333; margin-top: 10px; }
-</style></head>
-<body>
-  <div class="card">
-    <h2>Đăng Ký Cư Trú KTX Phước Vĩnh Tây</h2>
-    <p>Quét mã QR bằng Camera hoặc Zalo để khai báo thông tin</p>
-    <img src="${qrDataUrl}" alt="QR Code" />
-    <div class="url">${escapeHtml(url)}</div>
-  </div>
-</body></html>`);
+  const handleCopy = () => {
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(url);
+      setCopied(true);
+      toast.success('Đã sao chép đường dẫn đăng ký.');
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handlePrint = async (size: PosterPaperSize = paperSize) => {
+    const ok = await printQrBulletinPoster({
+      url,
+      paperSize: size,
+      badgeText: 'Tiếp nhận công nhân mới',
+      title: 'Đăng Ký Cư Trú Ký Túc Xá',
+      subtitle:
+        'Công nhân mới vào lưu trú vui lòng quét mã QR bên dưới để khai báo thông tin cá nhân, đơn vị công tác và vị trí phòng ở.',
+      accentHex: '#1d4ed8',
+      steps: [
+        { title: 'Quét mã QR', detail: 'Dùng Camera điện thoại hoặc Zalo quét mã niêm yết tại cổng / văn phòng KTX.' },
+        { title: 'Khai báo hồ sơ', detail: 'Điền đầy đủ Họ tên, CCCD, SĐT, đơn vị và phòng/giường dự kiến.' },
+        { title: 'Chờ duyệt nhận phòng', detail: 'Ban quản lý đối chiếu và phê duyệt để đồng bộ sơ đồ giường.' },
+      ],
+      footerNote: 'Ban Quản Lý KTX Phước Vĩnh Tây · Vui lòng chuẩn bị sẵn CCCD khi làm thủ tục nhận phòng',
+    });
+    if (!ok) toast.error('Không thể tạo mẫu in Poster QR.');
   };
 
   return (
-    <div className="bg-surf border border-bdr rounded-md p-4">
+    <div className="bg-surf border border-bdr rounded-xl p-4 sm:p-5">
       <div className="flex flex-col sm:flex-row items-center gap-5">
-        <div className="shrink-0 flex flex-col items-center gap-2.5">
-          <div className="p-2 border border-bdr bg-white rounded">
+        <div className="shrink-0 flex flex-col items-center gap-2 w-40">
+          <div className="p-2 border border-bdr bg-white rounded-lg">
             <QrCodeImage value={url} size={144} alt="QR Code đăng ký" className="w-36 h-36 object-contain" />
           </div>
           <div className="flex gap-1.5 w-full">
             <button
+              type="button"
               onClick={handleDownload}
-              className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 bg-side hover:bg-act text-tx rounded text-[11px] font-semibold cursor-pointer"
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 bg-side border border-bdr hover:bg-act text-tx rounded-lg text-[11px] font-semibold cursor-pointer whitespace-nowrap transition-colors"
             >
               <Download size={12} /> Tải mã
             </button>
             <button
-              onClick={handlePrint}
-              className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 border border-bdr hover:bg-act text-tx rounded text-[11px] font-semibold cursor-pointer"
+              type="button"
+              onClick={() => handlePrint(paperSize)}
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 bg-pri hover:opacity-90 text-white rounded-lg text-[11px] font-semibold cursor-pointer whitespace-nowrap transition-opacity"
+              title={`In Poster niêm yết khổ ${paperSize}`}
             >
-              <Printer size={12} /> In ấn
+              <Printer size={12} /> In {paperSize}
             </button>
+          </div>
+          <div className="inline-flex items-center w-full bg-page border border-bdr rounded-lg p-0.5 text-[11px]">
+            {(['A4', 'A5'] as const).map(sz => (
+              <button
+                key={sz}
+                type="button"
+                onClick={() => setPaperSize(sz)}
+                className={`flex-1 py-1 rounded font-semibold transition-colors cursor-pointer ${
+                  paperSize === sz ? 'bg-surf text-tx border border-bdr' : 'text-mu hover:text-tx'
+                }`}
+              >
+                Poster {sz}
+              </button>
+            ))}
           </div>
         </div>
 
-        <div className="flex-1 space-y-2 text-center sm:text-left">
+        <div className="flex-1 space-y-2.5 text-center sm:text-left w-full">
           <div>
-            <span className="text-[11px] font-bold uppercase text-wn tracking-wider">Mã Tiếp Nhận Công Nhân Mới</span>
-            <h3 className="font-bold text-sm text-tx mt-0.5">Mã QR Đăng Ký Cư Trú Trực Tuyến</h3>
+            <p className="text-xs font-semibold text-wn">Mã tiếp nhận công nhân mới</p>
+            <h3 className="font-bold text-base text-tx mt-0.5">Mã QR Đăng Ký Cư Trú Trực Tuyến</h3>
             <p className="text-xs text-mu mt-1 leading-relaxed">
-              Niêm yết tại cổng bảo vệ hoặc văn phòng KTX. Công nhân sử dụng Zalo hoặc camera điện thoại quét mã để khai báo họ tên, CCCD, phòng ở và đơn vị công tác.
+              Niêm yết mẫu poster khổ A4 hoặc A5 tại cổng bảo vệ hoặc văn phòng KTX. Công nhân sử dụng Zalo hoặc camera điện thoại quét mã để khai báo họ tên, CCCD, phòng ở và đơn vị công tác.
             </p>
           </div>
 
-          <div className="flex items-center gap-2 pt-1 flex-wrap">
-            <span className="text-xs text-ic font-mono bg-page px-2 py-1 rounded border border-bdr break-all">
+          <div className="bg-page rounded-lg border border-bdr p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="font-semibold text-mu">Đường dẫn đăng ký</span>
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="inline-flex items-center gap-1 text-wn hover:underline font-semibold cursor-pointer whitespace-nowrap"
+              >
+                {copied ? (
+                  <>
+                    <Check size={12} className="text-ok" />
+                    <span className="text-ok">Đã sao chép</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy size={12} />
+                    <span>Sao chép link</span>
+                  </>
+                )}
+              </button>
+            </div>
+            <code className="block text-xs text-tx font-mono bg-surf px-2.5 py-1.5 rounded border border-bdr break-all">
               {url}
-            </span>
-            <a
-              href="/register"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-wn hover:underline font-semibold"
-            >
-              <ExternalLink size={12} /> Mở trang đăng ký
-            </a>
+            </code>
+            <div className="pt-0.5">
+              <a
+                href="/register"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-wn hover:underline font-semibold"
+              >
+                <ExternalLink size={12} /> Mở trang đăng ký để kiểm tra giao diện
+              </a>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-2.5 gap-y-1 text-xs text-mu">
+            <span className="text-ok font-medium">Tiếp nhận trực tuyến 24/7</span>
+            <span aria-hidden="true">·</span>
+            <span>Tự động cảnh báo trùng CCCD/SĐT</span>
+            <span aria-hidden="true">·</span>
+            <span>Đồng bộ sơ đồ giường ngay khi duyệt</span>
           </div>
         </div>
       </div>
@@ -1016,7 +1077,11 @@ function QRCodeDisplay({ url }: { url: string }) {
   );
 }
 
-export default function QRPortalClient() {
+export default function QRPortalClient({
+  onPendingCountChange,
+}: {
+  onPendingCountChange?: (count: number) => void;
+} = {}) {
   const [registrations, setRegistrations] = useState<WorkerRegistration[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
@@ -1027,17 +1092,22 @@ export default function QRPortalClient() {
   const [deleteTarget, setDeleteTarget] = useState<WorkerRegistration | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Bộ lọc theo KTX / Dãy / Phòng (Requirement 3)
+  // Bộ lọc theo KTX / Dãy / Phòng + Khoảng ngày
   const [selectedKtx, setSelectedKtx] = useState<string>('all');
   const [selectedDay, setSelectedDay] = useState<string>('all');
   const [selectedRoom, setSelectedRoom] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchApproving, setBatchApproving] = useState(false);
+  const [batchRejecting, setBatchRejecting] = useState(false);
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
 
   const [facilities, setFacilities] = useState<FacilityItem[]>([]);
 
-  const { currentUser, isAdmin, canWriteBlock } = useAuth();
+  const { currentUser, isAdmin, isSuperAdmin, canWriteBlock } = useAuth();
   const { addLog } = useAudit();
   const { workers, refreshWorkers } = useWorkers();
   const supabase = useMemo(() => createClient(), []);
@@ -1560,6 +1630,11 @@ export default function QRPortalClient() {
       if (selectedKtx !== 'all' && r.ktx !== selectedKtx) return false;
       if (selectedDay !== 'all' && r.day !== selectedDay) return false;
       if (selectedRoom !== 'all' && r.phong_so !== selectedRoom) return false;
+      if (dateFrom || dateTo) {
+        const regDay = getVNDateString(new Date(r.created_at));
+        if (dateFrom && regDay < dateFrom) return false;
+        if (dateTo && regDay > dateTo) return false;
+      }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
         return (
@@ -1575,26 +1650,31 @@ export default function QRPortalClient() {
       }
       return true;
     });
-  }, [scopedRegistrations, filterStatus, selectedKtx, selectedDay, selectedRoom, searchQuery]);
+  }, [scopedRegistrations, filterStatus, selectedKtx, selectedDay, selectedRoom, dateFrom, dateTo, searchQuery]);
 
-  const pendingFiltered = useMemo(
-    () => filtered.filter(r => r.status === 'pending'),
-    [filtered]
+  const selectedVisibleRegs = useMemo(
+    () => filtered.filter(r => selectedIds.has(r.id)),
+    [filtered, selectedIds]
   );
 
   const selectedPendingRegs = useMemo(
-    () => pendingFiltered.filter(r => selectedIds.has(r.id)),
-    [pendingFiltered, selectedIds]
+    () => selectedVisibleRegs.filter(r => r.status === 'pending'),
+    [selectedVisibleRegs]
   );
 
-  const allPendingSelected =
-    pendingFiltered.length > 0 && pendingFiltered.every(r => selectedIds.has(r.id));
+  const selectedDeletableRegs = useMemo(
+    () => selectedVisibleRegs.filter(r => isSuperAdmin || r.status !== 'pending'),
+    [selectedVisibleRegs, isSuperAdmin]
+  );
 
-  const toggleSelectAllPending = () => {
-    if (allPendingSelected) {
+  const allVisibleSelected =
+    filtered.length > 0 && filtered.every(r => selectedIds.has(r.id));
+
+  const toggleSelectAllVisible = () => {
+    if (allVisibleSelected) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(pendingFiltered.map(r => r.id)));
+      setSelectedIds(new Set(filtered.map(r => r.id)));
     }
   };
 
@@ -1607,11 +1687,131 @@ export default function QRPortalClient() {
     });
   };
 
+  const handleBatchReject = async (regsToReject: WorkerRegistration[]) => {
+    if (regsToReject.length === 0) return;
+    setBatchRejecting(true);
+    const nowStr = new Date().toISOString();
+    let rejectedCount = 0;
+    try {
+      const ids = regsToReject.map(r => r.id);
+      const { error } = await supabase
+        .from('worker_registrations')
+        .update({ status: 'rejected', reviewed_by: currentUser?.id, reviewed_at: nowStr })
+        .in('id', ids);
+      if (error) throw new Error(error.message);
+      rejectedCount = ids.length;
+      const idSet = new Set(ids);
+      setRegistrations(prev =>
+        prev.map(r => (idSet.has(r.id) ? { ...r, status: 'rejected' as const, reviewed_at: nowStr } : r))
+      );
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        ids.forEach(id => next.delete(id));
+        return next;
+      });
+      toast.success(`Đã từ chối hàng loạt ${rejectedCount} hồ sơ đăng ký.`);
+    } catch (e: any) {
+      toast.error(`Lỗi khi từ chối hàng loạt: ${e?.message || 'Không thể cập nhật'}`);
+    } finally {
+      setBatchRejecting(false);
+    }
+  };
+
+  const handleBatchDeleteConfirm = async () => {
+    const targets = selectedDeletableRegs;
+    if (targets.length === 0) return;
+    setBatchDeleting(true);
+    const actor = currentUser?.name || currentUser?.email || 'Quản trị';
+    let deletedCount = 0;
+    let failedCount = 0;
+    const deletedSet = new Set<string>();
+
+    for (const target of targets) {
+      try {
+        await hardDeleteWorkerRegistration(supabase, {
+          registration: {
+            id: target.id,
+            ho_va_ten: target.ho_va_ten,
+            ma_nv: target.ma_nv,
+            so_cccd: target.so_cccd,
+            ktx: target.ktx,
+            day: target.day,
+            phong_so: target.phong_so,
+            giuong: target.giuong,
+            ghi_chu: target.ghi_chu,
+          },
+          account: actor,
+          sourceContext: 'qr_portal_registration_batch_delete',
+        });
+        deletedSet.add(target.id);
+        deletedCount++;
+      } catch {
+        failedCount++;
+      }
+    }
+
+    if (deletedSet.size > 0) {
+      setRegistrations(prev => prev.filter(r => !deletedSet.has(r.id)));
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        deletedSet.forEach(id => next.delete(id));
+        return next;
+      });
+      if (detailReg && deletedSet.has(detailReg.id)) setDetailReg(null);
+    }
+
+    setBatchDeleting(false);
+    setBatchDeleteOpen(false);
+    if (deletedCount > 0 && failedCount === 0) {
+      toast.success(`Đã xóa triệt để ${deletedCount} hồ sơ đăng ký.`);
+    } else if (deletedCount > 0) {
+      toast.warning(`Đã xóa ${deletedCount} hồ sơ, còn ${failedCount} hồ sơ chưa xóa được.`);
+    } else {
+      toast.error('Không thể xóa các hồ sơ đã chọn.');
+    }
+  };
+
+  const handleExportExcel = () => {
+    if (filtered.length === 0) {
+      toast.info('Không có hồ sơ nào trong bộ lọc hiện tại để xuất.');
+      return;
+    }
+    const rows = filtered.map((r, i) => {
+      const roomNum = extractRoomNumber(r.phong_so) || r.phong_so;
+      const bedNum = normalizeBedLabel(r.giuong) || r.giuong;
+      return {
+        STT: i + 1,
+        'Họ và tên': r.ho_va_ten || '',
+        'Mã NV': r.ma_nv || '',
+        'Giới tính': r.gioi_tinh || '',
+        'Ngày sinh': r.ngay_sinh || '',
+        'Số CCCD': r.so_cccd || '',
+        'Số điện thoại': r.so_dien_thoai || '',
+        'Đơn vị': r.don_vi || '',
+        'Tiểu đoàn': r.tieu_doan || '',
+        'Khu KTX': r.ktx || '',
+        'Dãy nhà': r.day || '',
+        'Phòng': roomNum ? `P.${roomNum}` : '',
+        'Giường': bedNum ? `G.${bedNum}` : '',
+        'Ngày vào KTX': r.ngay_vao_ktx || '',
+        'Trạng thái': STATUS_CONFIG[r.status]?.label || r.status,
+        'Thời gian gửi': new Date(r.created_at).toLocaleString('vi-VN'),
+        'Ghi chú': r.ghi_chu || '',
+      };
+    });
+    const ok = exportToExcel(rows, `HoSoDangKyCuTru_${getVNDateString()}.xlsx`, 'Đăng ký cư trú');
+    if (ok) toast.success(`Đã xuất ${rows.length} hồ sơ đăng ký ra Excel.`);
+  };
+
   const counts = {
     pending: scopedRegistrations.filter(r => r.status === 'pending').length,
     approved: scopedRegistrations.filter(r => r.status === 'approved').length,
     rejected: scopedRegistrations.filter(r => r.status === 'rejected').length,
   };
+
+  useEffect(() => {
+    onPendingCountChange?.(counts.pending);
+  }, [counts.pending, onPendingCountChange]);
 
   return (
     <div className="p-4 md:p-6 space-y-4">
@@ -1633,25 +1833,80 @@ export default function QRPortalClient() {
           deleting={deleting}
         />
       )}
+      {batchDeleteOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop-scrim fade-in p-4"
+          onClick={() => { if (!batchDeleting) setBatchDeleteOpen(false); }}
+        >
+          <div
+            className="modal-enter bg-surf border border-bdr rounded-xl w-full max-w-sm p-5 space-y-4 shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-dgrbg text-dgr flex items-center justify-center shrink-0">
+                <Trash2 size={16} />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-tx">Xóa hàng loạt hồ sơ đăng ký</h3>
+                <p className="text-xs text-mu">Thao tác không thể hoàn tác</p>
+              </div>
+            </div>
+            <p className="text-xs text-tx leading-relaxed">
+              Bạn có chắc chắn muốn xóa triệt để <strong className="font-mono text-dgr">{selectedDeletableRegs.length}</strong> hồ sơ đăng ký đã chọn khỏi danh sách? (Lưu ý: thao tác này chỉ xóa đơn đăng ký, không xóa hồ sơ công nhân đang lưu trú).
+            </p>
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setBatchDeleteOpen(false)}
+                disabled={batchDeleting}
+                className="flex-1 py-2 border border-bdr rounded-lg text-xs font-semibold hover:bg-act transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleBatchDeleteConfirm}
+                disabled={batchDeleting}
+                className="flex-1 py-2 bg-dgr hover:opacity-90 text-white rounded-lg text-xs font-bold transition-opacity cursor-pointer disabled:opacity-50 inline-flex items-center justify-center gap-1"
+              >
+                {batchDeleting && <Loader2 size={12} className="animate-spin" />}
+                <span>{batchDeleting ? 'Đang xóa...' : `Xóa ${selectedDeletableRegs.length} hồ sơ`}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Header bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-bdr">
         <div>
-          <h1 className="text-lg md:text-xl font-bold tracking-tight text-tx uppercase">
-            HỒ SƠ ĐĂNG KÝ CƯ TRÚ
+          <h1 className="text-lg md:text-xl font-bold tracking-tight text-tx">
+            Hồ Sơ Đăng Ký Cư Trú
           </h1>
           <p className="text-xs text-mu mt-0.5">
             Duyệt và phân bổ phòng cho công nhân mới quét mã đăng ký trực tuyến
           </p>
         </div>
-        <button
-          onClick={() => fetchRegistrations(true)}
-          disabled={refreshing}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-bdr bg-surf text-tx rounded text-xs font-semibold hover:bg-act dark:hover:bg-act transition-colors disabled:opacity-60 cursor-pointer w-fit"
-        >
-          <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
-          <span>Làm mới</span>
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={filtered.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-bdr bg-surf text-tx rounded-lg text-xs font-semibold hover:bg-act transition-colors disabled:opacity-50 cursor-pointer whitespace-nowrap"
+          >
+            <FileSpreadsheet size={13} className="text-ok" />
+            <span>Xuất Excel ({filtered.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => fetchRegistrations(true)}
+            disabled={refreshing}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-bdr bg-surf text-tx rounded-lg text-xs font-semibold hover:bg-act transition-colors disabled:opacity-60 cursor-pointer whitespace-nowrap"
+          >
+            <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+            <span>Làm mới</span>
+          </button>
+        </div>
       </div>
 
       {/* Phân quyền Staff */}
@@ -1771,8 +2026,8 @@ export default function QRPortalClient() {
           </div>
         </div>
 
-        {/* Bộ lọc vị trí KTX / Dãy / Phòng */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2.5 border-t border-bdr">
+        {/* Bộ lọc vị trí KTX / Dãy / Phòng + Khoảng ngày */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 pt-2.5 border-t border-bdr">
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-ic whitespace-nowrap min-w-[50px]">Khu KTX:</span>
             <select
@@ -1782,7 +2037,7 @@ export default function QRPortalClient() {
                 setSelectedDay('all');
                 setSelectedRoom('all');
               }}
-              className="flex-1 py-1 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn"
+              className="flex-1 py-1.5 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn"
             >
               <option value="all">Tất cả KTX</option>
               {hierarchy.ktxList.map(k => (
@@ -1799,7 +2054,7 @@ export default function QRPortalClient() {
                 setSelectedDay(e.target.value);
                 setSelectedRoom('all');
               }}
-              className="flex-1 py-1 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn"
+              className="flex-1 py-1.5 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn"
             >
               <option value="all">Tất cả Dãy</option>
               {filterAvailableDays.map(d => (
@@ -1813,7 +2068,7 @@ export default function QRPortalClient() {
             <select
               value={selectedRoom}
               onChange={e => setSelectedRoom(e.target.value)}
-              className="flex-1 py-1 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn"
+              className="flex-1 py-1.5 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn"
             >
               <option value="all">Tất cả Phòng</option>
               {filterAvailableRooms.map(p => (
@@ -1821,30 +2076,86 @@ export default function QRPortalClient() {
               ))}
             </select>
           </div>
+
+          <div className="flex items-center gap-1.5">
+            <Calendar size={13} className="text-ic shrink-0" />
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={e => setDateFrom(e.target.value)}
+              title="Từ ngày"
+              className="flex-1 py-1 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn font-tabular"
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-mu shrink-0">đến</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={e => setDateTo(e.target.value)}
+              title="Đến ngày"
+              className="flex-1 py-1 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn font-tabular"
+            />
+            {(dateFrom || dateTo) && (
+              <button
+                type="button"
+                onClick={() => { setDateFrom(''); setDateTo(''); }}
+                className="p-1 text-mu hover:text-tx cursor-pointer"
+                title="Xóa lọc ngày"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Batch Action Bar */}
-      {selectedPendingRegs.length > 0 && (
-        <div className="bg-surf border border-bdr2 rounded-md px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2">
+      {selectedVisibleRegs.length > 0 && (
+        <div className="bg-surf border border-bdr2 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs font-bold text-tx">
-            Đã chọn <span className="text-lnk font-mono">{selectedPendingRegs.length}</span> hồ sơ chờ duyệt
+            Đã chọn <span className="text-lnk font-mono font-tabular">{selectedVisibleRegs.length}</span> hồ sơ
           </span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => handleBatchApprove(selectedPendingRegs)}
-              disabled={batchApproving}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-ok2 hover:opacity-90 text-ok2-fg rounded text-xs font-bold disabled:opacity-50 cursor-pointer"
-            >
-              {batchApproving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
-              <span>{batchApproving ? 'Đang duyệt hàng loạt...' : `Duyệt hàng loạt (${selectedPendingRegs.length})`}</span>
-            </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            {selectedPendingRegs.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleBatchApprove(selectedPendingRegs)}
+                  disabled={batchApproving || batchRejecting || batchDeleting}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-ok2 hover:opacity-90 text-ok2-fg rounded-lg text-xs font-bold disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                >
+                  {batchApproving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                  <span>{batchApproving ? 'Đang duyệt...' : `Duyệt hàng loạt (${selectedPendingRegs.length})`}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBatchReject(selectedPendingRegs)}
+                  disabled={batchApproving || batchRejecting || batchDeleting}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-dgr text-dgr hover:bg-dgrbg rounded-lg text-xs font-semibold disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                >
+                  {batchRejecting ? <Loader2 size={13} className="animate-spin" /> : <XCircle size={13} />}
+                  <span>Từ chối ({selectedPendingRegs.length})</span>
+                </button>
+              </>
+            )}
+            {selectedDeletableRegs.length > 0 && (isAdmin || isSuperAdmin) && (
+              <button
+                type="button"
+                onClick={() => setBatchDeleteOpen(true)}
+                disabled={batchApproving || batchRejecting || batchDeleting}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-dgr hover:opacity-90 text-white rounded-lg text-xs font-bold disabled:opacity-50 cursor-pointer whitespace-nowrap"
+              >
+                <Trash2 size={13} />
+                <span>Xóa hàng loạt ({selectedDeletableRegs.length})</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setSelectedIds(new Set())}
-              disabled={batchApproving}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-bdr rounded text-xs font-semibold text-mu hover:text-tx hover:bg-act cursor-pointer"
+              disabled={batchApproving || batchRejecting || batchDeleting}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-bdr rounded-lg text-xs font-semibold text-mu hover:text-tx hover:bg-act cursor-pointer whitespace-nowrap"
             >
               <X size={12} /> Bỏ chọn
             </button>
@@ -1852,16 +2163,15 @@ export default function QRPortalClient() {
         </div>
       )}
 
-      {/* BẢNG DANH SÁCH (TABLE) THAY VÌ CARD STACK (Requirement: Operations Table View) */}
-      <div className="bg-surf border border-bdr rounded-md overflow-hidden">
+      {/* BẢNG DANH SÁCH */}
+      <div className="bg-surf border border-bdr rounded-xl overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-16 text-ic text-xs">
             <Loader2 size={18} className="animate-spin mr-2 text-wn" />
             <span>Đang tải danh sách hồ sơ...</span>
           </div>
         ) : filtered.length === 0 ? (
-          /* TRẠNG THÁI RỖNG (Requirement: Khung viền đứt nét, icon đơn giản, tiêu đề in đậm) */
-          <div className="p-10 border border-dashed border-bdr m-4 rounded text-center space-y-1.5">
+          <div className="p-10 border border-dashed border-bdr m-4 rounded-lg text-center space-y-1.5">
             <Inbox size={32} className="mx-auto text-mu stroke-1" />
             <h4 className="font-bold text-sm text-tx">Không có hồ sơ nào phù hợp</h4>
             <p className="text-xs text-mu max-w-sm mx-auto">
@@ -1874,23 +2184,21 @@ export default function QRPortalClient() {
               <thead>
                 <tr className="bg-page border-b border-bdr text-[11px] font-bold text-mu uppercase tracking-wider">
                   <th className="py-2.5 px-3 w-8 text-center">
-                    {pendingFiltered.length > 0 && (
-                      <input
-                        type="checkbox"
-                        checked={allPendingSelected}
-                        onChange={toggleSelectAllPending}
-                        className="rounded border-bdr bg-surf cursor-pointer"
-                        title="Chọn tất cả hồ sơ chờ duyệt"
-                      />
-                    )}
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={toggleSelectAllVisible}
+                      className="rounded border-bdr bg-surf cursor-pointer"
+                      title="Chọn tất cả hồ sơ đang hiển thị"
+                    />
                   </th>
-                  <th className="py-2.5 px-3">CÔNG NHÂN</th>
-                  <th className="py-2.5 px-3">LIÊN HỆ & CCCD</th>
-                  <th className="py-2.5 px-3">ĐƠN VỊ / TỔ</th>
-                  <th className="py-2.5 px-3">VỊ TRÍ ĐĂNG KÝ</th>
-                  <th className="py-2.5 px-3">NGÀY GỬI</th>
-                  <th className="py-2.5 px-3">TRẠNG THÁI</th>
-                  <th className="py-2.5 px-3 text-right">THAO TÁC</th>
+                  <th className="py-2.5 px-3">Công nhân</th>
+                  <th className="py-2.5 px-3">Liên hệ &amp; CCCD</th>
+                  <th className="py-2.5 px-3">Đơn vị / Tổ</th>
+                  <th className="py-2.5 px-3">Vị trí đăng ký</th>
+                  <th className="py-2.5 px-3">Ngày gửi</th>
+                  <th className="py-2.5 px-3">Trạng thái</th>
+                  <th className="py-2.5 px-3 text-right">Thao tác</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-bdr">
@@ -1899,25 +2207,27 @@ export default function QRPortalClient() {
                   const isProcessing = processing === reg.id;
                   const isDone = reg.status === 'approved' || reg.status === 'rejected';
                   const dupMatch = checkDuplicateWorker(hierarchy.workers, reg.so_cccd, reg.so_dien_thoai);
+                  const roomShort = extractRoomNumber(reg.phong_so) || reg.phong_so;
+                  const bedShort = normalizeBedLabel(reg.giuong) || reg.giuong;
 
                   return (
                     <tr
                       key={reg.id}
                       className={`transition-colors ${
-                        dupMatch
-                          ? 'border-l-[3px] border-l-wn tint-wn/25/25 hover:tint-wn/40/40'
+                        selectedIds.has(reg.id)
+                          ? 'bg-bdg/30'
+                          : dupMatch
+                          ? 'tint-wn hover:bg-act'
                           : 'hover:bg-act'
                       }`}
                     >
                       <td className="py-2.5 px-3 align-top text-center">
-                        {reg.status === 'pending' && (
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.has(reg.id)}
-                            onChange={() => toggleSelectRow(reg.id)}
-                            className="rounded border-bdr bg-surf cursor-pointer mt-0.5"
-                          />
-                        )}
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(reg.id)}
+                          onChange={() => toggleSelectRow(reg.id)}
+                          className="rounded border-bdr bg-surf cursor-pointer mt-0.5"
+                        />
                       </td>
                       {/* Cột 1: Tên & Mã NV */}
                       <td className="py-2.5 px-3 align-top">
@@ -1936,21 +2246,20 @@ export default function QRPortalClient() {
                             <span className="text-[11px] text-mu">· {reg.gioi_tinh}</span>
                           )}
                         </div>
-                        {/* Nhãn cảnh báo trùng màu đỏ nổi bật (Requirement) */}
                         {dupMatch && (
                           <div className="mt-1">
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-dgrbg text-dgr border border-dgr/30">
                               <AlertTriangle size={10} /> Trùng {dupMatch.field}
                             </span>
                             <p className="text-[10px] text-dgr mt-0.5 font-medium leading-tight">
-                              Khớp với: {dupMatch.worker.hoVaTen} [{dupMatch.worker.maNV || '—'}] ({dupMatch.worker.ktx} - {dupMatch.worker.day} - P.{dupMatch.worker.phongSo})
+                              Khớp với: {dupMatch.worker.hoVaTen} [{dupMatch.worker.maNV || '—'}] ({dupMatch.worker.ktx} · {dupMatch.worker.day} · P.{extractRoomNumber(dupMatch.worker.phongSo) || dupMatch.worker.phongSo})
                             </p>
                           </div>
                         )}
                       </td>
 
                       {/* Cột 2: CCCD & SĐT */}
-                      <td className="py-2.5 px-3 align-top whitespace-nowrap">
+                      <td className="py-2.5 px-3 align-top whitespace-nowrap font-tabular">
                         <div className="font-mono font-medium text-xs text-tx">
                           {reg.so_cccd || '—'}
                         </div>
@@ -1972,18 +2281,18 @@ export default function QRPortalClient() {
                         )}
                       </td>
 
-                      {/* Cột 4: Vị trí đăng ký */}
-                      <td className="py-2.5 px-3 align-top">
+                      {/* Cột 4: Vị trí đăng ký chuẩn hóa */}
+                      <td className="py-2.5 px-3 align-top font-tabular">
                         <div className="font-bold text-xs text-tx">
-                          {reg.ktx} — {reg.day}
+                          {reg.ktx} · {reg.day}
                         </div>
                         <div className="text-[11px] text-mu mt-0.5">
-                          Phòng {reg.phong_so} {reg.giuong ? `(Giường ${reg.giuong})` : ''}
+                          {roomShort ? `P.${roomShort}` : '—'}{bedShort ? ` · G.${bedShort}` : ''}
                         </div>
                       </td>
 
                       {/* Cột 5: Ngày gửi */}
-                      <td className="py-2.5 px-3 align-top text-[11px] text-mu whitespace-nowrap">
+                      <td className="py-2.5 px-3 align-top text-[11px] text-mu whitespace-nowrap font-tabular">
                         {new Date(reg.created_at).toLocaleDateString('vi-VN')}
                         <div className="text-[10px] text-mu">
                           {new Date(reg.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}

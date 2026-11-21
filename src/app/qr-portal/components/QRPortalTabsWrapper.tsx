@@ -25,6 +25,7 @@ export default function QRPortalTabsWrapper() {
   const [isMounted, setIsMounted] = useState(false);
   const [activeTab, setActiveTab] = useState<PortalTab>('attendance');
   const [visitedTabs, setVisitedTabs] = useState<Set<PortalTab>>(() => new Set(['attendance']));
+  const [pendingRegistrationCount, setPendingRegistrationCount] = useState<number>(0);
   const [pendingCheckoutCount, setPendingCheckoutCount] = useState<number>(0);
   const { isAdmin, canWriteBlock } = useAuth();
 
@@ -63,7 +64,7 @@ export default function QRPortalTabsWrapper() {
     }
   }, []);
 
-  const fetchPendingCount = useCallback(async () => {
+  const fetchPendingCounts = useCallback(async () => {
     try {
       const { data } = await supabase
         .from('worker_registrations')
@@ -71,11 +72,18 @@ export default function QRPortalTabsWrapper() {
         .eq('status', 'pending');
 
       if (data) {
-        const count = data.filter(r =>
-          r.ghi_chu?.startsWith('[CHECKOUT]') &&
-          (isAdmin || canWriteBlock(r.day, r.ktx))
-        ).length;
-        setPendingCheckoutCount(count);
+        let regCount = 0;
+        let checkoutCount = 0;
+        for (const r of data) {
+          if (!(isAdmin || canWriteBlock(r.day, r.ktx))) continue;
+          if (r.ghi_chu?.startsWith('[CHECKOUT]')) {
+            checkoutCount++;
+          } else {
+            regCount++;
+          }
+        }
+        setPendingRegistrationCount(regCount);
+        setPendingCheckoutCount(checkoutCount);
       }
     } catch {
       // non-blocking
@@ -83,18 +91,15 @@ export default function QRPortalTabsWrapper() {
   }, [supabase, isAdmin, canWriteBlock]);
 
   useEffect(() => {
-    fetchPendingCount();
+    fetchPendingCounts();
     let timer: ReturnType<typeof setTimeout> | null = null;
     const scheduleFetch = () => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => { fetchPendingCount(); }, 450);
+      timer = setTimeout(() => { fetchPendingCounts(); }, 450);
     };
     const channel = supabase
-      .channel('qr_portal_pending_checkout_badge')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_registrations' }, (payload: any) => {
-        const note = String(payload?.new?.ghi_chu ?? payload?.old?.ghi_chu ?? '');
-        const regType = String(payload?.new?.type ?? payload?.old?.type ?? '');
-        if (!note.startsWith('[CHECKOUT]') && regType !== 'CHECKOUT') return;
+      .channel('qr_portal_pending_counts_badge')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_registrations' }, () => {
         scheduleFetch();
       })
       .subscribe();
@@ -102,7 +107,7 @@ export default function QRPortalTabsWrapper() {
       if (timer) clearTimeout(timer);
       supabase.removeChannel(channel);
     };
-  }, [fetchPendingCount, supabase]);
+  }, [fetchPendingCounts, supabase]);
 
   // Prevent React Hydration Mismatch by rendering matching skeleton until client mount
   if (!isMounted) {
@@ -135,7 +140,13 @@ export default function QRPortalTabsWrapper() {
             onChange={handleTabChange}
             tabs={[
               { id: 'attendance', label: 'QR Điểm Danh', icon: ClipboardList },
-              { id: 'registration', label: 'Đăng ký cư trú', icon: QrCode },
+              {
+                id: 'registration',
+                label: 'Đăng ký cư trú',
+                icon: QrCode,
+                count: pendingRegistrationCount > 0 ? pendingRegistrationCount : undefined,
+                tone: pendingRegistrationCount > 0 ? 'warning' : 'default',
+              },
               { id: 'bed_inspect', label: 'Kiểm Tra Giường', icon: ScanLine },
               {
                 id: 'checkout_approval',
@@ -147,11 +158,6 @@ export default function QRPortalTabsWrapper() {
               { id: 'checkout', label: 'Mã QR Check-out', icon: LogOut },
             ]}
           />
-
-          <div className="hidden lg:flex items-center gap-2 text-xs text-mu font-mono shrink-0 pl-4 border-l border-bdr">
-            <span className="w-2 h-2 rounded-full bg-ok2" />
-            <span>QR PORTAL KTX</span>
-          </div>
         </div>
       </header>
 
@@ -164,7 +170,7 @@ export default function QRPortalTabsWrapper() {
         )}
         {visitedTabs.has('registration') && (
           <div className={activeTab === 'registration' ? 'block' : 'hidden'}>
-            <QRPortalClient />
+            <QRPortalClient onPendingCountChange={setPendingRegistrationCount} />
           </div>
         )}
         {visitedTabs.has('bed_inspect') && (
@@ -179,7 +185,7 @@ export default function QRPortalTabsWrapper() {
         )}
         {visitedTabs.has('checkout') && (
           <div className={activeTab === 'checkout' ? 'block' : 'hidden'}>
-            <CheckoutPortalClient />
+            <CheckoutPortalClient onOpenApprovalTab={() => handleTabChange('checkout_approval')} />
           </div>
         )}
       </main>

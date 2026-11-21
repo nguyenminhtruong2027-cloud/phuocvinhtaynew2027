@@ -90,7 +90,7 @@ export interface SlidingTabItem<T extends string = string> {
   label: string;
   count?: number;
   icon?: LucideIcon | React.ComponentType<{ size?: number; className?: string; strokeWidth?: number }>;
-  tone?: 'default' | 'danger' | 'success' | 'muted';
+  tone?: 'default' | 'danger' | 'warning' | 'success' | 'muted';
 }
 
 /**
@@ -121,6 +121,8 @@ export function SlidingTabs<T extends string = string>({
         const activeBg =
           tab.tone === 'danger'
             ? 'bg-dgr shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_4px_12px_-2px_rgba(220,38,38,0.4)]'
+            : tab.tone === 'warning'
+            ? 'bg-wn shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_4px_12px_-2px_rgba(217,119,6,0.35)]'
             : tab.tone === 'success'
             ? 'bg-ok2 shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_4px_12px_-2px_rgba(45,212,191,0.35)]'
             : tab.tone === 'muted'
@@ -128,7 +130,11 @@ export function SlidingTabs<T extends string = string>({
             : 'bg-pri shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_4px_14px_-2px_rgba(59,102,240,0.45)]';
 
         const activeText =
-          tab.tone === 'success' ? 'text-ok2-fg' : 'text-white';
+          tab.tone === 'success'
+            ? 'text-ok2-fg'
+            : tab.tone === 'warning'
+            ? 'text-wn-fg'
+            : 'text-white';
 
         return (
           <button
@@ -144,6 +150,8 @@ export function SlidingTabs<T extends string = string>({
                 ? `${activeBg} ${activeText}`
                 : tab.tone === 'danger' && (tab.count ?? 0) > 0
                 ? 'text-dgr hover:bg-dgrbg/60'
+                : tab.tone === 'warning' && (tab.count ?? 0) > 0
+                ? 'text-wn hover:bg-surf/65'
                 : 'text-mu hover:text-tx hover:bg-surf/65'
             }`}
           >
@@ -156,6 +164,8 @@ export function SlidingTabs<T extends string = string>({
                     ? 'bg-white/20 text-current'
                     : tab.tone === 'danger' && tab.count > 0
                     ? 'tint-dgr text-dgr border border-dgr/40'
+                    : tab.tone === 'warning' && tab.count > 0
+                    ? 'tint-wn text-wn border border-wn/40'
                     : 'bg-surf text-mu border border-bdr'
                 }`}
               >

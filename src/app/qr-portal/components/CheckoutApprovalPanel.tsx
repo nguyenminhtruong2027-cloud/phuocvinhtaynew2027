@@ -25,7 +25,10 @@ import {
   fetchFacilitiesList,
   invalidateFacilitiesCache,
   normalizeRoomLabel,
+  extractRoomNumber,
 } from '@/lib/facilityCapacity';
+import { exportToExcel } from '@/lib/exportExcel';
+import { getVNDateString } from '@/lib/vnDate';
 import { toast } from 'sonner';
 import {
   CheckCircle2,
@@ -42,6 +45,11 @@ import {
   XCircle,
   Inbox,
   AlertCircle,
+  FileSpreadsheet,
+  Calendar,
+  ChevronDown,
+  ChevronUp,
+  Info,
 } from 'lucide-react';
 
 export interface CheckoutRequest {
@@ -297,13 +305,20 @@ export default function CheckoutApprovalPanel({
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
   const [actionErrorMsg, setActionErrorMsg] = useState<string | null>(null);
 
-  // Bộ lọc theo KTX / Dãy / Phòng từ WorkerContext + cached facilities (zero duplicate worker fetch)
+  // Bộ lọc theo KTX / Dãy / Phòng + Khoảng ngày + Bulk selection + Collapsible guide
   const [selectedKtx, setSelectedKtx] = useState<string>('all');
   const [selectedDay, setSelectedDay] = useState<string>('all');
   const [selectedRoom, setSelectedRoom] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchRejecting, setBatchRejecting] = useState(false);
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
+  const [guideExpanded, setGuideExpanded] = useState<boolean>(false);
   const [facilities, setFacilities] = useState<FacilityItem[]>([]);
 
-  const { currentUser, isAdmin, canWriteBlock } = useAuth();
+  const { currentUser, isAdmin, isSuperAdmin, canWriteBlock } = useAuth();
   const { addLog } = useAudit();
   const { workers, markWorkersDeleted, setWorkers: setContextWorkers, refreshWorkers } = useWorkers();
   const supabase = useMemo(() => createClient(), []);
@@ -1202,6 +1217,11 @@ export default function CheckoutApprovalPanel({
       if (selectedKtx !== 'all' && c.ktx !== selectedKtx) return false;
       if (selectedDay !== 'all' && c.day !== selectedDay) return false;
       if (selectedRoom !== 'all' && c.phong_so !== selectedRoom) return false;
+      if (dateFrom || dateTo) {
+        const dayStr = getVNDateString(new Date(c.created_at));
+        if (dateFrom && dayStr < dateFrom) return false;
+        if (dateTo && dayStr > dateTo) return false;
+      }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
         return (
@@ -1216,7 +1236,144 @@ export default function CheckoutApprovalPanel({
       }
       return true;
     });
-  }, [scopedCheckouts, filterStatus, selectedKtx, selectedDay, selectedRoom, searchQuery]);
+  }, [scopedCheckouts, filterStatus, selectedKtx, selectedDay, selectedRoom, dateFrom, dateTo, searchQuery]);
+
+  const selectedVisibleCheckouts = useMemo(
+    () => filteredCheckouts.filter(c => selectedIds.has(c.id)),
+    [filteredCheckouts, selectedIds]
+  );
+
+  const selectedPendingCheckouts = useMemo(
+    () => selectedVisibleCheckouts.filter(c => c.status === 'pending'),
+    [selectedVisibleCheckouts]
+  );
+
+  const allVisibleSelected =
+    filteredCheckouts.length > 0 && filteredCheckouts.every(c => selectedIds.has(c.id));
+
+  const toggleSelectAllVisible = () => {
+    if (allVisibleSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredCheckouts.map(c => c.id)));
+    }
+  };
+
+  const toggleSelectRow = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBatchReject = async () => {
+    if (selectedPendingCheckouts.length === 0) return;
+    setBatchRejecting(true);
+    const nowStr = new Date().toISOString();
+    try {
+      const ids = selectedPendingCheckouts.map(c => c.id);
+      const { error } = await supabase
+        .from('worker_registrations')
+        .update({ status: 'rejected', reviewed_by: currentUser?.id, reviewed_at: nowStr })
+        .in('id', ids);
+      if (error) throw new Error(error.message);
+      const idSet = new Set(ids);
+      setCheckouts(prev =>
+        prev.map(c => (idSet.has(c.id) ? { ...c, status: 'rejected' as const, reviewed_at: nowStr } : c))
+      );
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        ids.forEach(id => next.delete(id));
+        return next;
+      });
+      toast.success(`Đã từ chối hàng loạt ${ids.length} yêu cầu check-out.`);
+    } catch (err: any) {
+      toast.error(`Lỗi khi từ chối hàng loạt: ${err?.message || 'Không thể cập nhật'}`);
+    } finally {
+      setBatchRejecting(false);
+    }
+  };
+
+  const handleBatchDeleteConfirm = async () => {
+    if (!isSuperAdmin || selectedVisibleCheckouts.length === 0) return;
+    setBatchDeleting(true);
+    const actor = currentUser?.name || currentUser?.email || 'Admin';
+    const deletedSet = new Set<string>();
+    let failedCount = 0;
+
+    for (const target of selectedVisibleCheckouts) {
+      try {
+        await hardDeleteWorkerRegistration(supabase, {
+          registration: {
+            id: target.id,
+            worker_id: target.worker_id,
+            ho_va_ten: target.ho_va_ten,
+            ma_nv: target.ma_nv,
+            so_cccd: target.so_cccd,
+            ktx: target.ktx,
+            day: target.day,
+            phong_so: target.phong_so,
+            giuong: target.giuong,
+            ghi_chu: target.ghi_chu,
+          },
+          account: actor,
+          sourceContext: 'CheckoutApprovalPanel.batchDelete',
+        });
+        deletedSet.add(target.id);
+      } catch {
+        failedCount++;
+      }
+    }
+
+    if (deletedSet.size > 0) {
+      setCheckouts(prev => prev.filter(c => !deletedSet.has(c.id)));
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        deletedSet.forEach(id => next.delete(id));
+        return next;
+      });
+      if (detailReq && deletedSet.has(detailReq.id)) setDetailReq(null);
+    }
+
+    setBatchDeleting(false);
+    setBatchDeleteOpen(false);
+    if (deletedSet.size > 0 && failedCount === 0) {
+      toast.success(`Đã xóa triệt để ${deletedSet.size} yêu cầu check-out.`);
+    } else if (deletedSet.size > 0) {
+      toast.warning(`Đã xóa ${deletedSet.size} bản ghi, còn ${failedCount} bản ghi chưa xóa được.`);
+    } else {
+      toast.error('Không thể xóa các bản ghi đã chọn.');
+    }
+  };
+
+  const handleExportExcel = () => {
+    if (filteredCheckouts.length === 0) {
+      toast.info('Không có yêu cầu check-out nào trong bộ lọc hiện tại để xuất.');
+      return;
+    }
+    const rows = filteredCheckouts.map((c, idx) => {
+      const roomNum = extractRoomNumber(c.phong_so) || c.phong_so;
+      return {
+        STT: idx + 1,
+        'Họ và tên': c.ho_va_ten || '',
+        'Mã NV': c.ma_nv || '',
+        'Số CCCD': c.so_cccd || '',
+        'Số điện thoại': c.so_dien_thoai || '',
+        'Khu KTX': c.ktx || '',
+        'Dãy nhà': c.day || '',
+        'Phòng': roomNum ? `P.${roomNum}` : '',
+        'Giường': c.giuong ? formatBedShort(c.giuong) : '',
+        'Lý do & Ghi chú': parseCheckoutNote(c.ghi_chu),
+        'Trạng thái': STATUS_CONFIG[c.status]?.label || c.status,
+        'Thời gian gửi': new Date(c.created_at).toLocaleString('vi-VN'),
+        'Thời gian duyệt': c.reviewed_at ? new Date(c.reviewed_at).toLocaleString('vi-VN') : '',
+      };
+    });
+    const ok = exportToExcel(rows, `DanhSachCheckOut_${getVNDateString()}.xlsx`, 'Duyệt Check-out');
+    if (ok) toast.success(`Đã xuất ${rows.length} bản ghi check-out ra Excel.`);
+  };
 
   if (!isMounted) {
     return (
@@ -1230,6 +1387,50 @@ export default function CheckoutApprovalPanel({
 
   return (
     <div className="p-4 md:p-6 space-y-4 max-w-7xl mx-auto" suppressHydrationWarning>
+      {/* Batch Delete Confirmation Modal (Super Admin) */}
+      {batchDeleteOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop-scrim fade-in p-4"
+          onClick={() => { if (!batchDeleting) setBatchDeleteOpen(false); }}
+        >
+          <div
+            className="bg-surf border border-bdr rounded-xl w-full max-w-sm p-5 space-y-4 modal-enter shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-dgrbg text-dgr flex items-center justify-center shrink-0">
+                <Trash2 size={16} />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-tx">Xóa hàng loạt lịch sử Check-out</h3>
+                <p className="text-xs text-mu">Chỉ dành cho Quản trị tối cao</p>
+              </div>
+            </div>
+            <p className="text-xs text-tx leading-relaxed">
+              Xác nhận xóa triệt để <strong className="font-mono text-dgr">{selectedVisibleCheckouts.length}</strong> bản ghi yêu cầu check-out đã chọn khỏi hệ thống? Thao tác này không thể hoàn tác.
+            </p>
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setBatchDeleteOpen(false)}
+                disabled={batchDeleting}
+                className="flex-1 py-2 border border-bdr rounded-lg text-xs font-semibold hover:bg-act transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleBatchDeleteConfirm}
+                disabled={batchDeleting}
+                className="flex-1 py-2 bg-dgr hover:opacity-90 text-white rounded-lg text-xs font-bold transition-opacity cursor-pointer disabled:opacity-50 inline-flex items-center justify-center gap-1"
+              >
+                {batchDeleting && <Loader2 size={12} className="animate-spin" />}
+                <span>{batchDeleting ? 'Đang xóa...' : `Xóa ${selectedVisibleCheckouts.length} bản ghi`}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Detail Modal */}
       {detailReq && (
         <CheckoutDetailModal
@@ -1321,34 +1522,58 @@ export default function CheckoutApprovalPanel({
       )}
 
       {/* Header title */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-bdr">
         <div>
-          <h1 className="text-lg md:text-xl font-bold tracking-tight text-tx uppercase">
-            DUYỆT CHECK-OUT & TRẢ PHÒNG KTX
+          <h1 className="text-lg md:text-xl font-bold tracking-tight text-tx">
+            Duyệt Check-out &amp; Trả Phòng KTX
           </h1>
           <p className="text-xs text-mu mt-0.5">
             Xác nhận dọn ra và hoàn trả chỗ ở cho công nhân rời ký túc xá
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => fetchCheckouts(true)}
-          disabled={refreshing || loading}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-bdr bg-surf text-tx rounded text-xs font-semibold hover:bg-act dark:hover:bg-act transition-colors disabled:opacity-60 cursor-pointer w-fit"
-        >
-          <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
-          <span>Làm mới danh sách</span>
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={filteredCheckouts.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-bdr bg-surf text-tx rounded-lg text-xs font-semibold hover:bg-act transition-colors disabled:opacity-50 cursor-pointer whitespace-nowrap"
+          >
+            <FileSpreadsheet size={13} className="text-ok" />
+            <span>Xuất Excel ({filteredCheckouts.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => fetchCheckouts(true)}
+            disabled={refreshing || loading}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-bdr bg-surf text-tx rounded-lg text-xs font-semibold hover:bg-act transition-colors disabled:opacity-60 cursor-pointer whitespace-nowrap"
+          >
+            <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+            <span>Làm mới danh sách</span>
+          </button>
+        </div>
       </div>
 
-      {/* BANNER THÔNG BÁO GIẢI THÍCH HÀNH VI (Requirement: Nền cam nhạt #fdf1e4, viền cam #c9690f, chữ đen/đậm, KHÔNG dùng icon tam giác to) */}
-      <div className="tint-wn border border-wn rounded-md p-3.5 text-xs text-tx leading-relaxed">
-        <p className="font-bold text-wn uppercase tracking-wide mb-0.5">
-          Quy trình giải phóng chỗ ở khi duyệt check-out:
-        </p>
-        <p className="font-medium text-tx">
-          Khi bấm <strong>&quot;Duyệt dọn ra&quot;</strong>, hệ thống tự động cập nhật trạng thái đơn thành <strong>Đã duyệt</strong>, đồng thời <strong>xóa hẳn công nhân khỏi danh sách lưu trú</strong> trên Supabase để giải phóng giường và phòng trống ngay lập tức trên Bảng điều khiển và Sơ đồ phòng.
-        </p>
+      {/* Compact Collapsible Procedure Notice */}
+      <div className="tint-wn border border-wn/40 rounded-xl overflow-hidden text-xs">
+        <button
+          type="button"
+          onClick={() => setGuideExpanded(prev => !prev)}
+          className="w-full px-3.5 py-2.5 flex items-center justify-between gap-2 text-left cursor-pointer hover:opacity-90 transition-opacity"
+        >
+          <span className="inline-flex items-center gap-2 font-semibold text-wn">
+            <Info size={14} className="shrink-0" />
+            <span>Quy trình giải phóng chỗ ở khi duyệt check-out</span>
+          </span>
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-mu shrink-0">
+            <span>{guideExpanded ? 'Thu gọn' : 'Xem hướng dẫn'}</span>
+            {guideExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          </span>
+        </button>
+        {guideExpanded && (
+          <div className="px-3.5 pb-3 pt-0.5 text-tx/90 leading-relaxed border-t border-wn/20">
+            Khi bấm <strong>&ldquo;Duyệt dọn ra&rdquo;</strong>, hệ thống tự động cập nhật trạng thái đơn thành <strong>Đã duyệt</strong>, đồng thời <strong>xóa hẳn công nhân khỏi danh sách lưu trú</strong> trên Supabase để giải phóng giường và phòng trống ngay lập tức trên Bảng điều khiển và Sơ đồ phòng.
+          </div>
+        )}
       </div>
 
       {/* Staff Permission Badge */}
@@ -1465,8 +1690,8 @@ export default function CheckoutApprovalPanel({
           </div>
         </div>
 
-        {/* Dropdown Filters KTX / Dãy / Phòng (Requirement 3) */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2.5 border-t border-bdr">
+        {/* Dropdown Filters KTX / Dãy / Phòng + Khoảng ngày */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 pt-2.5 border-t border-bdr">
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-ic whitespace-nowrap min-w-[50px]">Khu KTX:</span>
             <select
@@ -1476,7 +1701,7 @@ export default function CheckoutApprovalPanel({
                 setSelectedDay('all');
                 setSelectedRoom('all');
               }}
-              className="flex-1 py-1 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn"
+              className="flex-1 py-1.5 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn"
             >
               <option value="all">Tất cả KTX</option>
               {hierarchy.ktxList.map(k => (
@@ -1493,7 +1718,7 @@ export default function CheckoutApprovalPanel({
                 setSelectedDay(e.target.value);
                 setSelectedRoom('all');
               }}
-              className="flex-1 py-1 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn"
+              className="flex-1 py-1.5 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn"
             >
               <option value="all">Tất cả Dãy</option>
               {availableDays.map(d => (
@@ -1507,7 +1732,7 @@ export default function CheckoutApprovalPanel({
             <select
               value={selectedRoom}
               onChange={e => setSelectedRoom(e.target.value)}
-              className="flex-1 py-1 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn"
+              className="flex-1 py-1.5 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn"
             >
               <option value="all">Tất cả Phòng</option>
               {availableRooms.map(r => (
@@ -1515,19 +1740,91 @@ export default function CheckoutApprovalPanel({
               ))}
             </select>
           </div>
+
+          <div className="flex items-center gap-1.5">
+            <Calendar size={13} className="text-ic shrink-0" />
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={e => setDateFrom(e.target.value)}
+              title="Từ ngày"
+              className="flex-1 py-1 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn font-tabular"
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-mu shrink-0">đến</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={e => setDateTo(e.target.value)}
+              title="Đến ngày"
+              className="flex-1 py-1 px-2 text-xs bg-page border border-bdr rounded text-tx focus:outline-none focus:border-wn font-tabular"
+            />
+            {(dateFrom || dateTo) && (
+              <button
+                type="button"
+                onClick={() => { setDateFrom(''); setDateTo(''); }}
+                className="p-1 text-mu hover:text-tx cursor-pointer"
+                title="Xóa lọc ngày"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* BẢNG DANH SÁCH (TABLE) (Requirement: Operations Table View) */}
-      <div className="bg-surf border border-bdr rounded-md overflow-hidden">
+      {/* Bulk Selection Bar */}
+      {selectedVisibleCheckouts.length > 0 && (
+        <div className="bg-surf border border-bdr2 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs font-bold text-tx">
+            Đã chọn <span className="text-lnk font-mono font-tabular">{selectedVisibleCheckouts.length}</span> yêu cầu check-out
+          </span>
+          <div className="flex items-center gap-2 flex-wrap">
+            {selectedPendingCheckouts.length > 0 && (
+              <button
+                type="button"
+                onClick={handleBatchReject}
+                disabled={batchRejecting || batchDeleting}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-dgr text-dgr hover:bg-dgrbg rounded-lg text-xs font-semibold disabled:opacity-50 cursor-pointer whitespace-nowrap"
+              >
+                {batchRejecting ? <Loader2 size={13} className="animate-spin" /> : <XCircle size={13} />}
+                <span>Từ chối hàng loạt ({selectedPendingCheckouts.length})</span>
+              </button>
+            )}
+            {isSuperAdmin && (
+              <button
+                type="button"
+                onClick={() => setBatchDeleteOpen(true)}
+                disabled={batchRejecting || batchDeleting}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-dgr hover:opacity-90 text-white rounded-lg text-xs font-bold disabled:opacity-50 cursor-pointer whitespace-nowrap"
+              >
+                <Trash2 size={13} />
+                <span>Xóa hàng loạt ({selectedVisibleCheckouts.length})</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setSelectedIds(new Set())}
+              disabled={batchRejecting || batchDeleting}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-bdr rounded-lg text-xs font-semibold text-mu hover:text-tx hover:bg-act cursor-pointer whitespace-nowrap"
+            >
+              <X size={12} /> Bỏ chọn
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* BẢNG DANH SÁCH */}
+      <div className="bg-surf border border-bdr rounded-xl overflow-hidden">
         {loading ? (
           <div className="py-16 text-center text-ic flex items-center justify-center gap-2 text-xs">
             <RefreshCw size={16} className="animate-spin text-wn" />
             <span>Đang tải danh sách chờ check-out...</span>
           </div>
         ) : filteredCheckouts.length === 0 ? (
-          /* TRẠNG THÁI RỖNG (Requirement: Khung viền đứt nét, icon đơn giản, tiêu đề in đậm) */
-          <div className="p-10 border border-dashed border-bdr m-4 rounded text-center space-y-1.5">
+          <div className="p-10 border border-dashed border-bdr m-4 rounded-lg text-center space-y-1.5">
             <Inbox size={32} className="mx-auto text-mu stroke-1" />
             <h4 className="font-bold text-sm text-tx">Không có yêu cầu check-out nào</h4>
             <p className="text-xs text-mu max-w-sm mx-auto">
@@ -1541,13 +1838,22 @@ export default function CheckoutApprovalPanel({
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-page border-b border-bdr text-[11px] font-bold text-mu uppercase tracking-wider">
-                  <th className="py-2.5 px-3">CÔNG NHÂN</th>
-                  <th className="py-2.5 px-3">MÃ NV / CCCD</th>
-                  <th className="py-2.5 px-3">VỊ TRÍ TRẢ PHÒNG</th>
-                  <th className="py-2.5 px-3">LÝ DO & GHI CHÚ</th>
-                  <th className="py-2.5 px-3">NGÀY GỬI</th>
-                  <th className="py-2.5 px-3">TRẠNG THÁI</th>
-                  <th className="py-2.5 px-3 text-right">THAO TÁC</th>
+                  <th className="py-2.5 px-3 w-8 text-center">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={toggleSelectAllVisible}
+                      className="rounded border-bdr bg-surf cursor-pointer"
+                      title="Chọn tất cả yêu cầu đang hiển thị"
+                    />
+                  </th>
+                  <th className="py-2.5 px-3">Công nhân</th>
+                  <th className="py-2.5 px-3">Mã NV / CCCD</th>
+                  <th className="py-2.5 px-3">Vị trí trả phòng</th>
+                  <th className="py-2.5 px-3">Lý do &amp; Ghi chú</th>
+                  <th className="py-2.5 px-3">Ngày gửi</th>
+                  <th className="py-2.5 px-3">Trạng thái</th>
+                  <th className="py-2.5 px-3 text-right">Thao tác</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-bdr">
@@ -1555,19 +1861,30 @@ export default function CheckoutApprovalPanel({
                   const cfg = STATUS_CONFIG[req.status];
                   const cleanNote = parseCheckoutNote(req.ghi_chu);
                   const isProcessing = processingId === req.id;
+                  const roomShort = extractRoomNumber(req.phong_so) || req.phong_so;
 
                   return (
                     <tr
                       key={req.id}
-                      className="hover:bg-act transition-colors"
+                      className={`transition-colors ${
+                        selectedIds.has(req.id) ? 'bg-bdg/30' : 'hover:bg-act'
+                      }`}
                     >
+                      <td className="py-2.5 px-3 align-top text-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(req.id)}
+                          onChange={() => toggleSelectRow(req.id)}
+                          className="rounded border-bdr bg-surf cursor-pointer mt-0.5"
+                        />
+                      </td>
                       {/* Cột 1: Họ tên & SĐT */}
                       <td className="py-2.5 px-3 align-top">
                         <div className="font-bold text-tx text-xs sm:text-sm">
                           {req.ho_va_ten}
                         </div>
                         {req.so_dien_thoai && (
-                          <div className="text-[11px] text-mu mt-0.5 flex items-center gap-1">
+                          <div className="text-[11px] text-mu mt-0.5 flex items-center gap-1 font-tabular">
                             <Phone size={10} />
                             <span>{req.so_dien_thoai}</span>
                           </div>
@@ -1575,7 +1892,7 @@ export default function CheckoutApprovalPanel({
                       </td>
 
                       {/* Cột 2: Mã công nhân / CCCD */}
-                      <td className="py-2.5 px-3 align-top font-mono text-xs whitespace-nowrap">
+                      <td className="py-2.5 px-3 align-top font-mono text-xs whitespace-nowrap font-tabular">
                         <div className="font-semibold text-tx">
                           {req.ma_nv || '—'}
                         </div>
@@ -1586,13 +1903,13 @@ export default function CheckoutApprovalPanel({
                         )}
                       </td>
 
-                      {/* Cột 3: Vị trí phòng ở cần giải phóng */}
-                      <td className="py-2.5 px-3 align-top">
+                      {/* Cột 3: Vị trí phòng ở cần giải phóng chuẩn hóa */}
+                      <td className="py-2.5 px-3 align-top font-tabular">
                         <div className="font-bold text-xs text-tx">
-                          {req.ktx} — {req.day}
+                          {req.ktx} · {req.day}
                         </div>
-                        <div className="text-[11px] text-mu mt-0.5 font-tabular">
-                          Phòng {normalizeRoomLabel(req.phong_so) || req.phong_so} {req.giuong ? `(${formatBedShort(req.giuong)})` : ''}
+                        <div className="text-[11px] text-mu mt-0.5">
+                          {roomShort ? `P.${roomShort}` : '—'}{req.giuong ? ` · ${formatBedShort(req.giuong)}` : ''}
                         </div>
                       </td>
 
@@ -1604,7 +1921,7 @@ export default function CheckoutApprovalPanel({
                       </td>
 
                       {/* Cột 5: Thời gian gửi */}
-                      <td className="py-2.5 px-3 align-top text-[11px] text-mu whitespace-nowrap">
+                      <td className="py-2.5 px-3 align-top text-[11px] text-mu whitespace-nowrap font-tabular">
                         {new Date(req.created_at).toLocaleDateString('vi-VN')}
                         <div className="text-[10px] text-mu">
                           {new Date(req.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}

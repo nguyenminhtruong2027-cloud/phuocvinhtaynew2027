@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { QrCode, Calendar, Play, Square, Users, UserCheck, UserX, Download, RefreshCw, Loader2, CheckCircle2, Clock, Edit3, Save, X, AlertCircle, Search, Trash2, Filter, MapPin, Bell, BellRing, UserPlus } from 'lucide-react';
+import { QrCode, Calendar, Play, Square, Users, UserCheck, UserX, Download, RefreshCw, Loader2, CheckCircle2, Clock, Edit3, Save, X, AlertCircle, Search, Trash2, Filter, MapPin, Bell, BellRing, UserPlus, Copy, Check, Printer, History, ArrowUpRight } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
@@ -9,6 +9,8 @@ import { useAudit } from '@/context/AuditContext';
 import { useWorkers } from '@/context/WorkerContext';
 import { getVNDateString } from '@/lib/vnDate';
 import { QrCodeImage, downloadQrPng } from '@/components/QrCodeImage';
+import { fetchFacilitiesList, FacilityItem, extractRoomNumber } from '@/lib/facilityCapacity';
+import { printQrBulletinPoster } from '@/lib/qrPosterPrint';
 
 interface AttendanceSession {
   id: string;
@@ -66,50 +68,115 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   excused:  { label: 'Có phép',        color: 'bg-bdg text-lnk border-bdr2' },
 };
 
+function formatDayOptionLabel(raw: string): string {
+  const cleaned = raw.trim();
+  if (!cleaned) return '';
+  return /^dãy\b/i.test(cleaned) ? cleaned : `Dãy ${cleaned}`;
+}
+
+function formatRoomOptionLabel(raw: string): string {
+  const num = extractRoomNumber(raw) || raw.trim();
+  if (!num) return '';
+  return `Phòng ${num}`;
+}
+
 function getZoneLabel(s: AttendanceSession): string {
   if (!s.zone_ktx && !s.zone_day && !s.zone_phong) return 'Toàn KTX';
   const parts: string[] = [];
   if (s.zone_ktx) parts.push(s.zone_ktx);
-  if (s.zone_day) parts.push(`Dãy ${s.zone_day}`);
-  if (s.zone_phong) parts.push(`Phòng ${s.zone_phong}`);
+  if (s.zone_day) parts.push(formatDayOptionLabel(s.zone_day));
+  if (s.zone_phong) parts.push(formatRoomOptionLabel(s.zone_phong));
   return parts.join(' — ');
 }
 
 function QRCodeDisplay({ url, sessionDate, zoneLabel }: { url: string; sessionDate: string; zoneLabel: string }) {
+  const [copied, setCopied] = useState(false);
+
   const handleDownload = async () => {
     const ok = await downloadQrPng(url, `qr-diemdanh-${sessionDate}-${zoneLabel.replace(/\s+/g, '_')}.png`, 640);
     if (!ok) toast.error('Không thể tạo file ảnh QR.');
+    else toast.success('Đã tải ảnh QR điểm danh.');
+  };
+
+  const handleCopy = () => {
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(url);
+      setCopied(true);
+      toast.success('Đã sao chép đường dẫn điểm danh.');
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handlePrintPoster = async () => {
+    const ok = await printQrBulletinPoster({
+      url,
+      paperSize: 'A4',
+      badgeText: 'Điểm danh quân số hàng ngày',
+      title: 'QR Điểm Danh Công Nhân KTX',
+      subtitle: 'Công nhân quét mã QR bằng Camera điện thoại hoặc Zalo để xác nhận có mặt trong ngày.',
+      metaLine: `Ngày ${sessionDate} · Khu vực: ${zoneLabel}`,
+      accentHex: '#047857',
+      steps: [
+        { title: 'Mở Camera / Zalo', detail: 'Quét mã QR niêm yết tại cổng hoặc bảng tin dãy nhà.' },
+        { title: 'Nhập Mã NV / Họ tên', detail: 'Kiểm tra lại thông tin phòng ở đang cư trú.' },
+        { title: 'Xác nhận điểm danh', detail: 'Hệ thống ghi nhận tức thì vào bảng kiểm soát quân số.' },
+      ],
+      footerNote: `Ký Túc Xá Phước Vĩnh Tây · Phiên điểm danh ngày ${sessionDate} · ${zoneLabel}`,
+    });
+    if (!ok) toast.error('Không thể tạo mẫu in Poster QR.');
   };
 
   return (
-    <div className="bg-act border border-bdr rounded-md p-4">
+    <div className="bg-act border border-bdr rounded-lg p-4">
       <div className="flex flex-col sm:flex-row items-center gap-5">
-        <div className="shrink-0 flex flex-col items-center gap-2.5">
-          <div className="p-2 border border-bdr bg-white rounded">
+        <div className="shrink-0 flex flex-col items-center gap-2 w-40">
+          <div className="p-2 border border-bdr bg-white rounded-lg">
             <QrCodeImage value={url} size={144} alt={`QR điểm danh ngày ${sessionDate} - ${zoneLabel}`} className="w-36 h-36 object-contain" />
           </div>
-          <button onClick={handleDownload}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-side text-tx rounded text-xs font-semibold hover:bg-act transition-colors cursor-pointer">
-            <Download size={13} /> Tải QR xuống
-          </button>
-        </div>
-        <div className="flex-1 text-center sm:text-left space-y-2">
-          <div>
-            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-okbg text-ok border border-[#1f7a45]/30 rounded text-xs font-semibold mb-1">
-              <span className="w-2 h-2 bg-ok2 rounded-full animate-pulse" />
-              Phiên đang mở — Hợp lệ cả ngày
-            </div>
-            <h3 className="font-bold text-tx text-base">QR Điểm Danh Công Nhân</h3>
-            <p className="text-xs text-mu mt-0.5">Ngày: <strong className="text-tx">{sessionDate}</strong> · Khu vực: <strong className="text-wn">{zoneLabel}</strong></p>
+          <div className="flex gap-1.5 w-full">
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); handleDownload(); }}
+              className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 bg-side border border-bdr text-tx rounded-lg text-[11px] font-semibold hover:bg-surf transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <Download size={12} /> Tải mã
+            </button>
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); handlePrintPoster(); }}
+              className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 bg-pri text-white rounded-lg text-[11px] font-semibold hover:opacity-90 transition-opacity cursor-pointer whitespace-nowrap"
+            >
+              <Printer size={12} /> In A4
+            </button>
           </div>
-          <div className="bg-surf rounded border border-bdr p-2.5 space-y-1">
-            <p className="text-[11px] text-ic font-semibold">Đường dẫn quét:</p>
+        </div>
+        <div className="flex-1 text-center sm:text-left space-y-2.5 w-full">
+          <div>
+            <p className="text-xs font-semibold text-ok">Phiên đang mở · Hợp lệ cả ngày</p>
+            <h3 className="font-bold text-tx text-base mt-0.5">QR Điểm Danh Công Nhân</h3>
+            <p className="text-xs text-mu mt-0.5 font-tabular">
+              Ngày: <strong className="text-tx">{sessionDate}</strong> · Khu vực: <strong className="text-wn">{zoneLabel}</strong>
+            </p>
+          </div>
+          <div className="bg-surf rounded-lg border border-bdr p-2.5 space-y-1.5">
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-[11px] text-ic font-semibold">Đường dẫn quét</span>
+              <button
+                type="button"
+                onClick={e => { e.stopPropagation(); handleCopy(); }}
+                className="inline-flex items-center gap-1 text-lnk hover:underline font-semibold text-[11px] cursor-pointer whitespace-nowrap"
+              >
+                {copied ? <><Check size={12} className="text-ok" /><span className="text-ok">Đã sao chép</span></> : <><Copy size={12} /><span>Sao chép link</span></>}
+              </button>
+            </div>
             <code className="text-xs bg-act px-2 py-1 rounded font-mono text-tx break-all block border border-bdr">{url}</code>
           </div>
-          <div className="flex flex-wrap gap-1.5 text-xs">
-            <span className="px-2 py-0.5 rounded bg-surf text-ok border border-[#1f7a45]/30">✓ Không hết hạn trong ngày</span>
-            <span className="px-2 py-0.5 rounded bg-bdg text-lnk border border-bdr2">✓ Xác nhận tức thì</span>
-            <span className="px-2 py-0.5 rounded bg-surf text-wn border border-wn/30">✓ Hiển thị phòng/dãy</span>
+          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-2.5 gap-y-1 text-xs text-mu">
+            <span className="text-ok font-medium">Không hết hạn trong ngày</span>
+            <span aria-hidden="true">·</span>
+            <span>Xác nhận tức thì</span>
+            <span aria-hidden="true">·</span>
+            <span>Hiển thị phòng/dãy</span>
           </div>
         </div>
       </div>
@@ -199,9 +266,10 @@ export default function AttendancePortalClient() {
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
 
-  // Cascading lists derived from workers
-  const [dayList, setDayList] = useState<string[]>([]);
-  const [phongList, setPhongList] = useState<string[]>([]);
+  // Cascading lists derived from facilities + workers
+  const [facilities, setFacilities] = useState<FacilityItem[]>([]);
+  const [recentSessions, setRecentSessions] = useState<Array<AttendanceSession & { checkedInCount: number }>>([]);
+  const [recentSessionsLoading, setRecentSessionsLoading] = useState(false);
 
   // Manual input mode flags for session zone fields
   const [isManualKtx, setIsManualKtx] = useState(false);
@@ -212,6 +280,13 @@ export default function AttendancePortalClient() {
     if (typeof window !== 'undefined') {
       setAttendanceUrl(`${window.location.origin}/attendance`);
     }
+    let active = true;
+    fetchFacilitiesList()
+      .then(rows => {
+        if (active) setFacilities(rows);
+      })
+      .catch(() => {});
+    return () => { active = false; };
   }, []);
 
   const allWorkers = useMemo<WorkerInfo[]>(
@@ -233,27 +308,90 @@ export default function AttendancePortalClient() {
     [contextWorkers]
   );
 
-  const ktxList = useMemo(
-    () => Array.from(new Set(allWorkers.map(w => w.ktx).filter(Boolean))).sort(),
-    [allWorkers]
-  );
+  const ktxList = useMemo(() => {
+    const set = new Set<string>();
+    facilities.forEach(f => { if (f.ktx) set.add(f.ktx); });
+    allWorkers.forEach(w => { if (w.ktx) set.add(w.ktx); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }));
+  }, [facilities, allWorkers]);
 
-  // ─── Cascade: KTX → Dãy list ─────────────────────────────────────────────
-  useEffect(() => {
-    if (!zoneKtx || isManualKtx) { setDayList([]); return; }
-    const days = Array.from(new Set(allWorkers.filter(w => w.ktx === zoneKtx && w.day).map(w => w.day))).sort();
-    setDayList(days);
-    // Reset downstream if current value not in new list
-    if (!isManualDay && zoneDay && !days.includes(zoneDay)) { setZoneDay(''); setIsManualDay(false); }
-  }, [zoneKtx, allWorkers, isManualKtx, isManualDay, zoneDay]);
+  const dayList = useMemo(() => {
+    if (isManualKtx) return [];
+    const set = new Set<string>();
+    facilities
+      .filter(f => (!zoneKtx || f.ktx === zoneKtx) && f.day)
+      .forEach(f => set.add(f.day));
+    allWorkers
+      .filter(w => (!zoneKtx || w.ktx === zoneKtx) && w.day)
+      .forEach(w => set.add(w.day));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }));
+  }, [zoneKtx, isManualKtx, facilities, allWorkers]);
 
-  // ─── Cascade: Dãy → Phòng list ───────────────────────────────────────────
+  const phongList = useMemo(() => {
+    if (isManualDay) return [];
+    const set = new Set<string>();
+    facilities
+      .filter(f => (!zoneKtx || f.ktx === zoneKtx) && (!zoneDay || f.day === zoneDay) && f.phong)
+      .forEach(f => set.add(extractRoomNumber(f.phong) || f.phong));
+    allWorkers
+      .filter(w => (!zoneKtx || w.ktx === zoneKtx) && (!zoneDay || w.day === zoneDay) && w.phong_so)
+      .forEach(w => set.add(extractRoomNumber(w.phong_so) || w.phong_so));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }));
+  }, [zoneKtx, zoneDay, isManualDay, facilities, allWorkers]);
+
+  // Reset downstream selection if current value is no longer in list
   useEffect(() => {
-    if (!zoneKtx || !zoneDay || isManualDay) { setPhongList([]); return; }
-    const phongs = Array.from(new Set(allWorkers.filter(w => w.ktx === zoneKtx && w.day === zoneDay && w.phong_so).map(w => w.phong_so))).sort();
-    setPhongList(phongs);
-    if (!isManualPhong && zonePhong && !phongs.includes(zonePhong)) { setZonePhong(''); setIsManualPhong(false); }
-  }, [zoneKtx, zoneDay, allWorkers, isManualDay, isManualPhong, zonePhong]);
+    if (!isManualDay && zoneDay && dayList.length > 0 && !dayList.includes(zoneDay)) {
+      setZoneDay('');
+    }
+  }, [dayList, isManualDay, zoneDay]);
+
+  useEffect(() => {
+    if (!isManualPhong && zonePhong && phongList.length > 0 && !phongList.includes(zonePhong)) {
+      setZonePhong('');
+    }
+  }, [phongList, isManualPhong, zonePhong]);
+
+  // ─── Load recent 5 sessions across all dates ──────────────────────────────
+  const fetchRecentSessions = useCallback(async () => {
+    setRecentSessionsLoading(true);
+    try {
+      const { data: sessRows, error } = await supabase
+        .from('attendance_sessions')
+        .select('*')
+        .order('session_date', { ascending: false })
+        .order('opened_at', { ascending: false })
+        .limit(5);
+      if (error || !sessRows) return;
+      const ids = sessRows.map((s: any) => s.id).filter(Boolean);
+      const countMap = new Map<string, number>();
+      if (ids.length > 0) {
+        const { data: recRows } = await supabase
+          .from('attendance_records')
+          .select('session_id, status')
+          .in('session_id', ids)
+          .in('status', ['present', 'excused']);
+        (recRows || []).forEach((r: any) => {
+          const sid = String(r.session_id || '');
+          if (sid) countMap.set(sid, (countMap.get(sid) || 0) + 1);
+        });
+      }
+      setRecentSessions(
+        (sessRows as AttendanceSession[]).map(s => ({
+          ...s,
+          checkedInCount: countMap.get(s.id) || 0,
+        }))
+      );
+    } catch {
+      // non-blocking
+    } finally {
+      setRecentSessionsLoading(false);
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    fetchRecentSessions();
+  }, [fetchRecentSessions]);
 
   // ─── Load sessions ────────────────────────────────────────────────────────
   const fetchSessions = useCallback(async (date: string, silent = false) => {
@@ -289,10 +427,11 @@ export default function AttendancePortalClient() {
       .channel('attendance_sessions_realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_sessions' }, () => {
         fetchSessions(selectedDate, true);
+        fetchRecentSessions();
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [fetchSessions, selectedDate, supabase]);
+  }, [fetchSessions, fetchRecentSessions, selectedDate, supabase]);
 
   // ─── Load records ─────────────────────────────────────────────────────────
   const activeSessionId = activeSession?.id ?? null;
@@ -461,7 +600,7 @@ export default function AttendancePortalClient() {
             `Mở phiên điểm danh ngày ${selectedDate} — Khu vực: ${getZoneLabel(opened)}`
           );
         } catch {}
-        await fetchSessions(selectedDate);
+        await Promise.all([fetchSessions(selectedDate), fetchRecentSessions()]);
         setActiveSession(opened);
         setActiveTab('records');
       }
@@ -487,7 +626,7 @@ export default function AttendancePortalClient() {
           );
         } catch {}
         setActiveSession(prev => prev ? { ...prev, is_active: false } : prev);
-        await fetchSessions(selectedDate, true);
+        await Promise.all([fetchSessions(selectedDate, true), fetchRecentSessions()]);
       }
     } catch (e: any) {
       console.error('closeSession error:', e.message);
@@ -513,7 +652,7 @@ export default function AttendancePortalClient() {
         } catch {}
         setRecords([]);
         setShowDeleteConfirm(false);
-        await fetchSessions(selectedDate);
+        await Promise.all([fetchSessions(selectedDate), fetchRecentSessions()]);
         setActiveTab('session');
       }
     } catch (e: any) {
@@ -922,11 +1061,11 @@ export default function AttendancePortalClient() {
                         if (e.target.value === '__manual__') { setIsManualDay(true); setZoneDay(''); }
                         else { setZoneDay(e.target.value); setZonePhong(''); setIsManualPhong(false); }
                       }}
-                      className="px-3 py-2 text-sm border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 min-w-[120px]"
+                      className="px-3 py-2 text-sm border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 min-w-[140px]"
                     >
                       <option value="">-- Tất cả Dãy --</option>
-                      {dayList.map(d => <option key={d} value={d}>Dãy {d}</option>)}
-                      <option value="__manual__">✏ Khác / Nhập tay</option>
+                      {dayList.map(d => <option key={d} value={d}>{formatDayOptionLabel(d)}</option>)}
+                      <option value="__manual__">Khác / Nhập tay...</option>
                     </select>
                   ) : (
                     <div className="flex gap-1">
@@ -934,12 +1073,12 @@ export default function AttendancePortalClient() {
                         type="text"
                         value={zoneDay}
                         onChange={e => setZoneDay(e.target.value)}
-                        placeholder="VD: A, B, 1..."
+                        placeholder="VD: Dãy 1, Dãy A..."
                         autoFocus={isManualDay}
-                        className="px-3 py-2 text-sm border border-primary rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 min-w-[110px]"
+                        className="px-3 py-2 text-sm border border-primary rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 min-w-[130px]"
                       />
                       {dayList.length > 0 && (
-                        <button onClick={() => { setIsManualDay(false); setZoneDay(''); }} title="Quay lại chọn" className="px-2 py-1 border border-border rounded-lg text-xs text-muted-foreground hover:bg-muted">↩</button>
+                        <button type="button" onClick={() => { setIsManualDay(false); setZoneDay(''); }} title="Quay lại danh sách" className="px-2 py-1 border border-border rounded-lg text-xs text-muted-foreground hover:bg-muted cursor-pointer">↩</button>
                       )}
                     </div>
                   )}
@@ -954,11 +1093,11 @@ export default function AttendancePortalClient() {
                         if (e.target.value === '__manual__') { setIsManualPhong(true); setZonePhong(''); }
                         else setZonePhong(e.target.value);
                       }}
-                      className="px-3 py-2 text-sm border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 min-w-[120px]"
+                      className="px-3 py-2 text-sm border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 min-w-[140px]"
                     >
                       <option value="">-- Tất cả Phòng --</option>
-                      {phongList.map(p => <option key={p} value={p}>Phòng {p}</option>)}
-                      <option value="__manual__">✏ Khác / Nhập tay</option>
+                      {phongList.map(p => <option key={p} value={p}>{formatRoomOptionLabel(p)}</option>)}
+                      <option value="__manual__">Khác / Nhập tay...</option>
                     </select>
                   ) : (
                     <div className="flex gap-1">
@@ -966,12 +1105,12 @@ export default function AttendancePortalClient() {
                         type="text"
                         value={zonePhong}
                         onChange={e => setZonePhong(e.target.value)}
-                        placeholder="VD: 101, 202..."
+                        placeholder="VD: 1, 101..."
                         autoFocus={isManualPhong}
-                        className="px-3 py-2 text-sm border border-primary rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 min-w-[110px]"
+                        className="px-3 py-2 text-sm border border-primary rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 min-w-[130px]"
                       />
                       {phongList.length > 0 && (
-                        <button onClick={() => { setIsManualPhong(false); setZonePhong(''); }} title="Quay lại chọn" className="px-2 py-1 border border-border rounded-lg text-xs text-muted-foreground hover:bg-muted">↩</button>
+                        <button type="button" onClick={() => { setIsManualPhong(false); setZonePhong(''); }} title="Quay lại danh sách" className="px-2 py-1 border border-border rounded-lg text-xs text-muted-foreground hover:bg-muted cursor-pointer">↩</button>
                       )}
                     </div>
                   )}
@@ -979,7 +1118,7 @@ export default function AttendancePortalClient() {
               </div>
               <div className="text-xs text-muted-foreground">
                 Phạm vi QR: <strong className="text-foreground">
-                  {[zoneKtx || 'Toàn KTX', zoneDay ? `Dãy ${zoneDay}` : '', zonePhong ? `Phòng ${zonePhong}` : ''].filter(Boolean).join(' — ')}
+                  {[zoneKtx || 'Toàn KTX', zoneDay ? formatDayOptionLabel(zoneDay) : '', zonePhong ? formatRoomOptionLabel(zonePhong) : ''].filter(Boolean).join(' — ')}
                 </strong>
               </div>
             </div>
@@ -1040,8 +1179,9 @@ export default function AttendancePortalClient() {
           )}
 
           {!sessionLoading && sessions.length === 0 && (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm border bg-okbg border-bdr2 text-ok">
-              <AlertCircle size={14} /> Chưa có phiên điểm danh cho ngày này. Chọn khu vực và bấm &quot;Mở phiên điểm danh&quot; để bắt đầu.
+            <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-lg text-xs border bg-surf border-bdr text-mu">
+              <AlertCircle size={14} className="text-wn shrink-0" />
+              <span>Chưa có phiên điểm danh cho ngày <strong className="text-tx font-tabular">{selectedDate}</strong>. Chọn khu vực ở trên và bấm &ldquo;Mở phiên điểm danh&rdquo; để bắt đầu.</span>
             </div>
           )}
 
@@ -1056,13 +1196,88 @@ export default function AttendancePortalClient() {
                 <div key={s.label} className={`p-4 rounded-xl border flex items-center gap-3 ${s.color}`}>
                   <div className="opacity-70">{s.icon}</div>
                   <div>
-                    <p className="text-2xl font-bold">{s.value}</p>
+                    <p className="text-2xl font-bold font-tabular">{s.value}</p>
                     <p className="text-xs mt-0.5 font-medium opacity-80">{s.label}</p>
                   </div>
                 </div>
               ))}
             </div>
           )}
+
+          {/* 5 phiên điểm danh gần nhất */}
+          <div className="bg-surf border border-bdr rounded-xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-bdr flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <History size={15} className="text-pri2" />
+                <h3 className="text-sm font-bold text-tx">5 phiên điểm danh gần nhất</h3>
+              </div>
+              <span className="text-xs text-mu font-tabular">
+                {recentSessions.length} phiên
+              </span>
+            </div>
+            {recentSessionsLoading ? (
+              <div className="py-8 flex items-center justify-center gap-2 text-xs text-mu">
+                <Loader2 size={15} className="animate-spin text-pri2" />
+                <span>Đang tải lịch sử phiên...</span>
+              </div>
+            ) : recentSessions.length === 0 ? (
+              <div className="py-8 text-center text-xs text-mu">
+                Chưa có lịch sử phiên điểm danh nào được tạo.
+              </div>
+            ) : (
+              <div className="divide-y divide-bdr">
+                {recentSessions.map(rs => {
+                  const isCurrentSelected = activeSession?.id === rs.id;
+                  return (
+                    <div
+                      key={rs.id}
+                      className={`px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 transition-colors ${
+                        isCurrentSelected ? 'bg-act/60' : 'hover:bg-act/40'
+                      }`}
+                    >
+                      <div className="min-w-0 space-y-0.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-mono font-bold text-tx font-tabular">
+                            {rs.session_date}
+                          </span>
+                          <span className="text-xs text-mu" aria-hidden="true">·</span>
+                          <span className="text-xs font-semibold text-tx truncate">
+                            {getZoneLabel(rs)}
+                          </span>
+                          <span
+                            className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${
+                              rs.is_active
+                                ? 'bg-okbg text-ok border-bdr2'
+                                : 'bg-page text-mu border-bdr'
+                            }`}
+                          >
+                            {rs.is_active ? 'Đang mở' : 'Đã đóng'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-mu font-tabular">
+                          Mở lúc {new Date(rs.opened_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                          {' · '}
+                          <strong className="text-ok">{rs.checkedInCount.toLocaleString('vi-VN')}</strong> công nhân đã điểm danh
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedDate(rs.session_date);
+                          setActiveSession(rs);
+                          setActiveTab('records');
+                        }}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 border border-bdr bg-page hover:bg-act text-tx rounded-lg text-xs font-semibold cursor-pointer whitespace-nowrap w-fit"
+                      >
+                        <span>Xem bảng điểm danh</span>
+                        <ArrowUpRight size={13} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
