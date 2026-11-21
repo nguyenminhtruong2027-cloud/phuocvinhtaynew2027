@@ -986,6 +986,59 @@ export default function CheckoutApprovalPanel({
           .eq('id', req.id);
 
         if (updateErr) throw new Error(updateErr.message);
+
+        // 4b. Defense-in-depth: if a legacy trigger on `worker_registrations` re-inserted a zombie
+        // worker row when `status` changed to 'approved', purge it immediately and re-release bed.
+        const cleanPostName = (req.ho_va_ten || '').trim().replace(/\s+/g, ' ').replace(/[%_]/g, '');
+        if (cleanPostName) {
+          const postSinceIso = new Date(Date.now() - 25_000).toISOString();
+          const { data: postSpawned } = await supabase
+            .from('workers')
+            .select('id, ho_va_ten, ma_nv, cccd, so_dien_thoai, ktx, day, phong_so')
+            .ilike('ho_va_ten', `%${cleanPostName}%`)
+            .gte('created_at', postSinceIso)
+            .limit(20);
+
+          const zombieIds = (postSpawned || [])
+            .filter((w: any) =>
+              w?.id &&
+              isMatchingRow({
+                id: String(w.id),
+                hoVaTen: w.ho_va_ten,
+                maNV: w.ma_nv,
+                cccd: w.cccd,
+                ktx: w.ktx,
+                day: w.day,
+                phongSo: w.phong_so,
+                soDienThoai: w.so_dien_thoai,
+              })
+            )
+            .map((w: any) => String(w.id));
+
+          if (zombieIds.length > 0) {
+            console.warn(
+              '[CheckoutApproval] Phát hiện trigger CSDL cũ tự tạo lại công nhân sau khi đổi status=approved. Đang xóa ngay:',
+              zombieIds
+            );
+            const { data: delZombies } = await supabase
+              .from('workers')
+              .delete()
+              .in('id', zombieIds)
+              .select('id');
+            const removedZombies = (delZombies || []).map((r: any) => String(r.id)).filter(Boolean);
+            if (removedZombies.length > 0) {
+              actuallyDeletedIds = Array.from(new Set([...actuallyDeletedIds, ...removedZombies]));
+              await releaseBedByLocation(supabase, {
+                workerIds: removedZombies,
+                bedId: targetBedRow?.id || null,
+                ktx: reqKtx,
+                day: reqDay,
+                phongSo: req.phong_so,
+                giuong: req.giuong,
+              });
+            }
+          }
+        }
       }
 
       // 5. Strict post-delete integrity check + idempotent WORKER_HARD_DELETE audit tombstone

@@ -1295,6 +1295,49 @@ export default function QRPortalClient() {
 
       if (updateErr) throw new Error(updateErr.message);
 
+      // 2b. Defense-in-depth: detect & purge any rogue duplicate row spawned by a legacy
+      // DB trigger on `worker_registrations` when `status` flips to 'approved' (different UUID).
+      try {
+        const cleanRegName = (regToApprove.ho_va_ten || '').trim().replace(/\s+/g, ' ');
+        const safeNameToken = cleanRegName.replace(/[%_]/g, '');
+        if (safeNameToken) {
+          const recentSinceIso = new Date(Date.now() - 25_000).toISOString();
+          const { data: recentSameName } = await supabase
+            .from('workers')
+            .select('id, ho_va_ten, ktx, day, phong_so, cccd, created_at')
+            .ilike('ho_va_ten', `%${safeNameToken}%`)
+            .gte('created_at', recentSinceIso)
+            .limit(10);
+
+          const normRegName = cleanRegName.normalize('NFC').toLowerCase();
+          const normRegKtx = ktxVal.replace(/[\s\-_.]+/g, '').toLowerCase();
+          const normRegRoom = normalizeRoomLabel(roomVal);
+          const rogueDuplicateIds = (recentSameName || [])
+            .filter((r: any) => {
+              if (!r?.id || String(r.id) === workerId) return false;
+              const rName = String(r.ho_va_ten || '').normalize('NFC').trim().replace(/\s+/g, ' ').toLowerCase();
+              const rKtx = String(r.ktx || '').replace(/[\s\-_.]+/g, '').toLowerCase();
+              const rRoom = normalizeRoomLabel(String(r.phong_so || ''));
+              return (
+                rName === normRegName &&
+                (!normRegKtx || !rKtx || rKtx === normRegKtx) &&
+                (!normRegRoom || !rRoom || rRoom === normRegRoom)
+              );
+            })
+            .map((r: any) => String(r.id));
+
+          if (rogueDuplicateIds.length > 0) {
+            console.warn(
+              '[QRPortal] Phát hiện trigger CSDL cũ tự nhân bản công nhân khi duyệt worker_registrations. Đang tự dọn bản ghi trùng:',
+              rogueDuplicateIds
+            );
+            await supabase.from('workers').delete().in('id', rogueDuplicateIds);
+          }
+        }
+      } catch (sweepErr) {
+        console.warn('[QRPortal] Duplicate-trigger sweep warning:', sweepErr);
+      }
+
       // 3. Sync bed assignment into `beds` table so Bed Management updates immediately
       await syncBedForWorkerSave(supabase, undefined, {
         id: workerId,
@@ -1366,6 +1409,7 @@ export default function QRPortalClient() {
     regToApprove: WorkerRegistration,
     tamTruStatus: 'registered' | 'unregistered' = 'unregistered'
   ) => {
+    if (processing) return;
     setProcessing(regToApprove.id);
     try {
       await approveSingleRegistration(regToApprove, tamTruStatus);
