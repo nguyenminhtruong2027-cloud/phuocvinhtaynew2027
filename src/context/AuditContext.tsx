@@ -28,7 +28,8 @@ export type AuditAction =
   | 'ATTENDANCE_SESSION'
   | 'ATTENDANCE_UPDATE'
   | 'USER_PASSWORD_RESET'
-  | 'WORKER_HARD_DELETE';
+  | 'WORKER_HARD_DELETE'
+  | 'AUDIT_ARCHIVE_PURGE';
 
 export interface AuditEntry {
   id: string;
@@ -42,16 +43,20 @@ import { dedupeById } from '@/lib/dedupe';
 
 export interface AuditFilterParams {
   account?: string;
+  accounts?: string[];
   action?: string;
+  actions?: string[];
   keyword?: string;
   dateFrom?: string;
   dateTo?: string;
+  limit?: number;
 }
 
 interface AuditContextValue {
   logs: AuditEntry[];
   totalLogCount: number;
   addLog: (account: string, action: AuditAction, detail: string) => void;
+  prependRealtimeEntry: (entry: AuditEntry) => void;
   loading: boolean;
   refetchLogs: () => Promise<void>;
   fetchLogsPage: (page: number, pageSize: number) => Promise<{ entries: AuditEntry[]; total: number }>;
@@ -136,14 +141,20 @@ export function AuditProvider({ children }: { children: React.ReactNode }) {
         .from('audit_logs')
         .select('*')
         .order('timestamp', { ascending: false })
-        .limit(2000);
+        .limit(Math.min(Math.max(filters.limit ?? 2000, 100), 5000));
 
-      if (filters.account) {
+      if (filters.accounts && filters.accounts.length > 0) {
+        query = query.in('account', filters.accounts);
+      } else if (filters.account) {
         query = query.eq('account', filters.account);
       }
-      if (filters.action) {
+
+      if (filters.actions && filters.actions.length > 0) {
+        query = query.in('action', filters.actions);
+      } else if (filters.action) {
         query = query.eq('action', filters.action);
       }
+
       if (filters.dateFrom) {
         const fromIso = new Date(`${filters.dateFrom}T00:00:00+07:00`).toISOString();
         query = query.gte('timestamp', fromIso);
@@ -187,6 +198,15 @@ export function AuditProvider({ children }: { children: React.ReactNode }) {
     fetchLogs();
   }, [authLoading, shouldLoadAudit, fetchLogs]);
 
+  const prependRealtimeEntry = useCallback((entry: AuditEntry) => {
+    if (!entry?.id) return;
+    setLogs(prev => {
+      if (prev.some(item => item.id === entry.id)) return prev;
+      return [entry, ...prev].slice(0, 600);
+    });
+    setTotalLogCount(prev => prev + 1);
+  }, []);
+
   const addLog = useCallback(async (account: string, action: AuditAction, detail: string) => {
     const entry: AuditEntry = {
       id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -212,7 +232,18 @@ export function AuditProvider({ children }: { children: React.ReactNode }) {
   }, [supabase]);
 
   return (
-    <AuditContext.Provider value={{ logs, totalLogCount, addLog, loading, refetchLogs: fetchLogs, fetchLogsPage, fetchFilteredLogs }}>
+    <AuditContext.Provider
+      value={{
+        logs,
+        totalLogCount,
+        addLog,
+        prependRealtimeEntry,
+        loading,
+        refetchLogs: fetchLogs,
+        fetchLogsPage,
+        fetchFilteredLogs,
+      }}
+    >
       {children}
     </AuditContext.Provider>
   );
