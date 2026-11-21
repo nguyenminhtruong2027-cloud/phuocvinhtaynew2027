@@ -1,5 +1,6 @@
 'use client';
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Worker, calcSoNgay } from '@/data/workers';
 import {
   X,
@@ -21,6 +22,7 @@ import {
   Printer,
   CheckCircle2,
   Clock,
+  Box,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { escapeHtml, printHtmlViaIframe } from '@/lib/printHtml';
@@ -85,6 +87,7 @@ function formatHistoryTime(iso: string): string {
 }
 
 export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete, canEdit = true }: Props) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<'info' | 'history'>('info');
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -587,21 +590,39 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-bdr bg-act/30 flex justify-end gap-2">
-          <button onClick={onClose} className="btn-secondary text-xs">
-            Đóng
-          </button>
-          {canEdit ? (
-            <button onClick={() => onEdit(w)} className="btn-glow-primary px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer">
-              <Pencil size={13} />
-              <span>Chỉnh sửa</span>
+        <div className="px-5 py-3 border-t border-bdr bg-act/30 flex items-center justify-between gap-2">
+          <div>
+            {w.ktx && w.day && w.phongSo && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  router.push(`/ktx-3d?worker=${encodeURIComponent(w.id)}`);
+                }}
+                title="Mở vị trí giường của công nhân này trên Bản Đồ 3D"
+                className="btn-secondary text-xs flex items-center gap-1.5 text-lnk"
+              >
+                <Box size={13} />
+                <span>Xem 3D</span>
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="btn-secondary text-xs">
+              Đóng
             </button>
-          ) : (
-            <button disabled className="btn-primary text-xs opacity-40 cursor-not-allowed">
-              <Pencil size={13} />
-              <span>Chỉ xem</span>
-            </button>
-          )}
+            {canEdit ? (
+              <button onClick={() => onEdit(w)} className="btn-glow-primary px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer">
+                <Pencil size={13} />
+                <span>Chỉnh sửa</span>
+              </button>
+            ) : (
+              <button disabled className="btn-primary text-xs opacity-40 cursor-not-allowed">
+                <Pencil size={13} />
+                <span>Chỉ xem</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

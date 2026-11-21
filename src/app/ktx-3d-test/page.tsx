@@ -1,74 +1,36 @@
 'use client';
 
-import React from 'react';
-import dynamic from 'next/dynamic';
-import Link from 'next/link';
-import { AlertTriangle, ArrowLeft, Loader2 } from 'lucide-react';
+import React, { Suspense, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Loader2 } from 'lucide-react';
 
-// Strictly code-split Three.js bundle: only downloaded when visiting /ktx-3d-test
-const Ktx3DTestClient = dynamic(() => import('./components/Ktx3DTestClient'), {
-  ssr: false,
-  loading: () => (
-    <div className="w-full h-[calc(100vh-3.5rem)] lg:h-screen flex flex-col items-center justify-center gap-3 bg-[#0b1220] text-slate-300">
-      <Loader2 size={28} className="animate-spin text-blue-400" />
-      <p className="text-sm font-semibold">Đang khởi tạo bộ máy 3D...</p>
-      <p className="text-xs text-slate-400">Chế độ thử nghiệm độc lập · Không ảnh hưởng dữ liệu</p>
-    </div>
-  ),
-});
+function Legacy3DRedirectInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
-interface BoundaryState {
-  hasError: boolean;
-  message: string;
-}
+  useEffect(() => {
+    const qs = searchParams.toString();
+    router.replace(qs ? `/ktx-3d?${qs}` : '/ktx-3d');
+  }, [router, searchParams]);
 
-class SandboxErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  BoundaryState
-> {
-  constructor(props: { children: React.ReactNode }) {
-    super(props);
-    this.state = { hasError: false, message: '' };
-  }
-
-  static getDerivedStateFromError(error: Error): BoundaryState {
-    return {
-      hasError: true,
-      message: error?.message || 'Lỗi khởi tạo không gian 3D.',
-    };
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="w-full h-[calc(100vh-3.5rem)] lg:h-screen flex items-center justify-center p-6 bg-[#0b1220]">
-          <div className="max-w-md rounded-2xl bg-slate-900 border border-slate-700 p-6 text-center space-y-3 text-slate-100">
-            <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-400/35 text-amber-300 flex items-center justify-center mx-auto">
-              <AlertTriangle size={24} />
-            </div>
-            <h2 className="text-base font-bold">Không thể hiển thị bản test 3D</h2>
-            <p className="text-xs text-slate-400 leading-relaxed">{this.state.message}</p>
-            <div className="pt-2">
-              <Link
-                href="/"
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors"
-              >
-                <ArrowLeft size={14} />
-                <span>Quay lại Tổng Quan 2D</span>
-              </Link>
-            </div>
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
-export default function Ktx3DTestPage() {
   return (
-    <SandboxErrorBoundary>
-      <Ktx3DTestClient />
-    </SandboxErrorBoundary>
+    <div className="w-full h-[calc(100vh-3.5rem)] lg:h-screen flex flex-col items-center justify-center gap-3 bg-[#0b1220] text-slate-300">
+      <Loader2 size={24} className="animate-spin text-blue-400" />
+      <p className="text-xs font-semibold">Đang chuyển sang Bản Đồ 3D chính thức...</p>
+    </div>
+  );
+}
+
+export default function Ktx3DTestRedirectPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="w-full h-[calc(100vh-3.5rem)] lg:h-screen flex items-center justify-center bg-[#0b1220] text-slate-300">
+          <Loader2 size={24} className="animate-spin text-blue-400" />
+        </div>
+      }
+    >
+      <Legacy3DRedirectInner />
+    </Suspense>
   );
 }

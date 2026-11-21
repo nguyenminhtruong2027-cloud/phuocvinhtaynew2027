@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import Link from 'next/link';
 import {
-  BedDouble, RefreshCw, Search, X, User, UserCheck, UserX,
+  BedDouble, RefreshCw, Search, X, User, UserCheck, UserX, Box,
   ArrowRightLeft, Loader2, Building2, Phone, Briefcase, VenusAndMars,
   AlertCircle, LayoutGrid, Table2, BarChart3, Wrench, DoorOpen, Calendar,
   ExternalLink, UserPlus, CheckCircle2, Printer, Lock, Download,
@@ -1728,9 +1729,19 @@ export default function BedManagementClient() {
                               </span>
                             )}
                           </div>
-                          <span className="text-xs font-tabular font-extrabold text-tx shrink-0">
-                            {g.occupied}/{g.cap} giường
-                          </span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Link
+                              href={`/ktx-3d?ktx=${encodeURIComponent(g.ktx)}&day=${encodeURIComponent(g.day)}&room=${encodeURIComponent(g.room)}`}
+                              title="Mở sơ đồ giường tầng 3D của phòng này"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-act hover:bg-pri/15 text-lnk border border-bdr2 text-[11px] font-bold transition-colors"
+                            >
+                              <Box size={11} />
+                              <span>3D</span>
+                            </Link>
+                            <span className="text-xs font-tabular font-extrabold text-tx">
+                              {g.occupied}/{g.cap} giường
+                            </span>
+                          </div>
                         </div>
                         <div className="w-full h-1.5 bg-bdr2 rounded-full overflow-hidden mb-3">
                           <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(pct * 100, 100)}%` }} />

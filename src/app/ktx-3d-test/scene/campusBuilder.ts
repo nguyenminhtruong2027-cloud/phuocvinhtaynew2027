@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type {
+  CampusBuildingNode,
   CampusColorMode,
   CampusKtxNode,
   CampusRoomNode,
@@ -27,14 +28,25 @@ export interface RoomVisualHandle {
   worldCenter: THREE.Vector3;
 }
 
+export interface BuildingVisualHandle {
+  building: CampusBuildingNode;
+  worldCenter: THREE.Vector3;
+  radius: number;
+  builtX: number;
+  builtZ: number;
+  builtRotationDeg: number;
+}
+
 export interface CampusBuildResult {
   group: THREE.Group;
   roofsGroup: THREE.Group;
   functionalGroup: THREE.Group;
   hitTargets: THREE.Object3D[];
   functionalHitTargets: THREE.Object3D[];
+  buildingHitTargets: THREE.Object3D[];
   roomVisuals: Map<string, RoomVisualHandle>;
   functionalLookup: Map<string, FunctionalAreaNode>;
+  buildingVisuals: Map<string, BuildingVisualHandle>;
   boundsCenter: THREE.Vector3;
   boundsRadius: number;
 }
@@ -69,13 +81,18 @@ export function resolveRoomColor(
   room: CampusRoomNode,
   mode: CampusColorMode,
   unitFilter: UnitXRayFilter | null,
-  theme: SceneTheme
+  theme: SceneTheme,
+  assignedOnly = false
 ): { color: number; emissive: number; emissiveIntensity: number; opacity: number } {
   const isOverloaded = room.occupied > room.capacity;
   const isFull = room.occupied >= room.capacity && room.capacity > 0;
   const isEmpty = room.occupied === 0;
   const ghostColor = theme === 'light' ? PALETTE.ghostLight : PALETTE.ghostDark;
   const ghostOpacity = theme === 'light' ? 0.28 : 0.22;
+
+  if (assignedOnly && !room.hasWriteAccess) {
+    return { color: ghostColor, emissive: 0x000000, emissiveIntensity: 0, opacity: ghostOpacity };
+  }
 
   if (mode === 'unit_xray' && unitFilter) {
     const matchCount = getRoomUnitMatchCount(room, unitFilter);
@@ -89,6 +106,20 @@ export function resolveRoomColor(
       };
     }
     return { color: ghostColor, emissive: 0x000000, emissiveIntensity: 0, opacity: ghostOpacity };
+  }
+
+  if (mode === 'tam_tru') {
+    if (isEmpty) {
+      return { color: ghostColor, emissive: 0x000000, emissiveIntensity: 0, opacity: 0.45 };
+    }
+    if (room.unregisteredTamTruCount === 0) {
+      return { color: PALETTE.available, emissive: 0x047857, emissiveIntensity: 0.14, opacity: 1 };
+    }
+    const unregRatio = room.unregisteredTamTruCount / Math.max(1, room.occupied);
+    if (unregRatio >= 0.5) {
+      return { color: PALETTE.overloaded, emissive: 0xe11d48, emissiveIntensity: 0.34, opacity: 1 };
+    }
+    return { color: PALETTE.full, emissive: 0xb45309, emissiveIntensity: 0.24, opacity: 1 };
   }
 
   if (mode === 'vacant_only') {
@@ -147,10 +178,11 @@ export function applyCampusColorMode(
   hoveredKey: string | null,
   focusedKey: string | null,
   unitFilter: UnitXRayFilter | null,
-  theme: SceneTheme
+  theme: SceneTheme,
+  assignedOnly = false
 ): void {
   roomVisuals.forEach((handle, key) => {
-    const spec = resolveRoomColor(handle.room, mode, unitFilter, theme);
+    const spec = resolveRoomColor(handle.room, mode, unitFilter, theme, assignedOnly);
     const isHovered = key === hoveredKey;
     const isFocused = key === focusedKey;
 
@@ -241,7 +273,8 @@ export function buildCampusScene(
   theme: SceneTheme,
   maxAnisotropy: number,
   castShadows: boolean,
-  blueprint: CampusBlueprintConfig = CAMPUS_BLUEPRINT_CONFIG
+  blueprint: CampusBlueprintConfig = CAMPUS_BLUEPRINT_CONFIG,
+  assignedOnly = false
 ): CampusBuildResult {
   const group = new THREE.Group();
   group.name = 'ktx-campus-root';
@@ -257,8 +290,10 @@ export function buildCampusScene(
 
   const hitTargets: THREE.Object3D[] = [];
   const functionalHitTargets: THREE.Object3D[] = [];
+  const buildingHitTargets: THREE.Object3D[] = [];
   const roomVisuals = new Map<string, RoomVisualHandle>();
   const functionalLookup = new Map<string, FunctionalAreaNode>();
+  const buildingVisuals = new Map<string, BuildingVisualHandle>();
   const plaqueTexCache = new Map<string, THREE.CanvasTexture>();
   const roomPlaqueMatCache = new Map<string, THREE.MeshStandardMaterial>();
   const isLight = theme === 'light';
@@ -342,13 +377,22 @@ export function buildCampusScene(
   const doorGeo = new THREE.BoxGeometry(0.68, 1.55, 0.08);
   const stripGeo = new THREE.BoxGeometry(ROOM_W - 0.12, 0.12, 0.14);
   const pillarGeo = new THREE.CylinderGeometry(0.08, 0.09, ROOM_H + 0.15, 8);
-  const roomPlaqueGeo = new THREE.PlaneGeometry(1.15, 0.46);
+  const roomPlaqueGeo = new THREE.PlaneGeometry(1.42, 0.62);
   const postGeo = new THREE.CylinderGeometry(0.1, 0.11, 1.6, 8);
+
+  const FUNC_W = 2.8;
+  const FUNC_D = 2.5;
+  const FUNC_H = 2.05;
+  const FUNC_GAP_X = 0.55;
+  const FUNC_GAP_Z = 0.85;
 
   interface ZoneLayout {
     node: CampusKtxNode;
     width: number;
     depth: number;
+    funcApron: number;
+    funcCols: number;
+    funcRows: number;
   }
 
   const zoneLayouts: ZoneLayout[] = ktxNodes.map(ktxNode => {
@@ -357,20 +401,29 @@ export function buildCampusScene(
       ...ktxNode.buildings.map(b => {
         const bp = findBuildingBlueprint(blueprint, ktxNode.ktx, b.day);
         const floors = Math.max(1, bp?.floors || blueprint.defaultFloors || 1);
-        const perFloor = bp?.roomsPerFloor || Math.ceil(Math.max(1, b.rooms.length) / floors);
-        return Math.max(1, perFloor);
+        const accPerFloor = bp?.roomsPerFloor || Math.ceil(Math.max(1, b.rooms.length) / floors);
+        const attachedCount = b.functionalAreas?.length || 0;
+        return Math.max(1, accPerFloor + attachedCount);
       })
     );
     const maxBuildingW = maxRoomsInRow * (ROOM_W + ROOM_GAP) + 1.2;
-    const funcApron = ktxNode.functionalAreas.length > 0 ? 4.4 : 0;
+    const zoneW = Math.max(12, maxBuildingW + KTX_PAD_X * 2);
+    const funcCount = ktxNode.functionalAreas.length;
+    const funcCols = Math.max(1, Math.floor((zoneW - 3.6) / (FUNC_W + FUNC_GAP_X)));
+    const funcRows = funcCount > 0 ? Math.ceil(funcCount / funcCols) : 0;
+    const funcApron = funcRows > 0 ? funcRows * (FUNC_D + FUNC_GAP_Z) + 1.4 : 0;
+
     const totalDepth =
       ktxNode.buildings.length * (ROOM_D + CORRIDOR_D) +
       Math.max(0, ktxNode.buildings.length - 1) * BUILDING_GAP_Z +
       funcApron;
     return {
       node: ktxNode,
-      width: maxBuildingW + KTX_PAD_X * 2,
+      width: zoneW,
       depth: Math.max(10, totalDepth + KTX_PAD_Z * 2),
+      funcApron,
+      funcCols,
+      funcRows,
     };
   });
 
@@ -502,7 +555,7 @@ export function buildCampusScene(
 
     // ── 3. Build Accommodation Buildings (Supports Multi-Floor Blueprint Overrides!) ──
     const buildings = zl.node.buildings;
-    const funcApron = zl.node.functionalAreas.length > 0 ? 4.4 : 0;
+    const funcApron = zl.funcApron;
     const totalBldSpanZ =
       buildings.length * (ROOM_D + CORRIDOR_D) +
       Math.max(0, buildings.length - 1) * BUILDING_GAP_Z;
@@ -511,8 +564,10 @@ export function buildCampusScene(
     buildings.forEach(building => {
       const bp = findBuildingBlueprint(blueprint, zl.node.ktx, building.day);
       const floors = Math.max(1, bp?.floors || blueprint.defaultFloors || 1);
-      const roomsPerFloor = bp?.roomsPerFloor || Math.ceil(Math.max(1, building.rooms.length) / floors);
-      const rowRoomCount = Math.max(1, roomsPerFloor);
+      const accPerFloor =
+        bp?.roomsPerFloor || Math.ceil(Math.max(1, building.rooms.length) / floors);
+      const attachedFuncs = building.functionalAreas || [];
+      const rowRoomCount = Math.max(1, accPerFloor + attachedFuncs.length);
 
       const bldW = rowRoomCount * (ROOM_W + ROOM_GAP) + 0.8;
       const bldTotalD = ROOM_D + CORRIDOR_D;
@@ -521,7 +576,8 @@ export function buildCampusScene(
 
       const bldWorldX = blueprint.mode === 'blueprint' && bp ? bp.x : zoneCenterX;
       const bldWorldZ = blueprint.mode === 'blueprint' && bp ? bp.z : zoneCenterZ + bldCenterZLocal;
-      const bldRotY = THREE.MathUtils.degToRad(bp?.rotationDeg || 0);
+      const bldRotDeg = bp?.rotationDeg || 0;
+      const bldRotY = THREE.MathUtils.degToRad(bldRotDeg);
       const bldBaseY = plinthH + 0.02;
 
       const bldGroup = new THREE.Group();
@@ -632,15 +688,16 @@ export function buildCampusScene(
 
       roofsGroup.add(bldRoofGroup);
 
-      // Dual-end building signboards (left AND right gable ends)
+      // Dual-end clickable building signboards (left AND right gable ends -> click to frame building!)
+      const bldVacant = Math.max(0, building.totalCapacity - building.totalOccupied);
       const bldSignTex = createPlaqueTexture(
         building.day,
         {
-          subtext: `${building.totalOccupied}/${building.totalCapacity}${floors > 1 ? ` · ${floors}T` : ''}`,
+          subtext: `${building.totalOccupied}/${building.totalCapacity} · Trống ${bldVacant}${floors > 1 ? ` · ${floors}T` : ''}`,
           bg: '#0f172a',
           border: '#10b981',
-          width: 256,
-          height: 96,
+          width: 300,
+          height: 104,
           fontSize: 34,
           maxAnisotropy,
         },
@@ -651,26 +708,39 @@ export function buildCampusScene(
         roughness: 0.35,
         metalness: 0.1,
       });
-      const bldSignGeo = new THREE.PlaneGeometry(2.2, 0.82);
+      const bldSignGeo = new THREE.PlaneGeometry(2.5, 0.9);
 
       const bldSignLeft = new THREE.Mesh(bldSignGeo, bldSignMat);
       bldSignLeft.position.set(-bldW / 2 - 0.24, deckH + ROOM_H * 0.62, 0);
       bldSignLeft.rotation.y = -Math.PI / 2;
+      bldSignLeft.userData = { type: 'building', buildingKey: building.key };
       bldGroup.add(bldSignLeft);
+      buildingHitTargets.push(bldSignLeft);
 
       const bldSignRight = new THREE.Mesh(bldSignGeo, bldSignMat);
       bldSignRight.position.set(bldW / 2 + (floors > 1 ? 1.38 : 0.24), deckH + ROOM_H * 0.62, 0);
       bldSignRight.rotation.y = Math.PI / 2;
+      bldSignRight.userData = { type: 'building', buildingKey: building.key };
       bldGroup.add(bldSignRight);
+      buildingHitTargets.push(bldSignRight);
+
+      buildingVisuals.set(building.key, {
+        building,
+        worldCenter: new THREE.Vector3(bldWorldX, bldBaseY + (floors * storyStep) * 0.45, bldWorldZ),
+        radius: Math.max(7.5, Math.hypot(bldW / 2, bldTotalD / 2) * 1.1),
+        builtX: Math.round(bldWorldX * 10) / 10,
+        builtZ: Math.round(bldWorldZ * 10) / 10,
+        builtRotationDeg: bldRotDeg,
+      });
 
       // Build Interactive Room Units across floor(s)
       building.rooms.forEach((room, rIdx) => {
-        const floorIdx = Math.min(floors - 1, Math.floor(rIdx / rowRoomCount));
-        const colIdx = rIdx % rowRoomCount;
+        const floorIdx = Math.min(floors - 1, Math.floor(rIdx / Math.max(1, accPerFloor)));
+        const colIdx = rIdx % Math.max(1, accPerFloor);
         const rx = startRoomX + colIdx * (ROOM_W + ROOM_GAP);
         const floorBaseY = deckH + floorIdx * storyStep;
 
-        const spec = resolveRoomColor(room, colorMode, unitFilter, theme);
+        const spec = resolveRoomColor(room, colorMode, unitFilter, theme, assignedOnly);
 
         const bodyMat = new THREE.MeshStandardMaterial({
           color: spec.color,
@@ -716,17 +786,20 @@ export function buildCampusScene(
         strip.position.set(rx, floorBaseY + ROOM_H - 0.16, roomZLocal + ROOM_D / 2 + 0.06);
         bldGroup.add(strip);
 
-        // Deduplicated room number plaque (placed on room top/lintel so it remains visible even when roofs are hidden!)
-        let plaqueMat = roomPlaqueMatCache.get(room.roomLabel);
+        // Deduplicated 2-line room plaque: Room label + direct occupancy ratio (e.g. P.5 / 6/8)
+        const ratioText = `${room.occupied}/${room.capacity}`;
+        const plaqueCacheKey = `${room.roomLabel}|${ratioText}`;
+        let plaqueMat = roomPlaqueMatCache.get(plaqueCacheKey);
         if (!plaqueMat) {
           const rPlaqueTex = createPlaqueTexture(
             room.roomLabel,
             {
+              subtext: ratioText,
               bg: '#0b1220',
-              border: '#475569',
-              width: 160,
-              height: 64,
-              fontSize: 32,
+              border: room.overflow > 0 ? '#f43f5e' : room.vacant > 0 ? '#10b981' : '#f59e0b',
+              width: 192,
+              height: 88,
+              fontSize: 30,
               maxAnisotropy,
             },
             plaqueTexCache
@@ -736,10 +809,10 @@ export function buildCampusScene(
             roughness: 0.4,
             metalness: 0.1,
           });
-          roomPlaqueMatCache.set(room.roomLabel, plaqueMat);
+          roomPlaqueMatCache.set(plaqueCacheKey, plaqueMat);
         }
         const rPlaque = new THREE.Mesh(roomPlaqueGeo, plaqueMat);
-        rPlaque.position.set(rx, floorBaseY + ROOM_H + 0.05, roomZLocal + ROOM_D / 2 + 0.36);
+        rPlaque.position.set(rx, floorBaseY + ROOM_H + 0.08, roomZLocal + ROOM_D / 2 + 0.38);
         rPlaque.rotation.x = -0.55;
         bldGroup.add(rPlaque);
 
@@ -754,22 +827,89 @@ export function buildCampusScene(
           worldCenter,
         });
       });
+
+      // Build Building-Attached Functional Rooms seamlessly on Floor 0 inside this building!
+      if (attachedFuncs.length > 0) {
+        const bldFuncGroup = new THREE.Group();
+        bldFuncGroup.position.set(bldWorldX, bldBaseY, bldWorldZ);
+        bldFuncGroup.rotation.y = bldRotY;
+
+        const pushFuncLocal = (list: THREE.Matrix4[], x: number, y: number, z: number) => {
+          _tmpObj.position.set(x, y, z);
+          _tmpObj.rotation.set(0, 0, 0);
+          _tmpObj.scale.setScalar(1);
+          _tmpObj.updateMatrix();
+          _localMat.multiplyMatrices(_bldMatWorld, _tmpObj.matrix);
+          list.push(_localMat.clone());
+        };
+
+        attachedFuncs.forEach((fNode, fIdx) => {
+          const colIdx = accPerFloor + fIdx;
+          const fx = startRoomX + colIdx * (ROOM_W + ROOM_GAP);
+          const floorBaseY = deckH;
+
+          const fBody = new THREE.Mesh(roomBodyGeo, functionalMat);
+          fBody.position.set(fx, floorBaseY + ROOM_H / 2, roomZLocal);
+          fBody.castShadow = castShadows;
+          fBody.receiveShadow = true;
+          fBody.userData = { type: 'functional', functionalKey: fNode.key };
+          bldFuncGroup.add(fBody);
+          functionalHitTargets.push(fBody);
+          functionalLookup.set(fNode.key, fNode);
+
+          // Front door & windows aligned seamlessly with building facade
+          pushFuncLocal(doorMatrices, fx - 0.56, floorBaseY + 0.78, roomZLocal + ROOM_D / 2 + 0.02);
+          pushFuncLocal(windowMatrices, fx + 0.48, floorBaseY + 1.32, roomZLocal + ROOM_D / 2 + 0.02);
+          pushFuncLocal(windowMatrices, fx, floorBaseY + 1.32, roomZLocal - ROOM_D / 2 - 0.02);
+
+          // Violet accent strip on upper facade
+          const fStrip = new THREE.Mesh(stripGeo, functionalRoofMat);
+          fStrip.position.set(fx, floorBaseY + ROOM_H - 0.16, roomZLocal + ROOM_D / 2 + 0.06);
+          bldFuncGroup.add(fStrip);
+
+          // Angled facade plaque matching the building's room plaques
+          const fTex = createPlaqueTexture(
+            fNode.name.slice(0, 18),
+            {
+              subtext: `${building.day} · Khu CN`,
+              bg: '#1e1b4b',
+              border: '#a78bfa',
+              width: 240,
+              height: 88,
+              fontSize: 24,
+              maxAnisotropy,
+            },
+            plaqueTexCache
+          );
+          const fPlaque = new THREE.Mesh(
+            new THREE.PlaneGeometry(2.15, 0.74),
+            new THREE.MeshStandardMaterial({ map: fTex, roughness: 0.35 })
+          );
+          fPlaque.position.set(fx, floorBaseY + ROOM_H + 0.1, roomZLocal + ROOM_D / 2 + 0.38);
+          fPlaque.rotation.x = -0.55;
+          bldFuncGroup.add(fPlaque);
+        });
+
+        functionalGroup.add(bldFuncGroup);
+      }
     });
 
-    // ── 4. Functional Areas Layer (Văn phòng, Nhà ăn, Bảo vệ, WC...) ──
+    // ── 4. Functional Areas Layer (Multi-Row Wrap — ZERO items ever truncated!) ──
     const funcList = zl.node.functionalAreas || [];
     if (funcList.length > 0) {
-      const FUNC_W = 2.8;
-      const FUNC_D = 2.5;
-      const FUNC_H = 2.05;
-      const FUNC_GAP = 0.55;
-      const maxCols = Math.max(1, Math.floor((zl.width - 4) / (FUNC_W + FUNC_GAP)));
-      const displayFuncs = funcList.slice(0, maxCols);
-      const startFX = -((displayFuncs.length - 1) * (FUNC_W + FUNC_GAP)) / 2;
-      const fz = zoneCenterZ + zl.depth / 2 - 2.6;
+      const cols = Math.max(1, zl.funcCols);
+      const rows = Math.max(1, zl.funcRows);
+      const totalFuncD = rows * (FUNC_D + FUNC_GAP_Z) - FUNC_GAP_Z;
+      const funcBlockStartZ = zoneCenterZ + zl.depth / 2 - KTX_PAD_Z - totalFuncD + FUNC_D / 2;
 
-      displayFuncs.forEach((fNode, idx) => {
-        const fx = zoneCenterX + startFX + idx * (FUNC_W + FUNC_GAP);
+      funcList.forEach((fNode, idx) => {
+        const r = Math.floor(idx / cols);
+        const c = idx % cols;
+        const rowItemCount = Math.min(cols, funcList.length - r * cols);
+        const startFX = -((rowItemCount - 1) * (FUNC_W + FUNC_GAP_X)) / 2;
+        const fx = zoneCenterX + startFX + c * (FUNC_W + FUNC_GAP_X);
+        const fz = funcBlockStartZ + r * (FUNC_D + FUNC_GAP_Z);
+
         const fGroup = new THREE.Group();
         fGroup.position.set(fx, plinthH + 0.02, fz);
 
@@ -940,8 +1080,10 @@ export function buildCampusScene(
     functionalGroup,
     hitTargets,
     functionalHitTargets,
+    buildingHitTargets,
     roomVisuals,
     functionalLookup,
+    buildingVisuals,
     boundsCenter,
     boundsRadius,
   };

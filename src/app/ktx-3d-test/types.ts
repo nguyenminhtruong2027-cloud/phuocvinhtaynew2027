@@ -9,13 +9,22 @@ export type CampusColorMode =
   | 'gender'
   | 'vacant_only'
   | 'overloaded_only'
+  | 'tam_tru'
   | 'unit_xray';
+
+export type AlertCategory =
+  | 'overloaded'
+  | 'mixed_gender'
+  | 'unregistered_tam_tru'
+  | 'unassigned_bed';
 
 export type SceneTheme = 'dark' | 'light';
 
 export type BedTierFilter = 'all' | 'bottom' | 'top';
 
 export type CameraPreset = 'overview' | 'top' | 'low' | 'left_row' | 'right_row';
+
+export type CameraNavMode = 'orbit' | 'pan';
 
 export interface UnitXRayFilter {
   type: 'platoon' | 'unit';
@@ -49,6 +58,9 @@ export interface CampusRoomNode {
   dominantUnit: string;
   platoonCounts: Record<string, number>;
   unitCounts: Record<string, number>;
+  unregisteredTamTruCount: number;
+  unassignedBedCount: number;
+  hasWriteAccess: boolean;
   facility: FacilityItem | null;
 }
 
@@ -57,8 +69,11 @@ export interface CampusBuildingNode {
   ktx: string;
   day: string;
   rooms: CampusRoomNode[];
+  functionalAreas: FunctionalAreaNode[];
   totalCapacity: number;
   totalOccupied: number;
+  unregisteredTamTruCount: number;
+  hasWriteAccess: boolean;
 }
 
 export interface CampusKtxNode {
@@ -88,12 +103,13 @@ export interface RoomBedSlot {
 }
 
 export interface HoverInfo {
-  type: 'room' | 'bed' | 'functional';
+  type: 'room' | 'bed' | 'functional' | 'building';
   screenX: number;
   screenY: number;
   room?: CampusRoomNode;
   bed?: RoomBedSlot;
   functional?: FunctionalAreaNode;
+  building?: CampusBuildingNode;
 }
 
 export interface RenderPerfStats {

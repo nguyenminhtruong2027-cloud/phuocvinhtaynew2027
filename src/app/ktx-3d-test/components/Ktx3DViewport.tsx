@@ -7,7 +7,9 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { AlertTriangle } from 'lucide-react';
 import type {
   BedTierFilter,
+  CameraNavMode,
   CameraPreset,
+  CampusBuildingNode,
   CampusColorMode,
   CampusKtxNode,
   CampusRoomNode,
@@ -22,6 +24,7 @@ import type {
 import {
   applyCampusColorMode,
   buildCampusScene,
+  type BuildingVisualHandle,
   type RoomVisualHandle,
 } from '../scene/campusBuilder';
 import {
@@ -29,20 +32,29 @@ import {
   buildRoomInteriorScene,
   type BedVisualHandle,
 } from '../scene/roomBuilder';
-import { CAMPUS_BLUEPRINT_CONFIG } from '../scene/campusLayoutConfig';
+import type { CampusBlueprintConfig } from '../scene/campusLayoutConfig';
 import { disposeObject3D } from '../scene/materials';
 
 export interface Ktx3DViewportHandle {
   captureSnapshot: () => string | null;
+  orbitStep: (deltaAzimuthDeg: number, deltaPolarDeg?: number) => void;
+  resetNorth: () => void;
+  getBuiltBuildingPositions: () => Record<
+    string,
+    { x: number; z: number; rotationDeg: number }
+  >;
 }
 
 interface Ktx3DViewportProps {
   viewLevel: ViewLevel;
   sceneTheme: SceneTheme;
   campusScopeKey: string;
+  navMode: CameraNavMode;
+  blueprintConfig: CampusBlueprintConfig;
   ktxNodes: CampusKtxNode[];
   colorMode: CampusColorMode;
   unitXRayFilter: UnitXRayFilter | null;
+  assignedOnlyFilter: boolean;
   focusedRoomKey: string | null;
   hideRoofs: boolean;
   showFunctionalRooms: boolean;
@@ -53,11 +65,14 @@ interface Ktx3DViewportProps {
   showBedNames: boolean;
   cameraPresetRequest: { preset: CameraPreset; seq: number } | null;
   focusRoomRequest: { roomKey: string; seq: number } | null;
+  focusBuildingRequest: { buildingKey: string; seq: number } | null;
   focusBedRequest: { bedId: string; seq: number } | null;
   zoomRequest: { factor: number; seq: number } | null;
   onSelectRoom: (room: CampusRoomNode) => void;
+  onSelectBuilding?: (building: CampusBuildingNode) => void;
   onSelectBed: (bed: RoomBedSlot | null) => void;
   onHoverChange: (info: HoverInfo | null) => void;
+  onCompassHeadingChange?: (deg: number) => void;
   onPerfStats?: (stats: RenderPerfStats) => void;
 }
 
@@ -66,6 +81,12 @@ const _pointerNdc = new THREE.Vector2();
 const _desiredCamPos = new THREE.Vector3();
 const _desiredTarget = new THREE.Vector3();
 const _offsetVec = new THREE.Vector3();
+const _spherical = new THREE.Spherical();
+const _fwdVec = new THREE.Vector3();
+const _rightVec = new THREE.Vector3();
+const _upVec = new THREE.Vector3(0, 1, 0);
+const _groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const _groundHit = new THREE.Vector3();
 
 function detectSoftwareWebGL(): { supported: boolean; isSoftwareGl: boolean } {
   if (typeof document === 'undefined') return { supported: false, isSoftwareGl: true };
@@ -136,9 +157,12 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     viewLevel,
     sceneTheme,
     campusScopeKey,
+    navMode,
+    blueprintConfig,
     ktxNodes,
     colorMode,
     unitXRayFilter,
+    assignedOnlyFilter,
     focusedRoomKey,
     hideRoofs,
     showFunctionalRooms,
@@ -149,26 +173,47 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     showBedNames,
     cameraPresetRequest,
     focusRoomRequest,
+    focusBuildingRequest,
     focusBedRequest,
     zoomRequest,
     onSelectRoom,
+    onSelectBuilding,
     onSelectBed,
     onHoverChange,
+    onCompassHeadingChange,
     onPerfStats,
   },
   ref
 ) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [webglUnsupported, setWebglUnsupported] = useState(false);
+  const [contextLost, setContextLost] = useState(false);
+  const [restoreSeq, setRestoreSeq] = useState(0);
 
-  const callbacksRef = useRef({ onSelectRoom, onSelectBed, onHoverChange, onPerfStats });
-  callbacksRef.current = { onSelectRoom, onSelectBed, onHoverChange, onPerfStats };
+  const callbacksRef = useRef({
+    onSelectRoom,
+    onSelectBuilding,
+    onSelectBed,
+    onHoverChange,
+    onCompassHeadingChange,
+    onPerfStats,
+  });
+  callbacksRef.current = {
+    onSelectRoom,
+    onSelectBuilding,
+    onSelectBed,
+    onHoverChange,
+    onCompassHeadingChange,
+    onPerfStats,
+  };
 
   const stateRef = useRef({
     viewLevel,
     sceneTheme,
+    navMode,
     colorMode,
     unitXRayFilter,
+    assignedOnlyFilter,
     focusedRoomKey,
     hideRoofs,
     showFunctionalRooms,
@@ -178,8 +223,10 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
   stateRef.current = {
     viewLevel,
     sceneTheme,
+    navMode,
     colorMode,
     unitXRayFilter,
+    assignedOnlyFilter,
     focusedRoomKey,
     hideRoofs,
     showFunctionalRooms,
@@ -202,8 +249,10 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     maxAnisotropy: number;
     hitTargets: THREE.Object3D[];
     functionalHitTargets: THREE.Object3D[];
+    buildingHitTargets: THREE.Object3D[];
     roomVisuals: Map<string, RoomVisualHandle>;
     functionalLookup: Map<string, FunctionalAreaNode>;
+    buildingVisuals: Map<string, BuildingVisualHandle>;
     bedVisuals: Map<string, BedVisualHandle>;
     boundsCenter: THREE.Vector3;
     boundsRadius: number;
@@ -218,7 +267,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     requestRender: () => void;
   } | null>(null);
 
-  // Expose synchronous HUD-free PNG Snapshot export (zero preserveDrawingBuffer perf overhead)
+  // Expose synchronous Snapshot, smooth 360° orbit/tilt steering, North align & current building positions
   useImperativeHandle(
     ref,
     () => ({
@@ -233,6 +282,64 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
           console.warn('[ktx-3d-test] captureSnapshot error:', err);
           return null;
         }
+      },
+      orbitStep: (deltaAzimuthDeg: number, deltaPolarDeg = 0) => {
+        const eng = engineRef.current;
+        if (!eng) return;
+        const baseTarget = eng.cameraTransition.active
+          ? eng.cameraTransition.targetLook
+          : eng.controls.target;
+        const basePos = eng.cameraTransition.active
+          ? eng.cameraTransition.targetPos
+          : eng.camera.position;
+
+        _offsetVec.copy(basePos).sub(baseTarget);
+        _spherical.setFromVector3(_offsetVec);
+        _spherical.theta += THREE.MathUtils.degToRad(deltaAzimuthDeg);
+        _spherical.phi = THREE.MathUtils.clamp(
+          _spherical.phi + THREE.MathUtils.degToRad(deltaPolarDeg),
+          eng.controls.minPolarAngle + 0.02,
+          eng.controls.maxPolarAngle - 0.01
+        );
+        _offsetVec.setFromSpherical(_spherical);
+
+        eng.cameraTransition.targetLook.copy(baseTarget);
+        eng.cameraTransition.targetPos.copy(baseTarget).add(_offsetVec);
+        eng.cameraTransition.active = true;
+        eng.requestRender();
+      },
+      resetNorth: () => {
+        const eng = engineRef.current;
+        if (!eng) return;
+        const baseTarget = eng.cameraTransition.active
+          ? eng.cameraTransition.targetLook
+          : eng.controls.target;
+        const basePos = eng.cameraTransition.active
+          ? eng.cameraTransition.targetPos
+          : eng.camera.position;
+
+        _offsetVec.copy(basePos).sub(baseTarget);
+        _spherical.setFromVector3(_offsetVec);
+        _spherical.theta = 0;
+        _offsetVec.setFromSpherical(_spherical);
+
+        eng.cameraTransition.targetLook.copy(baseTarget);
+        eng.cameraTransition.targetPos.copy(baseTarget).add(_offsetVec);
+        eng.cameraTransition.active = true;
+        eng.requestRender();
+      },
+      getBuiltBuildingPositions: () => {
+        const eng = engineRef.current;
+        const result: Record<string, { x: number; z: number; rotationDeg: number }> = {};
+        if (!eng) return result;
+        eng.buildingVisuals.forEach((handle, key) => {
+          result[key] = {
+            x: handle.builtX,
+            z: handle.builtZ,
+            rotationDeg: handle.builtRotationDeg,
+          };
+        });
+        return result;
       },
     }),
     []
@@ -277,6 +384,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
     renderer.domElement.style.outline = 'none';
+    renderer.domElement.style.touchAction = 'none';
     container.appendChild(renderer.domElement);
 
     const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -317,11 +425,19 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = !isSoftwareGl;
-    controls.dampingFactor = 0.075;
-    controls.maxPolarAngle = Math.PI / 2 - 0.04;
+    controls.dampingFactor = 0.08;
+    controls.minPolarAngle = 0.02;
+    controls.maxPolarAngle = Math.PI / 2 - 0.015;
+    controls.minAzimuthAngle = -Infinity;
+    controls.maxAzimuthAngle = Infinity;
     controls.minDistance = 3.2;
-    controls.maxDistance = 190;
-    controls.screenSpacePanning = true;
+    controls.maxDistance = 210;
+    // Pan parallel to campus ground plane + zoom straight toward mouse pointer!
+    controls.screenSpacePanning = false;
+    controls.zoomToCursor = true;
+    controls.rotateSpeed = 1.0;
+    controls.panSpeed = 1.2;
+    controls.zoomSpeed = 1.2;
 
     const cameraTransition = {
       active: false,
@@ -329,12 +445,30 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
       targetLook: new THREE.Vector3(),
     };
 
+    const heldKeys = new Set<string>();
+    const NAV_KEYS = new Set([
+      'KeyW',
+      'KeyA',
+      'KeyS',
+      'KeyD',
+      'KeyQ',
+      'KeyE',
+      'KeyR',
+      'KeyF',
+      'ArrowUp',
+      'ArrowDown',
+      'ArrowLeft',
+      'ArrowRight',
+    ]);
+
     let frameId = 0;
     let disposed = false;
     let renderBusy = false;
     let renderDirty = false;
     let lastTickTs = performance.now();
     let lastPerfReportTs = 0;
+    let lastCompassReportTs = 0;
+    let lastCompassDeg = -999;
 
     function afterDraw(cb: () => void) {
       if (disposed) return;
@@ -403,6 +537,55 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
           }
         }
 
+        // Smooth free-roam keyboard movement (WASD / Arrows pan on ground plane, Q/E rotate 360°, R/F tilt)
+        if (heldKeys.size > 0) {
+          cameraTransition.active = false;
+          _offsetVec.copy(camera.position).sub(controls.target);
+          const dist = Math.max(5, _offsetVec.length());
+          const moveSpeed = Math.max(8, dist * 0.65) * delta;
+
+          camera.getWorldDirection(_fwdVec);
+          _fwdVec.y = 0;
+          if (_fwdVec.lengthSq() > 0.0001) {
+            _fwdVec.normalize();
+          } else {
+            _fwdVec.set(0, 0, -1);
+          }
+          _rightVec.crossVectors(_fwdVec, _upVec).normalize();
+
+          const forwardInput =
+            (heldKeys.has('KeyW') || heldKeys.has('ArrowUp') ? 1 : 0) -
+            (heldKeys.has('KeyS') || heldKeys.has('ArrowDown') ? 1 : 0);
+          const strafeInput =
+            (heldKeys.has('KeyD') || heldKeys.has('ArrowRight') ? 1 : 0) -
+            (heldKeys.has('KeyA') || heldKeys.has('ArrowLeft') ? 1 : 0);
+
+          if (forwardInput !== 0) {
+            camera.position.addScaledVector(_fwdVec, forwardInput * moveSpeed);
+            controls.target.addScaledVector(_fwdVec, forwardInput * moveSpeed);
+          }
+          if (strafeInput !== 0) {
+            camera.position.addScaledVector(_rightVec, strafeInput * moveSpeed);
+            controls.target.addScaledVector(_rightVec, strafeInput * moveSpeed);
+          }
+
+          const yawInput = (heldKeys.has('KeyE') ? 1 : 0) - (heldKeys.has('KeyQ') ? 1 : 0);
+          const pitchInput = (heldKeys.has('KeyF') ? 1 : 0) - (heldKeys.has('KeyR') ? 1 : 0);
+          if (yawInput !== 0 || pitchInput !== 0) {
+            _offsetVec.copy(camera.position).sub(controls.target);
+            _spherical.setFromVector3(_offsetVec);
+            _spherical.theta += yawInput * 1.15 * delta;
+            _spherical.phi = THREE.MathUtils.clamp(
+              _spherical.phi + pitchInput * 0.85 * delta,
+              controls.minPolarAngle + 0.02,
+              controls.maxPolarAngle - 0.01
+            );
+            _offsetVec.setFromSpherical(_spherical);
+            camera.position.copy(controls.target).add(_offsetVec);
+          }
+          needsAnotherFrame = true;
+        }
+
         const controlsChanged = controls.update();
         if (controlsChanged && controls.enableDamping) {
           needsAnotherFrame = true;
@@ -411,6 +594,16 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
         const t0 = performance.now();
         renderer.render(scene, camera);
         const frameMs = performance.now() - t0;
+
+        if (now - lastCompassReportTs > 110) {
+          lastCompassReportTs = now;
+          const azDeg = Math.round(THREE.MathUtils.radToDeg(controls.getAzimuthalAngle()));
+          const normDeg = ((azDeg % 360) + 360) % 360;
+          if (normDeg !== lastCompassDeg) {
+            lastCompassDeg = normDeg;
+            callbacksRef.current.onCompassHeadingChange?.(normDeg);
+          }
+        }
 
         if (now - lastPerfReportTs > 450) {
           lastPerfReportTs = now;
@@ -454,11 +647,13 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     const getHitFromEvent = (e: PointerEvent) => {
       const eng = engineRef.current;
       if (!eng) return null;
-      const targets =
-        stateRef.current.viewLevel === 'campus' &&
-        stateRef.current.showFunctionalRooms &&
-        eng.functionalHitTargets.length > 0
-          ? [...eng.hitTargets, ...eng.functionalHitTargets]
+      const targets: THREE.Object3D[] =
+        stateRef.current.viewLevel === 'campus'
+          ? [
+              ...eng.hitTargets,
+              ...eng.buildingHitTargets,
+              ...(stateRef.current.showFunctionalRooms ? eng.functionalHitTargets : []),
+            ]
           : eng.hitTargets;
       if (targets.length === 0) return null;
 
@@ -477,6 +672,13 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     };
 
     const handlePointerMove = (e: PointerEvent) => {
+      // Skip raycasting & hover tooltips while actively rotating/panning the camera (zero stutter!)
+      if (e.buttons !== 0) {
+        renderer.domElement.style.cursor = 'grabbing';
+        callbacksRef.current.onHoverChange(null);
+        return;
+      }
+
       const now = performance.now();
       if (now - lastHoverTs < 45) return;
       lastHoverTs = now;
@@ -487,6 +689,8 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
       const hit = getHitFromEvent(e);
       if (stateRef.current.viewLevel === 'campus') {
         const roomKey = hit?.userData?.type === 'room' ? String(hit.userData.roomKey) : null;
+        const bldKey =
+          hit?.userData?.type === 'building' ? String(hit.userData.buildingKey) : null;
         const funcKey =
           hit?.userData?.type === 'functional' ? String(hit.userData.functionalKey) : null;
 
@@ -498,7 +702,8 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
             roomKey,
             stateRef.current.focusedRoomKey,
             stateRef.current.unitXRayFilter,
-            stateRef.current.sceneTheme
+            stateRef.current.sceneTheme,
+            stateRef.current.assignedOnlyFilter
           );
           requestRender();
         }
@@ -512,6 +717,18 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
               screenX: e.clientX,
               screenY: e.clientY,
               room: handle.room,
+            });
+            return;
+          }
+        } else if (bldKey) {
+          renderer.domElement.style.cursor = 'pointer';
+          const bHandle = eng.buildingVisuals.get(bldKey);
+          if (bHandle) {
+            callbacksRef.current.onHoverChange({
+              type: 'building',
+              screenX: e.clientX,
+              screenY: e.clientY,
+              building: bHandle.building,
             });
             return;
           }
@@ -571,7 +788,8 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
           null,
           stateRef.current.focusedRoomKey,
           stateRef.current.unitXRayFilter,
-          stateRef.current.sceneTheme
+          stateRef.current.sceneTheme,
+          stateRef.current.assignedOnlyFilter
         );
         requestRender();
       }
@@ -603,6 +821,20 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
             callbacksRef.current.onHoverChange(null);
             callbacksRef.current.onSelectRoom(handle.room);
           }
+        } else if (hit?.userData?.type === 'building') {
+          const bHandle = eng.buildingVisuals.get(String(hit.userData.buildingKey));
+          if (bHandle) {
+            const dist = Math.max(12, bHandle.radius * 1.42);
+            eng.cameraTransition.targetLook.copy(bHandle.worldCenter);
+            eng.cameraTransition.targetPos.set(
+              bHandle.worldCenter.x + dist * 0.48,
+              bHandle.worldCenter.y + dist * 0.62,
+              bHandle.worldCenter.z + dist * 0.85
+            );
+            eng.cameraTransition.active = true;
+            requestRender();
+            callbacksRef.current.onSelectBuilding?.(bHandle.building);
+          }
         }
       } else {
         if (hit?.userData?.type === 'bed') {
@@ -616,11 +848,69 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
       }
     };
 
+    // Double-click ground plane in Campus view to smoothly recenter free 360° orbit pivot on that spot
+    const handleDoubleClick = (e: MouseEvent) => {
+      const eng = engineRef.current;
+      if (!eng || stateRef.current.viewLevel !== 'campus') return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      _pointerNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      _pointerNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(_pointerNdc, camera);
+      if (raycaster.ray.intersectPlane(_groundPlane, _groundHit)) {
+        _offsetVec.copy(camera.position).sub(controls.target);
+        eng.cameraTransition.targetLook.set(_groundHit.x, 1.2, _groundHit.z);
+        eng.cameraTransition.targetPos.copy(eng.cameraTransition.targetLook).add(_offsetVec);
+        eng.cameraTransition.active = true;
+        requestRender();
+      }
+    };
+
+    const handleNavKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (NAV_KEYS.has(e.code)) {
+        if (e.code.startsWith('Arrow')) e.preventDefault();
+        const wasEmpty = heldKeys.size === 0;
+        heldKeys.add(e.code);
+        if (wasEmpty) {
+          lastTickTs = performance.now();
+          requestRender();
+        }
+      }
+    };
+
+    const handleNavKeyUp = (e: KeyboardEvent) => {
+      heldKeys.delete(e.code);
+    };
+
+    const handleWindowBlur = () => {
+      heldKeys.clear();
+    };
+
+    // Resilient WebGL Context Loss & Auto-Restore (for long-running 24/7 monitoring & laptop sleep)
+    const handleContextLost = (e: Event) => {
+      e.preventDefault();
+      setContextLost(true);
+    };
+    const handleContextRestored = () => {
+      setContextLost(false);
+      setRestoreSeq(prev => prev + 1);
+      requestRender();
+    };
+
     const dom = renderer.domElement;
     dom.addEventListener('pointerdown', handlePointerDown);
     dom.addEventListener('pointermove', handlePointerMove);
     dom.addEventListener('pointerleave', handlePointerLeave);
     dom.addEventListener('pointerup', handlePointerUp);
+    dom.addEventListener('dblclick', handleDoubleClick);
+    dom.addEventListener('webglcontextlost', handleContextLost, false);
+    dom.addEventListener('webglcontextrestored', handleContextRestored, false);
+    window.addEventListener('keydown', handleNavKeyDown);
+    window.addEventListener('keyup', handleNavKeyUp);
+    window.addEventListener('blur', handleWindowBlur);
 
     const resizeObserver = new ResizeObserver(entries => {
       if (disposed) return;
@@ -650,8 +940,10 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
       maxAnisotropy,
       hitTargets: [],
       functionalHitTargets: [],
+      buildingHitTargets: [],
       roomVisuals: new Map(),
       functionalLookup: new Map(),
+      buildingVisuals: new Map(),
       bedVisuals: new Map(),
       boundsCenter: new THREE.Vector3(0, 1, 0),
       boundsRadius: 20,
@@ -676,6 +968,12 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
       dom.removeEventListener('pointermove', handlePointerMove);
       dom.removeEventListener('pointerleave', handlePointerLeave);
       dom.removeEventListener('pointerup', handlePointerUp);
+      dom.removeEventListener('dblclick', handleDoubleClick);
+      dom.removeEventListener('webglcontextlost', handleContextLost);
+      dom.removeEventListener('webglcontextrestored', handleContextRestored);
+      window.removeEventListener('keydown', handleNavKeyDown);
+      window.removeEventListener('keyup', handleNavKeyUp);
+      window.removeEventListener('blur', handleWindowBlur);
       disposeObject3D(contentRoot);
       envTarget.dispose();
       renderer.dispose();
@@ -685,6 +983,25 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
       engineRef.current = null;
     };
   }, []);
+
+  // ── 1b. Switch Mouse Navigation Mode (Free 360° Orbit vs Hand Pan) ──
+  useEffect(() => {
+    const eng = engineRef.current;
+    if (!eng) return;
+    if (navMode === 'pan') {
+      eng.controls.mouseButtons = {
+        LEFT: THREE.MOUSE.PAN,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.ROTATE,
+      };
+    } else {
+      eng.controls.mouseButtons = {
+        LEFT: THREE.MOUSE.ROTATE,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.PAN,
+      };
+    }
+  }, [navMode]);
 
   // ── 2. Update Daylight vs Night Theme Lighting, Background & Fog ──
   useEffect(() => {
@@ -734,8 +1051,10 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     eng.functionalGroup = null;
     eng.hitTargets = [];
     eng.functionalHitTargets = [];
+    eng.buildingHitTargets = [];
     eng.roomVisuals = new Map();
     eng.functionalLookup = new Map();
+    eng.buildingVisuals = new Map();
     eng.bedVisuals = new Map();
     eng.hoveredRoomKey = null;
     eng.hoveredBedId = null;
@@ -753,7 +1072,8 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
         sceneTheme,
         eng.maxAnisotropy,
         !eng.isSoftwareGl,
-        CAMPUS_BLUEPRINT_CONFIG
+        blueprintConfig,
+        stateRef.current.assignedOnlyFilter
       );
       built.roofsGroup.visible = !stateRef.current.hideRoofs;
       built.functionalGroup.visible = stateRef.current.showFunctionalRooms;
@@ -763,8 +1083,10 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
       eng.functionalGroup = built.functionalGroup;
       eng.hitTargets = built.hitTargets;
       eng.functionalHitTargets = built.functionalHitTargets;
+      eng.buildingHitTargets = built.buildingHitTargets;
       eng.roomVisuals = built.roomVisuals;
       eng.functionalLookup = built.functionalLookup;
+      eng.buildingVisuals = built.buildingVisuals;
       eng.boundsCenter.copy(built.boundsCenter);
       eng.boundsRadius = built.boundsRadius;
 
@@ -788,7 +1110,8 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
         null,
         stateRef.current.focusedRoomKey,
         stateRef.current.unitXRayFilter,
-        sceneTheme
+        sceneTheme,
+        stateRef.current.assignedOnlyFilter
       );
 
       if (shouldResetCamera) {
@@ -857,7 +1180,17 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
       eng.renderer.compile(eng.scene, eng.camera);
     }
     eng.requestRender();
-  }, [viewLevel, campusScopeKey, ktxNodes, activeRoom, activeRoomBeds, sceneTheme, showBedNames]);
+  }, [
+    viewLevel,
+    campusScopeKey,
+    blueprintConfig,
+    ktxNodes,
+    activeRoom,
+    activeRoomBeds,
+    sceneTheme,
+    showBedNames,
+    restoreSeq,
+  ]);
 
   // ── 4. Instant 0ms Roof Cutaway & Functional Layer Toggles (zero geometry rebuild) ──
   useEffect(() => {
@@ -874,7 +1207,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     eng.requestRender();
   }, [showFunctionalRooms, viewLevel]);
 
-  // ── 5. Instant Color Mode / Unit X-Ray / Focused Room Re-styling (zero geometry rebuild) ──
+  // ── 5. Instant Color Mode / Unit X-Ray / Assigned Blocks / Focused Room Re-styling ──
   useEffect(() => {
     const eng = engineRef.current;
     if (!eng || viewLevel !== 'campus') return;
@@ -884,10 +1217,11 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
       eng.hoveredRoomKey,
       focusedRoomKey,
       unitXRayFilter,
-      sceneTheme
+      sceneTheme,
+      assignedOnlyFilter
     );
     eng.requestRender();
-  }, [colorMode, unitXRayFilter, focusedRoomKey, viewLevel, sceneTheme]);
+  }, [colorMode, unitXRayFilter, assignedOnlyFilter, focusedRoomKey, viewLevel, sceneTheme]);
 
   // ── 6. Instant Bed Selection & Bunk Tier Filter Highlight (with Layer-2 Click Pass-Through) ──
   useEffect(() => {
@@ -915,7 +1249,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     eng.requestRender();
   }, [cameraPresetRequest, viewLevel]);
 
-  // ── 8. Smooth Fly-To Specific Room on Campus (from Quick Search) ──
+  // ── 8. Smooth Fly-To Specific Room on Campus (from Quick Search or Alert Bar) ──
   useEffect(() => {
     const eng = engineRef.current;
     if (!eng || !focusRoomRequest || viewLevel !== 'campus') return;
@@ -931,6 +1265,24 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     eng.cameraTransition.active = true;
     eng.requestRender();
   }, [focusRoomRequest, viewLevel]);
+
+  // ── 8b. Smooth Fly-To Specific Building on Campus ──
+  useEffect(() => {
+    const eng = engineRef.current;
+    if (!eng || !focusBuildingRequest || viewLevel !== 'campus') return;
+    const bHandle = eng.buildingVisuals.get(focusBuildingRequest.buildingKey);
+    if (!bHandle) return;
+
+    const dist = Math.max(12, bHandle.radius * 1.42);
+    eng.cameraTransition.targetLook.copy(bHandle.worldCenter);
+    eng.cameraTransition.targetPos.set(
+      bHandle.worldCenter.x + dist * 0.48,
+      bHandle.worldCenter.y + dist * 0.62,
+      bHandle.worldCenter.z + dist * 0.85
+    );
+    eng.cameraTransition.active = true;
+    eng.requestRender();
+  }, [focusBuildingRequest, viewLevel]);
 
   // ── 9. Smooth Fly-To Specific Bunk Bed in Room Interior ──
   useEffect(() => {
@@ -1000,7 +1352,19 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
       ref={mountRef}
       className="w-full h-full relative overflow-hidden select-none"
       aria-label="Khung hiển thị mô hình 3D Ký Túc Xá"
-    />
+    >
+      {contextLost && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-[#0b1220]/90 p-6">
+          <div className="max-w-sm rounded-2xl bg-slate-900 border border-slate-700 p-5 text-center space-y-2 text-slate-100">
+            <AlertTriangle size={22} className="text-amber-400 mx-auto" />
+            <p className="text-sm font-bold">Đang phục hồi kết nối đồ họa 3D...</p>
+            <p className="text-xs text-slate-400">
+              Trình duyệt vừa tạm thu hồi GPU. Mô hình sẽ tự hiển thị lại ngay sau vài giây.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
   );
 });
 
