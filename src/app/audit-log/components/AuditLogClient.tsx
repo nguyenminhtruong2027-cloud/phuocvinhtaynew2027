@@ -28,6 +28,7 @@ import {
   ArrowRight,
   ArrowLeftRight,
   Table2,
+  Trash2,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { exportToExcel } from '@/lib/exportExcel';
@@ -53,7 +54,7 @@ import {
 } from '@/lib/auditParser';
 import AuditDetailDrawer from './AuditDetailDrawer';
 import AuditTimelineView from './AuditTimelineView';
-import AuditArchiveModal from './AuditArchiveModal';
+import AuditArchiveModal, { type CleanupMode } from './AuditArchiveModal';
 
 const ALL_ACTIONS: AuditAction[] = [
   'CREATE',
@@ -176,12 +177,15 @@ export default function AuditLogClient() {
   const [liveConnected, setLiveConnected] = useState(false);
   const [liveNewCount, setLiveNewCount] = useState(0);
 
-  // Drawer & Archive Modal state
+  // Drawer & Cleanup Modal state
   const [selectedRow, setSelectedRow] = useState<{
     entry: AuditEntry;
     pairedTechnical: AuditEntry[];
   } | null>(null);
   const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [archiveModalMode, setArchiveModalMode] = useState<CleanupMode>('retention');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [singleDeleteOverride, setSingleDeleteOverride] = useState<AuditEntry[] | null>(null);
 
   // Server query & pagination state
   const [serverFilteredLogs, setServerFilteredLogs] = useState<AuditEntry[] | null>(null);
@@ -474,12 +478,102 @@ export default function AuditLogClient() {
     return groupedRows.slice((page - 1) * pageSize, page * pageSize);
   }, [hasActiveFilter, pagedEntries, groupedRows, page, pageSize]);
 
+  // All entries map for resolving selected rows (including paired technical rows)
+  const entryById = useMemo(() => {
+    const map = new Map<string, AuditEntry>();
+    for (const e of logs) map.set(e.id, e);
+    if (serverFilteredLogs) {
+      for (const e of serverFilteredLogs) map.set(e.id, e);
+    }
+    if (pagedEntries) {
+      for (const e of pagedEntries) map.set(e.id, e);
+    }
+    return map;
+  }, [logs, serverFilteredLogs, pagedEntries]);
+
+  const selectedEntries = useMemo(() => {
+    if (singleDeleteOverride) return singleDeleteOverride;
+    const list: AuditEntry[] = [];
+    selectedIds.forEach(id => {
+      const found = entryById.get(id);
+      if (found) list.push(found);
+    });
+    return list;
+  }, [singleDeleteOverride, selectedIds, entryById]);
+
+  const visibleRowEntryIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const r of visibleRows) {
+      ids.push(r.primary.id);
+      for (const t of r.pairedTechnical) ids.push(t.id);
+    }
+    return ids;
+  }, [visibleRows]);
+
+  const allVisibleSelected =
+    visibleRowEntryIds.length > 0 && visibleRowEntryIds.every(id => selectedIds.has(id));
+
+  const toggleSelectRow = (row: GroupedAuditRow) => {
+    const rowIds = [row.primary.id, ...row.pairedTechnical.map(t => t.id)];
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      const isChecked = next.has(row.primary.id);
+      if (isChecked) {
+        rowIds.forEach(id => next.delete(id));
+      } else {
+        rowIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAllVisible = () => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        visibleRowEntryIds.forEach(id => next.delete(id));
+      } else {
+        visibleRowEntryIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const filterSummaryText = useMemo(() => {
+    const parts: string[] = [];
+    if (filterCategory !== 'all') {
+      const tab = CATEGORY_TABS.find(t => t.id === filterCategory);
+      if (tab) parts.push(`Nhóm: ${tab.label}`);
+    }
+    if (filterAction) {
+      parts.push(`Hành động: ${AUDIT_ACTION_META[filterAction as AuditAction]?.labelVi || filterAction}`);
+    }
+    if (filterAccountKey) {
+      const acc = accountOptions.find(a => a.key === filterAccountKey);
+      if (acc) parts.push(`Tài khoản: ${acc.displayName}`);
+    }
+    if (searchKeyword.trim()) {
+      parts.push(`Từ khóa: "${searchKeyword.trim()}"`);
+    }
+    if (filterDateFrom || filterDateTo) {
+      parts.push(`Ngày: ${filterDateFrom || '...'} → ${filterDateTo || '...'}`);
+    }
+    return parts.join(' · ');
+  }, [filterCategory, filterAction, filterAccountKey, accountOptions, searchKeyword, filterDateFrom, filterDateTo]);
+
+  const openCleanupModal = (mode: CleanupMode, overrideEntries: AuditEntry[] | null = null) => {
+    setSingleDeleteOverride(overrideEntries);
+    setArchiveModalMode(mode);
+    setShowArchiveModal(true);
+  };
+
   const handleApplyDatePreset = (preset: QuickDatePreset) => {
     setDatePreset(preset);
     const { from, to } = getQuickDateRange(preset);
     setFilterDateFrom(from);
     setFilterDateTo(to);
     setPage(1);
+    setSelectedIds(new Set());
   };
 
   const clearFilters = () => {
@@ -491,6 +585,7 @@ export default function AuditLogClient() {
     setFilterDateFrom('');
     setFilterDateTo('');
     setPage(1);
+    setSelectedIds(new Set());
   };
 
   const handleRefresh = useCallback(async () => {
@@ -653,12 +748,12 @@ export default function AuditLogClient() {
           {isSuperAdmin && (
             <button
               type="button"
-              onClick={() => setShowArchiveModal(true)}
+              onClick={() => openCleanupModal('retention')}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-bdr2 bg-surf text-tx text-xs font-semibold hover:bg-act transition-colors cursor-pointer whitespace-nowrap"
-              title="Sao lưu Excel và dọn nhật ký cũ hơn 90/180/365 ngày"
+              title="Dọn nhật ký cũ hoặc làm mới sạch toàn bộ nhật ký"
             >
               <Archive size={13} />
-              <span>Lưu trữ & Dọn log</span>
+              <span>Dọn & Làm mới log</span>
             </button>
           )}
         </div>
@@ -909,6 +1004,17 @@ export default function AuditLogClient() {
                   <EyeOff size={12} />
                   <span>Ẩn log kỹ thuật</span>
                 </button>
+                {hasActiveFilter && isSuperAdmin && filteredEntries.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => openCleanupModal('filtered')}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-dgr/40 tint-dgr text-dgr hover:opacity-90 text-xs font-semibold transition-opacity cursor-pointer whitespace-nowrap font-tabular"
+                    title="Xóa các bản ghi khớp với bộ lọc đang chọn"
+                  >
+                    <Trash2 size={12} />
+                    <span>Xóa theo bộ lọc ({filteredEntries.length.toLocaleString('vi-VN')})</span>
+                  </button>
+                )}
                 {hasActiveFilter && (
                   <button
                     type="button"
@@ -923,12 +1029,58 @@ export default function AuditLogClient() {
             </div>
           </div>
 
+          {/* ─── Super Admin Bulk Selection Bar ─── */}
+          {isSuperAdmin && selectedIds.size > 0 && (
+            <div className="rounded-xl border border-dgr/35 bg-surf px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 shadow-sm">
+              <div className="text-xs text-tx font-tabular">
+                Đã chọn <strong className="text-dgr">{selectedIds.size.toLocaleString('vi-VN')}</strong> bản ghi nhật ký
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {hasActiveFilter && filteredEntries.length > selectedIds.size && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedIds(new Set(filteredEntries.map(e => e.id)))}
+                    className="px-2.5 py-1.5 rounded-lg border border-bdr text-xs font-semibold text-lnk hover:bg-act transition-colors cursor-pointer whitespace-nowrap font-tabular"
+                  >
+                    Chọn tất cả {filteredEntries.length.toLocaleString('vi-VN')} kết quả lọc
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelectedIds(new Set())}
+                  className="px-2.5 py-1.5 rounded-lg border border-bdr text-xs font-medium text-mu hover:text-tx hover:bg-act transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  Bỏ chọn
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openCleanupModal('selected')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-dgr text-white text-xs font-semibold hover:opacity-90 transition-opacity cursor-pointer whitespace-nowrap"
+                >
+                  <Trash2 size={12} />
+                  <span>Xóa đã chọn ({selectedIds.size.toLocaleString('vi-VN')})</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* ─── High-Density Audit Log Table ─── */}
           <div className="surface-elevated rounded-2xl overflow-hidden">
             <div className="overflow-x-auto scrollbar-thin">
               <table className="w-full text-sm min-w-[820px]">
                 <thead className="bg-act border-b border-bdr2 sticky top-0 z-10">
                   <tr>
+                    {isSuperAdmin && (
+                      <th className="pl-4 pr-1 py-3 text-left w-9">
+                        <input
+                          type="checkbox"
+                          checked={allVisibleSelected}
+                          onChange={toggleSelectAllVisible}
+                          aria-label="Chọn tất cả bản ghi trên trang này"
+                          className="rounded border-bdr accent-pri2 cursor-pointer"
+                        />
+                      </th>
+                    )}
                     <th className="px-4 py-3 text-left text-xs font-semibold text-mu whitespace-nowrap w-44">
                       <span className="inline-flex items-center gap-1.5">
                         <Clock size={12} /> Thời gian (UTC+7)
@@ -954,14 +1106,14 @@ export default function AuditLogClient() {
                   {loadingPage || searchingServer ? (
                     Array.from({ length: 6 }).map((_, idx) => (
                       <tr key={`sk-${idx}`}>
-                        <td colSpan={5} className="px-4 py-3">
+                        <td colSpan={isSuperAdmin ? 6 : 5} className="px-4 py-3">
                           <div className="h-5 rounded skeleton-pulse" />
                         </td>
                       </tr>
                     ))
                   ) : visibleRows.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-4 py-12 text-center space-y-2">
+                      <td colSpan={isSuperAdmin ? 6 : 5} className="px-4 py-12 text-center space-y-2">
                         <p className="text-sm font-semibold text-tx">Không có bản ghi nhật ký nào phù hợp</p>
                         <p className="text-xs text-mu">Thử nới rộng khoảng thời gian hoặc xóa bộ lọc đang áp dụng.</p>
                         {hasActiveFilter && (
@@ -994,8 +1146,24 @@ export default function AuditLogClient() {
                         <React.Fragment key={primary.id}>
                           <tr
                             onClick={() => setSelectedRow({ entry: primary, pairedTechnical })}
-                            className="hover:bg-act/45 transition-colors cursor-pointer group"
+                            className={`hover:bg-act/45 transition-colors cursor-pointer group ${
+                              isSuperAdmin && selectedIds.has(primary.id) ? 'bg-pri2/5' : ''
+                            }`}
                           >
+                            {isSuperAdmin && (
+                              <td
+                                className="pl-4 pr-1 py-3 align-top"
+                                onClick={e => e.stopPropagation()}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedIds.has(primary.id)}
+                                  onChange={() => toggleSelectRow(row)}
+                                  aria-label={`Chọn bản ghi ${meta.labelVi}`}
+                                  className="mt-0.5 rounded border-bdr accent-pri2 cursor-pointer"
+                                />
+                              </td>
+                            )}
                             {/* Timestamp */}
                             <td className="px-4 py-3 align-top whitespace-nowrap">
                               <div className="text-xs font-medium text-tx font-tabular">
@@ -1135,6 +1303,7 @@ export default function AuditLogClient() {
                                   onClick={() => setSelectedRow({ entry: tech, pairedTechnical: [] })}
                                   className="bg-act/30 hover:bg-act/55 transition-colors cursor-pointer"
                                 >
+                                  {isSuperAdmin && <td className="pl-4 pr-1 py-2" />}
                                   <td className="px-4 py-2 text-[11px] text-mu font-tabular whitespace-nowrap pl-8">
                                     ↳ {formatTimestampVN(tech.timestamp)}
                                   </td>
@@ -1215,16 +1384,47 @@ export default function AuditLogClient() {
         resolveActor={resolveActor}
         onClose={() => setSelectedRow(null)}
         onTraceWorker={handleTraceWorker}
+        onDeleteEntries={
+          isSuperAdmin
+            ? entries => openCleanupModal('selected', entries)
+            : undefined
+        }
       />
 
-      {/* ─── Super Admin Archive & Purge Modal ─── */}
+      {/* ─── Super Admin Cleanup & Reset Modal ─── */}
       <AuditArchiveModal
         open={showArchiveModal}
-        onClose={() => setShowArchiveModal(false)}
+        initialMode={archiveModalMode}
+        selectedEntries={selectedEntries}
+        filteredEntries={filteredEntries}
+        filterSummary={filterSummaryText}
+        hasActiveFilter={hasActiveFilter}
+        onClose={() => {
+          setShowArchiveModal(false);
+          setSingleDeleteOverride(null);
+        }}
         resolveActor={resolveActor}
         onPurged={async () => {
-          await refetchLogs();
+          setSelectedIds(new Set());
+          setSingleDeleteOverride(null);
+          setServerFilteredLogs(null);
+          setPagedEntries(null);
           setPage(1);
+          await refetchLogs();
+          if (hasActiveFilter) {
+            const aliases = selectedAliasesKey ? selectedAliasesKey.split('||').filter(Boolean) : [];
+            const catActions = categoryActionsKey ? categoryActionsKey.split('||').filter(Boolean) : [];
+            const refreshed = await fetchFilteredLogs({
+              accounts: aliases.length > 0 ? aliases : undefined,
+              action: filterAction || undefined,
+              actions: !filterAction && catActions.length > 0 ? catActions : undefined,
+              keyword: searchKeyword.trim() || undefined,
+              dateFrom: filterDateFrom || undefined,
+              dateTo: filterDateTo || undefined,
+              limit: 2000,
+            });
+            setServerFilteredLogs(refreshed);
+          }
         }}
       />
     </div>

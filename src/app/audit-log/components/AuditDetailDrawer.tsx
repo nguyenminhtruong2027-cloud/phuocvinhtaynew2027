@@ -15,6 +15,7 @@ import {
   User,
   Clock,
   MapPin,
+  Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AuditEntry } from '@/context/AuditContext';
@@ -34,6 +35,7 @@ interface AuditDetailDrawerProps {
   resolveActor: (rawAccount: string) => ResolvedActor;
   onClose: () => void;
   onTraceWorker: (query: string) => void;
+  onDeleteEntries?: (entries: AuditEntry[]) => void;
 }
 
 export default function AuditDetailDrawer({
@@ -42,6 +44,7 @@ export default function AuditDetailDrawer({
   resolveActor,
   onClose,
   onTraceWorker,
+  onDeleteEntries,
 }: AuditDetailDrawerProps) {
   const [copiedKey, setCopiedKey] = useState<'raw' | 'summary' | null>(null);
 
@@ -323,6 +326,19 @@ export default function AuditDetailDrawer({
               <div className="px-5 py-3 border-t border-bdr flex items-center justify-between gap-2 bg-surf">
                 <span className="text-[11px] text-mu font-mono truncate">ID: {entry.id}</span>
                 <div className="flex items-center gap-2 shrink-0">
+                  {onDeleteEntries && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onDeleteEntries([entry, ...pairedTechnical]);
+                        onClose();
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-dgr/40 tint-dgr text-dgr text-xs font-semibold hover:opacity-90 transition-opacity cursor-pointer whitespace-nowrap"
+                    >
+                      <Trash2 size={12} />
+                      <span>Xóa dòng này</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() =>
