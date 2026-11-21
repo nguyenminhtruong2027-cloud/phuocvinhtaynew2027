@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Users, ChevronLeft, ChevronRight, LogOut, BarChart2,
-  ClipboardList, UserCog, RefreshCw, Building2, QrCode, Menu, X, BedDouble, ShieldCheck, Search
+  ClipboardList, UserCog, RefreshCw, Building2, QrCode, Menu, X, BedDouble, ShieldCheck, Search, Box
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useWorkers } from '@/context/WorkerContext';
@@ -276,6 +276,25 @@ export default function Sidebar() {
           {/* Data Sync & Theme Tool */}
           <div className="mt-4 pt-3 border-t border-bdr space-y-1">
             {!collapsed && <p className="px-3 mb-1 text-[10px] font-bold text-ic uppercase tracking-widest">TIỆN ÍCH</p>}
+            <Link
+              href="/ktx-3d-test"
+              title="Mô hình 3D (Bản thử nghiệm)"
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-colors duration-100 ${
+                pathname === '/ktx-3d-test'
+                  ? 'bg-act text-tx border border-bdr2 font-bold shadow-sm'
+                  : 'text-nav hover:text-tx hover:bg-act/80 border border-transparent hover:border-bdr2'
+              }`}
+            >
+              <Box size={16} className={`flex-shrink-0 ${pathname === '/ktx-3d-test' ? 'text-pri2' : 'text-ic'}`} />
+              {!collapsed && (
+                <>
+                  <span className="flex-1 truncate">Mô hình 3D</span>
+                  <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-bdg text-lnk border border-bdr2">
+                    Beta
+                  </span>
+                </>
+              )}
+            </Link>
             <button
               onClick={() => { void refreshWorkers(); }}
               disabled={refreshing}
@@ -447,6 +466,21 @@ export default function Sidebar() {
                 )}
 
                 <div className="pt-4 border-t border-bdr mt-3 space-y-1">
+                  <Link
+                    href="/ktx-3d-test"
+                    onClick={() => setMobileOpen(false)}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-colors duration-100 text-sm font-semibold ${
+                      pathname === '/ktx-3d-test'
+                        ? 'bg-act text-tx border border-bdr2 font-bold'
+                        : 'text-nav hover:bg-act hover:text-tx'
+                    }`}
+                  >
+                    <Box size={18} className={pathname === '/ktx-3d-test' ? 'text-pri2' : ''} />
+                    <span className="flex-1">Mô hình 3D</span>
+                    <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-bdg text-lnk border border-bdr2">
+                      Beta
+                    </span>
+                  </Link>
                   <button
                     onClick={() => { refreshWorkers(); setMobileOpen(false); }}
                     disabled={refreshing}
