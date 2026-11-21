@@ -3,9 +3,22 @@ import type { RoomGenderInfo } from '@/lib/roomGender';
 
 export type ViewLevel = 'campus' | 'room';
 
-export type CampusColorMode = 'occupancy' | 'gender' | 'vacant_only' | 'overloaded_only';
+export type CampusColorMode =
+  | 'occupancy'
+  | 'gender'
+  | 'vacant_only'
+  | 'overloaded_only'
+  | 'unit_xray';
+
+export type SceneTheme = 'dark' | 'light';
 
 export type CameraPreset = 'overview' | 'top' | 'low' | 'left_row' | 'right_row';
+
+export interface UnitXRayFilter {
+  type: 'platoon' | 'unit';
+  value: string;
+  label: string;
+}
 
 export interface CampusRoomNode {
   key: string; // `${ktx}||${day}||${normRoom}`
@@ -22,6 +35,8 @@ export interface CampusRoomNode {
   genderInfo: RoomGenderInfo;
   workers: Worker[];
   dominantUnit: string;
+  platoonCounts: Record<string, number>;
+  unitCounts: Record<string, number>;
 }
 
 export interface CampusBuildingNode {

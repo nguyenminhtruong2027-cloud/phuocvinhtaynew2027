@@ -13,6 +13,8 @@ import type {
   HoverInfo,
   RenderPerfStats,
   RoomBedSlot,
+  SceneTheme,
+  UnitXRayFilter,
   ViewLevel,
 } from '../types';
 import {
@@ -29,12 +31,18 @@ import { disposeObject3D } from '../scene/materials';
 
 interface Ktx3DViewportProps {
   viewLevel: ViewLevel;
+  sceneTheme: SceneTheme;
   ktxNodes: CampusKtxNode[];
   colorMode: CampusColorMode;
+  unitXRayFilter: UnitXRayFilter | null;
+  focusedRoomKey: string | null;
   activeRoom: CampusRoomNode | null;
   activeRoomBeds: RoomBedSlot[];
   selectedBedId: string | null;
   cameraPresetRequest: { preset: CameraPreset; seq: number } | null;
+  focusRoomRequest: { roomKey: string; seq: number } | null;
+  focusBedRequest: { bedId: string; seq: number } | null;
+  zoomRequest: { factor: number; seq: number } | null;
   onSelectRoom: (room: CampusRoomNode) => void;
   onSelectBed: (bed: RoomBedSlot | null) => void;
   onHoverChange: (info: HoverInfo | null) => void;
@@ -45,6 +53,7 @@ interface Ktx3DViewportProps {
 const _pointerNdc = new THREE.Vector2();
 const _desiredCamPos = new THREE.Vector3();
 const _desiredTarget = new THREE.Vector3();
+const _offsetVec = new THREE.Vector3();
 
 function detectSoftwareWebGL(): { supported: boolean; isSoftwareGl: boolean } {
   if (typeof document === 'undefined') return { supported: false, isSoftwareGl: true };
@@ -65,6 +74,10 @@ function detectSoftwareWebGL(): { supported: boolean; isSoftwareGl: boolean } {
   }
 }
 
+function getThemeBgHex(theme: SceneTheme): number {
+  return theme === 'light' ? 0xdbe7f5 : 0x0b1220;
+}
+
 function computeCameraForPreset(
   viewLevel: ViewLevel,
   preset: CameraPreset,
@@ -79,15 +92,17 @@ function computeCameraForPreset(
     if (preset === 'top') {
       outPos.set(center.x, center.y + dist * 1.25, center.z + 0.01);
     } else if (preset === 'low') {
-      outPos.set(center.x + dist * 0.58, center.y + Math.max(7, radius * 0.34), center.z + dist * 0.72);
+      outPos.set(
+        center.x + dist * 0.58,
+        center.y + Math.max(7, radius * 0.34),
+        center.z + dist * 0.72
+      );
     } else {
-      // overview isometric-like 3/4 view
       outPos.set(center.x + dist * 0.55, center.y + dist * 0.68, center.z + dist * 0.85);
     }
     return;
   }
 
-  // Room interior view
   const dist = Math.max(8.5, radius * 1.48);
   if (preset === 'top') {
     outPos.set(center.x, center.y + dist * 1.18, center.z + 0.01);
@@ -100,19 +115,24 @@ function computeCameraForPreset(
   } else if (preset === 'low') {
     outPos.set(center.x, 1.75, center.z + dist * 0.92);
   } else {
-    // overview cutaway front-3/4
     outPos.set(center.x + dist * 0.38, center.y + dist * 0.64, center.z + dist * 0.92);
   }
 }
 
 export default function Ktx3DViewport({
   viewLevel,
+  sceneTheme,
   ktxNodes,
   colorMode,
+  unitXRayFilter,
+  focusedRoomKey,
   activeRoom,
   activeRoomBeds,
   selectedBedId,
   cameraPresetRequest,
+  focusRoomRequest,
+  focusBedRequest,
+  zoomRequest,
   onSelectRoom,
   onSelectBed,
   onHoverChange,
@@ -121,24 +141,34 @@ export default function Ktx3DViewport({
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [webglUnsupported, setWebglUnsupported] = useState(false);
 
-  // Store latest callbacks & props in refs so WebGL renderer is mounted ONCE and never torn down on React state changes
   const callbacksRef = useRef({ onSelectRoom, onSelectBed, onHoverChange, onPerfStats });
   callbacksRef.current = { onSelectRoom, onSelectBed, onHoverChange, onPerfStats };
 
   const stateRef = useRef({
     viewLevel,
+    sceneTheme,
     colorMode,
+    unitXRayFilter,
+    focusedRoomKey,
     selectedBedId,
   });
-  stateRef.current = { viewLevel, colorMode, selectedBedId };
+  stateRef.current = {
+    viewLevel,
+    sceneTheme,
+    colorMode,
+    unitXRayFilter,
+    focusedRoomKey,
+    selectedBedId,
+  };
 
-  // Mutable engine handles shared across effects
   const engineRef = useRef<{
     scene: THREE.Scene;
     camera: THREE.PerspectiveCamera;
     renderer: THREE.WebGLRenderer;
     controls: OrbitControls;
+    hemiLight: THREE.HemisphereLight;
     keyLight: THREE.DirectionalLight;
+    rimLight: THREE.DirectionalLight;
     contentRoot: THREE.Group;
     isSoftwareGl: boolean;
     maxAnisotropy: number;
@@ -157,7 +187,7 @@ export default function Ktx3DViewport({
     requestRender: () => void;
   } | null>(null);
 
-  // ── 1. Initialize Three.js Renderer, Studio Environment, Lighting & Controls ONCE ──
+  // ── 1. Initialize WebGLRenderer, RoomEnvironment, Studio Lighting & OrbitControls ONCE ──
   useEffect(() => {
     const container = mountRef.current;
     if (!container) return;
@@ -172,9 +202,9 @@ export default function Ktx3DViewport({
     const height = Math.max(container.clientHeight, 320);
 
     const scene = new THREE.Scene();
-    const bgHex = 0x0b1220;
-    scene.background = new THREE.Color(bgHex);
-    scene.fog = new THREE.FogExp2(bgHex, 0.0055);
+    const initBg = getThemeBgHex(stateRef.current.sceneTheme);
+    scene.background = new THREE.Color(initBg);
+    scene.fog = new THREE.FogExp2(initBg, 0.0055);
 
     const camera = new THREE.PerspectiveCamera(44, width / height, 0.15, 420);
     camera.position.set(24, 24, 30);
@@ -198,13 +228,13 @@ export default function Ktx3DViewport({
 
     const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
 
-    // Procedural Studio RoomEnvironment (mandatory for PBR metalness/roughness realism)
+    // Procedural Studio RoomEnvironment
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     const envTarget = pmremGenerator.fromScene(new RoomEnvironment(), 0.04);
     scene.environment = envTarget.texture;
     pmremGenerator.dispose();
 
-    // Warm/Cool 3-point architectural lighting rig
+    // Warm/Cool 3-point lighting rig
     const hemiLight = new THREE.HemisphereLight(0xcbd5e1, 0x1e293b, 0.78);
     hemiLight.position.set(0, 60, 0);
     scene.add(hemiLight);
@@ -246,7 +276,6 @@ export default function Ktx3DViewport({
       targetLook: new THREE.Vector3(),
     };
 
-    // On-demand render scheduler with software-WebGL afterDraw pacing
     let frameId = 0;
     let disposed = false;
     let renderBusy = false;
@@ -294,7 +323,6 @@ export default function Ktx3DViewport({
         const delta = Math.min(0.08, Math.max(0.001, (now - lastTickTs) / 1000));
         lastTickTs = now;
 
-        // Smooth exponential damping for scripted camera presets/transitions
         let needsAnotherFrame = false;
         if (cameraTransition.active) {
           if (isSoftwareGl) {
@@ -354,7 +382,6 @@ export default function Ktx3DViewport({
       });
     }
 
-    // Cancel scripted camera transition immediately when user interacts
     const handleControlsStart = () => {
       cameraTransition.active = false;
     };
@@ -364,7 +391,7 @@ export default function Ktx3DViewport({
     controls.addEventListener('start', handleControlsStart);
     controls.addEventListener('change', handleControlsChange);
 
-    // Raycasting (throttled pointermove + click-vs-drag guard)
+    // Throttled pointermove raycasting + drag-vs-click separation
     const raycaster = new THREE.Raycaster();
     let lastHoverTs = 0;
     let pointerDownX = 0;
@@ -400,7 +427,14 @@ export default function Ktx3DViewport({
         const roomKey = hit?.userData?.type === 'room' ? String(hit.userData.roomKey) : null;
         if (roomKey !== eng.hoveredRoomKey) {
           eng.hoveredRoomKey = roomKey;
-          applyCampusColorMode(eng.roomVisuals, stateRef.current.colorMode, roomKey);
+          applyCampusColorMode(
+            eng.roomVisuals,
+            stateRef.current.colorMode,
+            roomKey,
+            stateRef.current.focusedRoomKey,
+            stateRef.current.unitXRayFilter,
+            stateRef.current.sceneTheme
+          );
           requestRender();
         }
         renderer.domElement.style.cursor = roomKey ? 'pointer' : 'grab';
@@ -446,7 +480,14 @@ export default function Ktx3DViewport({
       if (!eng) return;
       if (eng.hoveredRoomKey) {
         eng.hoveredRoomKey = null;
-        applyCampusColorMode(eng.roomVisuals, stateRef.current.colorMode, null);
+        applyCampusColorMode(
+          eng.roomVisuals,
+          stateRef.current.colorMode,
+          null,
+          stateRef.current.focusedRoomKey,
+          stateRef.current.unitXRayFilter,
+          stateRef.current.sceneTheme
+        );
         requestRender();
       }
       if (eng.hoveredBedId) {
@@ -459,7 +500,7 @@ export default function Ktx3DViewport({
 
     const handlePointerUp = (e: PointerEvent) => {
       const moveDist = Math.hypot(e.clientX - pointerDownX, e.clientY - pointerDownY);
-      if (moveDist > 6) return; // Was an orbit/pan drag, not a click
+      if (moveDist > 6) return;
 
       const eng = engineRef.current;
       if (!eng) return;
@@ -491,7 +532,6 @@ export default function Ktx3DViewport({
     dom.addEventListener('pointerleave', handlePointerLeave);
     dom.addEventListener('pointerup', handlePointerUp);
 
-    // ResizeObserver for clean container resizing (including sidebar collapse!)
     const resizeObserver = new ResizeObserver(entries => {
       if (disposed) return;
       const entry = entries[0];
@@ -510,7 +550,9 @@ export default function Ktx3DViewport({
       camera,
       renderer,
       controls,
+      hemiLight,
       keyLight,
+      rimLight,
       contentRoot,
       isSoftwareGl,
       maxAnisotropy,
@@ -549,12 +591,45 @@ export default function Ktx3DViewport({
     };
   }, []);
 
-  // ── 2. Rebuild 3D Scene Content when ViewLevel, Campus Data, or Active Room changes ──
+  // ── 2. Update Daylight vs Night Theme Lighting, Background & Fog ──
   useEffect(() => {
     const eng = engineRef.current;
     if (!eng) return;
 
-    // Dispose previous scene graph cleanly
+    const bgHex = getThemeBgHex(sceneTheme);
+    eng.scene.background = new THREE.Color(bgHex);
+    if (eng.scene.fog instanceof THREE.FogExp2) {
+      eng.scene.fog.color.setHex(bgHex);
+    }
+
+    if (sceneTheme === 'light') {
+      eng.hemiLight.color.setHex(0xffffff);
+      eng.hemiLight.groundColor.setHex(0x94a3b8);
+      eng.hemiLight.intensity = 1.05;
+      eng.keyLight.color.setHex(0xfffbeb);
+      eng.keyLight.intensity = 1.75;
+      eng.rimLight.color.setHex(0xbae6fd);
+      eng.rimLight.intensity = 0.45;
+      eng.renderer.toneMappingExposure = 1.08;
+    } else {
+      eng.hemiLight.color.setHex(0xcbd5e1);
+      eng.hemiLight.groundColor.setHex(0x1e293b);
+      eng.hemiLight.intensity = 0.78;
+      eng.keyLight.color.setHex(0xfff5e4);
+      eng.keyLight.intensity = 1.55;
+      eng.rimLight.color.setHex(0x93c5fd);
+      eng.rimLight.intensity = 0.55;
+      eng.renderer.toneMappingExposure = 1.12;
+    }
+
+    eng.requestRender();
+  }, [sceneTheme]);
+
+  // ── 3. Rebuild 3D Scene Content when ViewLevel, Campus Data, Theme, or Active Room changes ──
+  useEffect(() => {
+    const eng = engineRef.current;
+    if (!eng) return;
+
     while (eng.contentRoot.children.length > 0) {
       const child = eng.contentRoot.children[0];
       eng.contentRoot.remove(child);
@@ -566,10 +641,14 @@ export default function Ktx3DViewport({
     eng.hoveredRoomKey = null;
     eng.hoveredBedId = null;
 
+    const bgHex = getThemeBgHex(sceneTheme);
+
     if (viewLevel === 'campus') {
       const built = buildCampusScene(
         ktxNodes,
         stateRef.current.colorMode,
+        stateRef.current.unitXRayFilter,
+        sceneTheme,
         eng.maxAnisotropy,
         !eng.isSoftwareGl
       );
@@ -579,8 +658,10 @@ export default function Ktx3DViewport({
       eng.boundsCenter.copy(built.boundsCenter);
       eng.boundsRadius = built.boundsRadius;
 
-      // Adjust fog & shadow frustum to campus scale
-      eng.scene.fog = new THREE.FogExp2(0x0b1220, Math.min(0.0085, 0.28 / Math.max(25, built.boundsRadius)));
+      eng.scene.fog = new THREE.FogExp2(
+        bgHex,
+        Math.min(0.008, 0.26 / Math.max(25, built.boundsRadius))
+      );
       const d = Math.min(95, Math.max(28, built.boundsRadius * 1.15));
       eng.keyLight.shadow.camera.left = -d;
       eng.keyLight.shadow.camera.right = d;
@@ -588,10 +669,26 @@ export default function Ktx3DViewport({
       eng.keyLight.shadow.camera.bottom = -d;
       eng.keyLight.shadow.camera.updateProjectionMatrix();
 
-      eng.controls.minDistance = 8;
+      eng.controls.minDistance = 7;
       eng.controls.maxDistance = Math.max(120, built.boundsRadius * 3.4);
 
-      computeCameraForPreset('campus', 'overview', built.boundsCenter, built.boundsRadius, _desiredCamPos, _desiredTarget);
+      applyCampusColorMode(
+        eng.roomVisuals,
+        stateRef.current.colorMode,
+        null,
+        stateRef.current.focusedRoomKey,
+        stateRef.current.unitXRayFilter,
+        sceneTheme
+      );
+
+      computeCameraForPreset(
+        'campus',
+        'overview',
+        built.boundsCenter,
+        built.boundsRadius,
+        _desiredCamPos,
+        _desiredTarget
+      );
       eng.cameraTransition.targetPos.copy(_desiredCamPos);
       eng.cameraTransition.targetLook.copy(_desiredTarget);
       eng.cameraTransition.active = true;
@@ -608,8 +705,7 @@ export default function Ktx3DViewport({
       eng.boundsCenter.copy(built.boundsCenter);
       eng.boundsRadius = built.boundsRadius;
 
-      // Crisp room interior fog & tight shadow bounds
-      eng.scene.fog = new THREE.FogExp2(0x0b1220, 0.012);
+      eng.scene.fog = new THREE.FogExp2(bgHex, sceneTheme === 'light' ? 0.007 : 0.011);
       const d = Math.max(10, built.boundsRadius * 1.3);
       eng.keyLight.shadow.camera.left = -d;
       eng.keyLight.shadow.camera.right = d;
@@ -617,12 +713,19 @@ export default function Ktx3DViewport({
       eng.keyLight.shadow.camera.bottom = -d;
       eng.keyLight.shadow.camera.updateProjectionMatrix();
 
-      eng.controls.minDistance = 2.8;
+      eng.controls.minDistance = 2.6;
       eng.controls.maxDistance = Math.max(24, built.boundsRadius * 3.2);
 
       applyBedHighlights(eng.bedVisuals, null, stateRef.current.selectedBedId);
 
-      computeCameraForPreset('room', 'overview', built.boundsCenter, built.boundsRadius, _desiredCamPos, _desiredTarget);
+      computeCameraForPreset(
+        'room',
+        'overview',
+        built.boundsCenter,
+        built.boundsRadius,
+        _desiredCamPos,
+        _desiredTarget
+      );
       eng.cameraTransition.targetPos.copy(_desiredCamPos);
       eng.cameraTransition.targetLook.copy(_desiredTarget);
       eng.cameraTransition.active = true;
@@ -632,17 +735,24 @@ export default function Ktx3DViewport({
       eng.renderer.compile(eng.scene, eng.camera);
     }
     eng.requestRender();
-  }, [viewLevel, ktxNodes, activeRoom, activeRoomBeds]);
+  }, [viewLevel, ktxNodes, activeRoom, activeRoomBeds, sceneTheme]);
 
-  // ── 3. Instant Color Mode Re-styling (zero geometry rebuild) ──
+  // ── 4. Instant Color Mode / Unit X-Ray / Focused Room Re-styling (zero geometry rebuild) ──
   useEffect(() => {
     const eng = engineRef.current;
     if (!eng || viewLevel !== 'campus') return;
-    applyCampusColorMode(eng.roomVisuals, colorMode, eng.hoveredRoomKey);
+    applyCampusColorMode(
+      eng.roomVisuals,
+      colorMode,
+      eng.hoveredRoomKey,
+      focusedRoomKey,
+      unitXRayFilter,
+      sceneTheme
+    );
     eng.requestRender();
-  }, [colorMode, viewLevel]);
+  }, [colorMode, unitXRayFilter, focusedRoomKey, viewLevel, sceneTheme]);
 
-  // ── 4. Instant Bed Selection Highlight (zero geometry rebuild) ──
+  // ── 5. Instant Bed Selection Highlight ──
   useEffect(() => {
     const eng = engineRef.current;
     if (!eng || viewLevel !== 'room') return;
@@ -650,7 +760,7 @@ export default function Ktx3DViewport({
     eng.requestRender();
   }, [selectedBedId, viewLevel]);
 
-  // ── 5. Smooth Camera Preset Transitions ──
+  // ── 6. Smooth Camera Preset Transitions ──
   useEffect(() => {
     const eng = engineRef.current;
     if (!eng || !cameraPresetRequest) return;
@@ -667,6 +777,70 @@ export default function Ktx3DViewport({
     eng.cameraTransition.active = true;
     eng.requestRender();
   }, [cameraPresetRequest, viewLevel]);
+
+  // ── 7. Smooth Fly-To Specific Room on Campus (from Quick Search) ──
+  useEffect(() => {
+    const eng = engineRef.current;
+    if (!eng || !focusRoomRequest || viewLevel !== 'campus') return;
+    const handle = eng.roomVisuals.get(focusRoomRequest.roomKey);
+    if (!handle) return;
+
+    eng.cameraTransition.targetLook.copy(handle.worldCenter);
+    eng.cameraTransition.targetPos.set(
+      handle.worldCenter.x + 6.5,
+      handle.worldCenter.y + 8.5,
+      handle.worldCenter.z + 11.5
+    );
+    eng.cameraTransition.active = true;
+    eng.requestRender();
+  }, [focusRoomRequest, viewLevel]);
+
+  // ── 8. Smooth Fly-To Specific Bunk Bed in Room Interior ──
+  useEffect(() => {
+    const eng = engineRef.current;
+    if (!eng || !focusBedRequest || viewLevel !== 'room') return;
+    const handle = eng.bedVisuals.get(focusBedRequest.bedId);
+    if (!handle) return;
+
+    const sideSign = handle.worldCenter.x < 0 ? 1 : -1;
+    eng.cameraTransition.targetLook.copy(handle.worldCenter);
+    eng.cameraTransition.targetPos.set(
+      handle.worldCenter.x + sideSign * 3.8,
+      handle.worldCenter.y + 1.85,
+      handle.worldCenter.z + 3.2
+    );
+    eng.cameraTransition.active = true;
+    eng.requestRender();
+  }, [focusBedRequest, viewLevel]);
+
+  // ── 9. Smooth Zoom In / Out Buttons (for touchpad & mobile) ──
+  useEffect(() => {
+    const eng = engineRef.current;
+    if (!eng || !zoomRequest) return;
+
+    const baseTarget = eng.cameraTransition.active
+      ? eng.cameraTransition.targetLook
+      : eng.controls.target;
+    const basePos = eng.cameraTransition.active
+      ? eng.cameraTransition.targetPos
+      : eng.camera.position;
+
+    _offsetVec.copy(basePos).sub(baseTarget);
+    const currentDist = _offsetVec.length();
+    const nextDist = THREE.MathUtils.clamp(
+      currentDist * zoomRequest.factor,
+      eng.controls.minDistance,
+      eng.controls.maxDistance
+    );
+    if (currentDist > 0.001) {
+      _offsetVec.multiplyScalar(nextDist / currentDist);
+    }
+
+    eng.cameraTransition.targetLook.copy(baseTarget);
+    eng.cameraTransition.targetPos.copy(baseTarget).add(_offsetVec);
+    eng.cameraTransition.active = true;
+    eng.requestRender();
+  }, [zoomRequest]);
 
   if (webglUnsupported) {
     return (

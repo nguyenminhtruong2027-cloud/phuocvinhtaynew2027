@@ -1,5 +1,11 @@
 import * as THREE from 'three';
-import type { CampusColorMode, CampusKtxNode, CampusRoomNode } from '../types';
+import type {
+  CampusColorMode,
+  CampusKtxNode,
+  CampusRoomNode,
+  SceneTheme,
+  UnitXRayFilter,
+} from '../types';
 import {
   createGroundTileTexture,
   createPlaqueTexture,
@@ -22,36 +28,67 @@ export interface CampusBuildResult {
   boundsRadius: number;
 }
 
-// Semantic architectural palette (works harmoniously under ACESFilmic + RoomEnvironment)
 const PALETTE = {
-  empty: 0x475569,
+  empty: 0x64748b,
   available: 0x10b981,
   full: 0xf59e0b,
   overloaded: 0xf43f5e,
   male: 0x3b82f6,
   female: 0xec4899,
   mixed: 0xf59e0b,
-  ghost: 0x1e293b,
+  xrayMatch: 0x38bdf8,
+  xrayStrong: 0x0ea5e9,
+  ghostDark: 0x1e293b,
+  ghostLight: 0x94a3b8,
 };
+
+export function getRoomUnitMatchCount(
+  room: CampusRoomNode,
+  unitFilter: UnitXRayFilter | null
+): number {
+  if (!unitFilter) return 0;
+  if (unitFilter.type === 'platoon') {
+    return room.platoonCounts[unitFilter.value] || 0;
+  }
+  return room.unitCounts[unitFilter.value] || 0;
+}
 
 export function resolveRoomColor(
   room: CampusRoomNode,
-  mode: CampusColorMode
+  mode: CampusColorMode,
+  unitFilter: UnitXRayFilter | null,
+  theme: SceneTheme
 ): { color: number; emissive: number; emissiveIntensity: number; opacity: number } {
   const isOverloaded = room.occupied > room.capacity;
   const isFull = room.occupied >= room.capacity && room.capacity > 0;
   const isEmpty = room.occupied === 0;
+  const ghostColor = theme === 'light' ? PALETTE.ghostLight : PALETTE.ghostDark;
+  const ghostOpacity = theme === 'light' ? 0.28 : 0.22;
+
+  if (mode === 'unit_xray' && unitFilter) {
+    const matchCount = getRoomUnitMatchCount(room, unitFilter);
+    if (matchCount > 0) {
+      const ratio = room.occupied > 0 ? matchCount / room.occupied : 1;
+      return {
+        color: ratio >= 0.5 ? PALETTE.xrayStrong : PALETTE.xrayMatch,
+        emissive: 0x0284c7,
+        emissiveIntensity: 0.22 + ratio * 0.28,
+        opacity: 1,
+      };
+    }
+    return { color: ghostColor, emissive: 0x000000, emissiveIntensity: 0, opacity: ghostOpacity };
+  }
 
   if (mode === 'vacant_only') {
     if (room.vacant > 0) {
       return {
         color: isEmpty ? 0x38bdf8 : PALETTE.available,
         emissive: isEmpty ? 0x0ea5e9 : 0x059669,
-        emissiveIntensity: 0.28,
+        emissiveIntensity: 0.26,
         opacity: 1,
       };
     }
-    return { color: PALETTE.ghost, emissive: 0x000000, emissiveIntensity: 0, opacity: 0.24 };
+    return { color: ghostColor, emissive: 0x000000, emissiveIntensity: 0, opacity: ghostOpacity };
   }
 
   if (mode === 'overloaded_only') {
@@ -63,7 +100,7 @@ export function resolveRoomColor(
         opacity: 1,
       };
     }
-    return { color: PALETTE.ghost, emissive: 0x000000, emissiveIntensity: 0, opacity: 0.22 };
+    return { color: ghostColor, emissive: 0x000000, emissiveIntensity: 0, opacity: ghostOpacity };
   }
 
   if (mode === 'gender') {
@@ -96,27 +133,44 @@ export function resolveRoomColor(
 export function applyCampusColorMode(
   roomVisuals: Map<string, RoomVisualHandle>,
   mode: CampusColorMode,
-  hoveredKey: string | null
+  hoveredKey: string | null,
+  focusedKey: string | null,
+  unitFilter: UnitXRayFilter | null,
+  theme: SceneTheme
 ): void {
   roomVisuals.forEach((handle, key) => {
-    const spec = resolveRoomColor(handle.room, mode);
+    const spec = resolveRoomColor(handle.room, mode, unitFilter, theme);
     const isHovered = key === hoveredKey;
-    handle.bodyMat.color.setHex(spec.color);
-    handle.bodyMat.opacity = isHovered ? 1 : spec.opacity;
-    handle.bodyMat.transparent = !isHovered && spec.opacity < 0.99;
-    handle.bodyMat.depthWrite = isHovered || spec.opacity >= 0.99;
-    handle.bodyMat.emissive.setHex(isHovered ? 0x38bdf8 : spec.emissive);
-    handle.bodyMat.emissiveIntensity = isHovered ? 0.55 : spec.emissiveIntensity;
+    const isFocused = key === focusedKey;
 
-    handle.stripMat.color.setHex(isHovered ? 0x7dd3fc : spec.color);
-    handle.stripMat.emissive.setHex(isHovered ? 0x38bdf8 : spec.color);
-    handle.stripMat.emissiveIntensity = isHovered ? 0.85 : spec.opacity < 0.5 ? 0.05 : 0.45;
+    handle.bodyMat.color.setHex(spec.color);
+    handle.bodyMat.opacity = isHovered || isFocused ? 1 : spec.opacity;
+    handle.bodyMat.transparent = !isHovered && !isFocused && spec.opacity < 0.99;
+    handle.bodyMat.depthWrite = isHovered || isFocused || spec.opacity >= 0.99;
+
+    if (isFocused) {
+      handle.bodyMat.emissive.setHex(0x38bdf8);
+      handle.bodyMat.emissiveIntensity = 0.65;
+    } else if (isHovered) {
+      handle.bodyMat.emissive.setHex(0x7dd3fc);
+      handle.bodyMat.emissiveIntensity = 0.48;
+    } else {
+      handle.bodyMat.emissive.setHex(spec.emissive);
+      handle.bodyMat.emissiveIntensity = spec.emissiveIntensity;
+    }
+
+    handle.stripMat.color.setHex(isFocused || isHovered ? 0x7dd3fc : spec.color);
+    handle.stripMat.emissive.setHex(isFocused || isHovered ? 0x38bdf8 : spec.color);
+    handle.stripMat.emissiveIntensity =
+      isFocused || isHovered ? 0.9 : spec.opacity < 0.5 ? 0.05 : 0.45;
   });
 }
 
 export function buildCampusScene(
   ktxNodes: CampusKtxNode[],
   colorMode: CampusColorMode,
+  unitFilter: UnitXRayFilter | null,
+  theme: SceneTheme,
   maxAnisotropy: number,
   castShadows: boolean
 ): CampusBuildResult {
@@ -125,8 +179,11 @@ export function buildCampusScene(
 
   const hitTargets: THREE.Object3D[] = [];
   const roomVisuals = new Map<string, RoomVisualHandle>();
+  const plaqueTexCache = new Map<string, THREE.CanvasTexture>();
+  const roomPlaqueMatCache = new Map<string, THREE.MeshStandardMaterial>();
+  const isLight = theme === 'light';
 
-  // Dimensions (meters-like architectural units)
+  // Dimensions
   const ROOM_W = 2.6;
   const ROOM_D = 3.2;
   const ROOM_H = 2.35;
@@ -137,29 +194,29 @@ export function buildCampusScene(
   const KTX_PAD_Z = 2.8;
   const KTX_ZONE_GAP_X = 7.5;
 
-  // Shared materials (varied roughness/metalness for crisp architectural depth)
+  // Shared materials adapted cleanly for Daylight vs Night theme
   const concretePlinthMat = new THREE.MeshStandardMaterial({
-    color: 0x263246,
+    color: isLight ? 0xcbd5e1 : 0x263246,
     roughness: 0.88,
-    metalness: 0.06,
+    metalness: 0.05,
   });
   const buildingDeckMat = new THREE.MeshStandardMaterial({
-    color: 0x334155,
+    color: isLight ? 0x94a3b8 : 0x334155,
     roughness: 0.82,
     metalness: 0.08,
   });
   const roofMat = new THREE.MeshStandardMaterial({
-    color: 0x1e293b,
+    color: isLight ? 0x334155 : 0x1e293b,
     roughness: 0.46,
-    metalness: 0.48,
+    metalness: 0.45,
   });
   const roofTrimMat = new THREE.MeshStandardMaterial({
-    color: 0x64748b,
+    color: isLight ? 0xe2e8f0 : 0x64748b,
     roughness: 0.34,
-    metalness: 0.65,
+    metalness: 0.62,
   });
   const pillarMat = new THREE.MeshStandardMaterial({
-    color: 0xcbd5e1,
+    color: isLight ? 0xf1f5f9 : 0xcbd5e1,
     roughness: 0.55,
     metalness: 0.25,
   });
@@ -167,11 +224,11 @@ export function buildCampusScene(
     color: 0xbae6fd,
     roughness: 0.14,
     metalness: 0.35,
-    emissive: 0x0c4a6e,
-    emissiveIntensity: 0.25,
+    emissive: isLight ? 0x0369a1 : 0x0c4a6e,
+    emissiveIntensity: isLight ? 0.12 : 0.25,
   });
   const doorMat = new THREE.MeshStandardMaterial({
-    color: 0x1e293b,
+    color: isLight ? 0x334155 : 0x1e293b,
     roughness: 0.62,
     metalness: 0.22,
   });
@@ -181,32 +238,29 @@ export function buildCampusScene(
     metalness: 0.75,
   });
   const lawnMat = new THREE.MeshStandardMaterial({
-    color: 0x1a3a2f,
+    color: isLight ? 0x4d7c5b : 0x1a3a2f,
     roughness: 0.94,
     metalness: 0.0,
   });
 
-  // Shared geometries for reuse across all rooms/buildings (low draw-call / memory footprint)
+  // Shared reusable geometries
   const roomBodyGeo = new THREE.BoxGeometry(ROOM_W, ROOM_H, ROOM_D);
   const windowGeo = new THREE.BoxGeometry(ROOM_W * 0.42, 0.72, 0.08);
   const doorGeo = new THREE.BoxGeometry(0.68, 1.55, 0.08);
   const stripGeo = new THREE.BoxGeometry(ROOM_W - 0.12, 0.12, 0.14);
   const pillarGeo = new THREE.CylinderGeometry(0.08, 0.09, ROOM_H + 0.15, 8);
   const roomPlaqueGeo = new THREE.PlaneGeometry(1.15, 0.46);
+  const postGeo = new THREE.CylinderGeometry(0.1, 0.11, 1.6, 8);
 
-  // Measure each KTX zone footprint first so we can center the entire campus cleanly at (0, 0, 0)
+  // Measure each KTX zone footprint
   interface ZoneLayout {
     node: CampusKtxNode;
     width: number;
     depth: number;
-    maxRoomsInRow: number;
   }
 
   const zoneLayouts: ZoneLayout[] = ktxNodes.map(ktxNode => {
-    const maxRooms = Math.max(
-      1,
-      ...ktxNode.buildings.map(b => Math.max(1, b.rooms.length))
-    );
+    const maxRooms = Math.max(1, ...ktxNode.buildings.map(b => Math.max(1, b.rooms.length)));
     const maxBuildingW = maxRooms * (ROOM_W + ROOM_GAP) + 1.2;
     const totalDepth =
       ktxNode.buildings.length * (ROOM_D + CORRIDOR_D) +
@@ -215,7 +269,6 @@ export function buildCampusScene(
       node: ktxNode,
       width: maxBuildingW + KTX_PAD_X * 2,
       depth: Math.max(10, totalDepth + KTX_PAD_Z * 2),
-      maxRoomsInRow: maxRooms,
     };
   });
 
@@ -224,9 +277,9 @@ export function buildCampusScene(
     Math.max(0, zoneLayouts.length - 1) * KTX_ZONE_GAP_X;
   const maxCampusD = Math.max(18, ...zoneLayouts.map(z => z.depth));
 
-  // ── 1. Extended Outdoor Ground Plane (blends cleanly into horizon fog, no void edge) ──
+  // ── 1. Extended Outdoor Ground Plane ──
   const groundSize = Math.max(260, Math.max(totalCampusW, maxCampusD) * 4.5);
-  const groundTex = createGroundTileTexture(maxAnisotropy);
+  const groundTex = createGroundTileTexture(maxAnisotropy, theme);
   const groundMat = new THREE.MeshStandardMaterial({
     map: groundTex,
     roughness: 0.92,
@@ -238,8 +291,8 @@ export function buildCampusScene(
   groundMesh.receiveShadow = true;
   group.add(groundMesh);
 
-  // Main horizontal campus boulevard in front of KTX zones
-  const roadTex = createRoadTexture(maxAnisotropy);
+  // Main campus boulevard
+  const roadTex = createRoadTexture(maxAnisotropy, theme);
   const roadLen = Math.max(totalCampusW + 40, 80);
   roadTex.repeat.set(1, Math.max(4, Math.round(roadLen / 10)));
   const roadMat = new THREE.MeshStandardMaterial({
@@ -257,9 +310,14 @@ export function buildCampusScene(
   roadMesh.receiveShadow = true;
   group.add(roadMesh);
 
+  // Collectors for high-performance InstancedMesh batching
+  const doorPositions: THREE.Vector3[] = [];
+  const windowPositions: THREE.Vector3[] = [];
+  const pillarPositions: THREE.Vector3[] = [];
+  const treePositions: { x: number; z: number }[] = [];
+
   // ── 2. Build each KTX Zone ──
   let cursorX = -totalCampusW / 2;
-  const treePositions: { x: number; z: number }[] = [];
 
   zoneLayouts.forEach((zl, ktxIdx) => {
     const zoneCenterX = cursorX + zl.width / 2;
@@ -269,7 +327,6 @@ export function buildCampusScene(
     ktxGroup.name = `ktx-zone-${zl.node.ktx}`;
     ktxGroup.position.set(zoneCenterX, 0, 0);
 
-    // KTX Zone architectural plinth (y offset >= 0.04 above ground)
     const plinthH = 0.24;
     const plinth = new THREE.Mesh(
       new THREE.BoxGeometry(zl.width, plinthH, zl.depth),
@@ -279,7 +336,6 @@ export function buildCampusScene(
     plinth.receiveShadow = true;
     ktxGroup.add(plinth);
 
-    // Green courtyard strips along left & right edges of zone
     const lawnStripGeo = new THREE.BoxGeometry(1.1, 0.06, zl.depth - 1.4);
     const leftLawn = new THREE.Mesh(lawnStripGeo, lawnMat);
     leftLawn.position.set(-zl.width / 2 + 0.8, plinthH + 0.05, 0);
@@ -288,7 +344,6 @@ export function buildCampusScene(
     rightLawn.position.set(zl.width / 2 - 0.8, plinthH + 0.05, 0);
     ktxGroup.add(rightLawn);
 
-    // Register perimeter trees outside KTX plinth for InstancedMesh
     const treeCountSide = Math.max(3, Math.min(8, Math.floor(zl.depth / 6)));
     for (let t = 0; t < treeCountSide; t++) {
       const tz = -zl.depth / 2 + 2.5 + (t * (zl.depth - 5)) / Math.max(1, treeCountSide - 1);
@@ -299,15 +354,19 @@ export function buildCampusScene(
     }
 
     // KTX Zone Entrance Monument Signboard
-    const ktxSignTex = createPlaqueTexture(zl.node.ktx, {
-      subtext: `${zl.node.totalOccupied}/${zl.node.totalCapacity} chỗ · ${zl.node.totalRooms} phòng`,
-      bg: '#0f172a',
-      border: '#3b82f6',
-      width: 384,
-      height: 112,
-      fontSize: 38,
-      maxAnisotropy,
-    });
+    const ktxSignTex = createPlaqueTexture(
+      zl.node.ktx,
+      {
+        subtext: `${zl.node.totalOccupied}/${zl.node.totalCapacity} chỗ · ${zl.node.totalRooms} phòng`,
+        bg: '#0f172a',
+        border: '#3b82f6',
+        width: 384,
+        height: 112,
+        fontSize: 38,
+        maxAnisotropy,
+      },
+      plaqueTexCache
+    );
     const signBoard = new THREE.Mesh(
       new THREE.BoxGeometry(5.6, 1.65, 0.22),
       new THREE.MeshStandardMaterial({
@@ -320,7 +379,6 @@ export function buildCampusScene(
     signBoard.castShadow = castShadows;
     ktxGroup.add(signBoard);
 
-    const postGeo = new THREE.CylinderGeometry(0.1, 0.11, 1.6, 8);
     [-2.1, 2.1].forEach(px => {
       const post = new THREE.Mesh(postGeo, signPostMat);
       post.position.set(px, plinthH + 0.8, zl.depth / 2 + 0.6);
@@ -341,11 +399,11 @@ export function buildCampusScene(
       const bldCenterZ = bldCursorZ + bldTotalD / 2;
       bldCursorZ += bldTotalD + BUILDING_GAP_Z;
 
+      const bldBaseY = plinthH + 0.02;
       const bldGroup = new THREE.Group();
       bldGroup.name = `building-${building.key}`;
-      bldGroup.position.set(0, plinthH + 0.02, bldCenterZ);
+      bldGroup.position.set(0, bldBaseY, bldCenterZ);
 
-      // Building concrete foundation + front walkway deck
       const deckH = 0.22;
       const deck = new THREE.Mesh(
         new THREE.BoxGeometry(bldW + 0.4, deckH, bldTotalD + 0.3),
@@ -355,7 +413,6 @@ export function buildCampusScene(
       deck.receiveShadow = true;
       bldGroup.add(deck);
 
-      // Pitched architectural roof overhang + ridge beam
       const roofY = deckH + ROOM_H + 0.18;
       const roofMain = new THREE.Mesh(
         new THREE.BoxGeometry(bldW + 0.9, 0.22, bldTotalD + 0.8),
@@ -374,7 +431,6 @@ export function buildCampusScene(
       roofRidge.castShadow = castShadows;
       bldGroup.add(roofRidge);
 
-      // Corridor front fascia trim
       const fascia = new THREE.Mesh(
         new THREE.BoxGeometry(bldW + 0.94, 0.14, 0.12),
         roofTrimMat
@@ -382,47 +438,61 @@ export function buildCampusScene(
       fascia.position.set(0, roofY - 0.04, bldTotalD / 2 + 0.4);
       bldGroup.add(fascia);
 
-      // Front walkway columns
+      // Queue front walkway pillars for InstancedMesh
       const pillarCount = Math.max(2, Math.min(rowRoomCount + 1, 14));
       for (let p = 0; p < pillarCount; p++) {
         const px = -bldW / 2 + (p * bldW) / (pillarCount - 1);
-        const pillar = new THREE.Mesh(pillarGeo, pillarMat);
-        pillar.position.set(px, deckH + (ROOM_H + 0.15) / 2, bldTotalD / 2 - 0.1);
-        bldGroup.add(pillar);
+        pillarPositions.push(
+          new THREE.Vector3(
+            zoneCenterX + px,
+            bldBaseY + deckH + (ROOM_H + 0.15) / 2,
+            bldCenterZ + bldTotalD / 2 - 0.1
+          )
+        );
       }
 
-      // Building signboard on left gable end
-      const bldSignTex = createPlaqueTexture(building.day, {
-        subtext: `${building.totalOccupied}/${building.totalCapacity}`,
-        bg: '#0f172a',
-        border: '#10b981',
-        width: 256,
-        height: 96,
-        fontSize: 34,
-        maxAnisotropy,
-      });
-      const bldSign = new THREE.Mesh(
-        new THREE.PlaneGeometry(2.2, 0.82),
-        new THREE.MeshStandardMaterial({
-          map: bldSignTex,
-          roughness: 0.35,
-          metalness: 0.1,
-        })
+      // Building signboards on BOTH left AND right gable ends (readable from any orbit angle!)
+      const bldSignTex = createPlaqueTexture(
+        building.day,
+        {
+          subtext: `${building.totalOccupied}/${building.totalCapacity}`,
+          bg: '#0f172a',
+          border: '#10b981',
+          width: 256,
+          height: 96,
+          fontSize: 34,
+          maxAnisotropy,
+        },
+        plaqueTexCache
       );
-      bldSign.position.set(-bldW / 2 - 0.24, deckH + ROOM_H * 0.62, 0);
-      bldSign.rotation.y = -Math.PI / 2;
-      bldGroup.add(bldSign);
+      const bldSignMat = new THREE.MeshStandardMaterial({
+        map: bldSignTex,
+        roughness: 0.35,
+        metalness: 0.1,
+      });
+      const bldSignGeo = new THREE.PlaneGeometry(2.2, 0.82);
 
-      // ── 4. Build Interactive Room Units along the Building ──
+      const bldSignLeft = new THREE.Mesh(bldSignGeo, bldSignMat);
+      bldSignLeft.position.set(-bldW / 2 - 0.24, deckH + ROOM_H * 0.62, 0);
+      bldSignLeft.rotation.y = -Math.PI / 2;
+      bldGroup.add(bldSignLeft);
+
+      const bldSignRight = new THREE.Mesh(bldSignGeo, bldSignMat);
+      bldSignRight.position.set(bldW / 2 + 0.24, deckH + ROOM_H * 0.62, 0);
+      bldSignRight.rotation.y = Math.PI / 2;
+      bldGroup.add(bldSignRight);
+
+      // ── 4. Build Interactive Room Units ──
       const startRoomX = -((rowRoomCount - 1) * (ROOM_W + ROOM_GAP)) / 2;
       const roomZLocal = -CORRIDOR_D / 2;
 
       building.rooms.forEach((room, rIdx) => {
         const rx = startRoomX + rIdx * (ROOM_W + ROOM_GAP);
-        const spec = resolveRoomColor(room, colorMode);
+        const worldX = zoneCenterX + rx;
+        const worldYBase = bldBaseY + deckH;
+        const worldZ = bldCenterZ + roomZLocal;
 
-        const roomGroup = new THREE.Group();
-        roomGroup.position.set(rx, deckH, roomZLocal);
+        const spec = resolveRoomColor(room, colorMode, unitFilter, theme);
 
         const bodyMat = new THREE.MeshStandardMaterial({
           color: spec.color,
@@ -436,28 +506,19 @@ export function buildCampusScene(
         });
 
         const bodyMesh = new THREE.Mesh(roomBodyGeo, bodyMat);
-        bodyMesh.position.set(0, ROOM_H / 2, 0);
+        bodyMesh.position.set(rx, deckH + ROOM_H / 2, roomZLocal);
         bodyMesh.castShadow = castShadows;
         bodyMesh.receiveShadow = true;
         bodyMesh.userData = { type: 'room', roomKey: room.key };
-        roomGroup.add(bodyMesh);
+        bldGroup.add(bodyMesh);
         hitTargets.push(bodyMesh);
 
-        // Front door (facing corridor +Z)
-        const door = new THREE.Mesh(doorGeo, doorMat);
-        door.position.set(-0.56, 0.78, ROOM_D / 2 + 0.02);
-        roomGroup.add(door);
+        // Queue door + front/rear windows for InstancedMesh
+        doorPositions.push(new THREE.Vector3(worldX - 0.56, worldYBase + 0.78, worldZ + ROOM_D / 2 + 0.02));
+        windowPositions.push(new THREE.Vector3(worldX + 0.48, worldYBase + 1.32, worldZ + ROOM_D / 2 + 0.02));
+        windowPositions.push(new THREE.Vector3(worldX, worldYBase + 1.32, worldZ - ROOM_D / 2 - 0.02));
 
-        // Front & rear recessed windows
-        const frontWin = new THREE.Mesh(windowGeo, windowGlassMat);
-        frontWin.position.set(0.48, 1.32, ROOM_D / 2 + 0.02);
-        roomGroup.add(frontWin);
-
-        const rearWin = new THREE.Mesh(windowGeo, windowGlassMat);
-        rearWin.position.set(0, 1.32, -ROOM_D / 2 - 0.02);
-        roomGroup.add(rearWin);
-
-        // Status indicator bar above corridor lintel
+        // Status indicator bar
         const stripMat = new THREE.MeshStandardMaterial({
           color: spec.color,
           emissive: spec.color,
@@ -466,38 +527,37 @@ export function buildCampusScene(
           metalness: 0.3,
         });
         const strip = new THREE.Mesh(stripGeo, stripMat);
-        strip.position.set(0, ROOM_H - 0.16, ROOM_D / 2 + 0.06);
-        roomGroup.add(strip);
+        strip.position.set(rx, deckH + ROOM_H - 0.16, roomZLocal + ROOM_D / 2 + 0.06);
+        bldGroup.add(strip);
 
-        // Crisp room number plaque above door
-        const rPlaqueTex = createPlaqueTexture(room.roomLabel, {
-          bg: '#0b1220',
-          border: '#475569',
-          width: 160,
-          height: 64,
-          fontSize: 32,
-          maxAnisotropy,
-        });
-        const rPlaque = new THREE.Mesh(
-          roomPlaqueGeo,
-          new THREE.MeshStandardMaterial({
+        // Deduplicated room number plaque
+        let plaqueMat = roomPlaqueMatCache.get(room.roomLabel);
+        if (!plaqueMat) {
+          const rPlaqueTex = createPlaqueTexture(
+            room.roomLabel,
+            {
+              bg: '#0b1220',
+              border: '#475569',
+              width: 160,
+              height: 64,
+              fontSize: 32,
+              maxAnisotropy,
+            },
+            plaqueTexCache
+          );
+          plaqueMat = new THREE.MeshStandardMaterial({
             map: rPlaqueTex,
             roughness: 0.4,
             metalness: 0.1,
-          })
-        );
-        rPlaque.position.set(0, ROOM_H + 0.36, ROOM_D / 2 + CORRIDOR_D * 0.46);
+          });
+          roomPlaqueMatCache.set(room.roomLabel, plaqueMat);
+        }
+        const rPlaque = new THREE.Mesh(roomPlaqueGeo, plaqueMat);
+        rPlaque.position.set(rx, deckH + ROOM_H + 0.36, roomZLocal + ROOM_D / 2 + CORRIDOR_D * 0.46);
         rPlaque.rotation.x = -0.35;
-        roomGroup.add(rPlaque);
+        bldGroup.add(rPlaque);
 
-        bldGroup.add(roomGroup);
-
-        const worldCenter = new THREE.Vector3(
-          zoneCenterX + rx,
-          plinthH + 0.02 + deckH + ROOM_H / 2,
-          bldCenterZ + roomZLocal
-        );
-
+        const worldCenter = new THREE.Vector3(worldX, worldYBase + ROOM_H / 2, worldZ);
         roomVisuals.set(room.key, {
           room,
           bodyMesh,
@@ -513,8 +573,52 @@ export function buildCampusScene(
     group.add(ktxGroup);
   });
 
-  // ── 3. Composite Procedural Trees via InstancedMesh (3-part: trunk + lower crown + upper crown) ──
-  // Add front boulevard trees as well
+  // ── 5. Commit Batched InstancedMeshes (Doors, Windows, Corridor Pillars) ──
+  const dummy = new THREE.Object3D();
+
+  if (doorPositions.length > 0) {
+    const doorsInst = new THREE.InstancedMesh(doorGeo, doorMat, doorPositions.length);
+    doorPositions.forEach((pos, idx) => {
+      dummy.position.copy(pos);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      doorsInst.setMatrixAt(idx, dummy.matrix);
+    });
+    doorsInst.instanceMatrix.needsUpdate = true;
+    doorsInst.computeBoundingSphere();
+    group.add(doorsInst);
+  }
+
+  if (windowPositions.length > 0) {
+    const windowsInst = new THREE.InstancedMesh(windowGeo, windowGlassMat, windowPositions.length);
+    windowPositions.forEach((pos, idx) => {
+      dummy.position.copy(pos);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      windowsInst.setMatrixAt(idx, dummy.matrix);
+    });
+    windowsInst.instanceMatrix.needsUpdate = true;
+    windowsInst.computeBoundingSphere();
+    group.add(windowsInst);
+  }
+
+  if (pillarPositions.length > 0) {
+    const pillarsInst = new THREE.InstancedMesh(pillarGeo, pillarMat, pillarPositions.length);
+    pillarPositions.forEach((pos, idx) => {
+      dummy.position.copy(pos);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      pillarsInst.setMatrixAt(idx, dummy.matrix);
+    });
+    pillarsInst.instanceMatrix.needsUpdate = true;
+    pillarsInst.computeBoundingSphere();
+    group.add(pillarsInst);
+  }
+
+  // ── 6. Composite Procedural Trees via InstancedMesh ──
   const blvdTreeCount = Math.max(4, Math.min(14, Math.floor(totalCampusW / 8)));
   for (let i = 0; i < blvdTreeCount; i++) {
     const tx = -totalCampusW / 2 + (i * totalCampusW) / Math.max(1, blvdTreeCount - 1);
@@ -538,12 +642,12 @@ export function buildCampusScene(
     crowns1.castShadow = castShadows;
     crowns2.castShadow = castShadows;
 
-    const dummy = new THREE.Object3D();
     const tint = new THREE.Color();
+    const baseLightness = isLight ? 0.34 : 0.24;
 
     treePositions.forEach((pos, idx) => {
-      const scale = 0.86 + ((idx * 37) % 30) / 100; // ±15% natural variation
-      const rotY = ((idx * 1.7) % (Math.PI * 2));
+      const scale = 0.86 + ((idx * 37) % 30) / 100;
+      const rotY = (idx * 1.7) % (Math.PI * 2);
 
       dummy.position.set(pos.x, 0.9 * scale, pos.z);
       dummy.rotation.set(0, rotY, 0);
@@ -559,9 +663,8 @@ export function buildCampusScene(
       dummy.updateMatrix();
       crowns2.setMatrixAt(idx, dummy.matrix);
 
-      // Subtle natural foliage shade variation
       const greenHue = 0.36 + ((idx % 5) - 2) * 0.015;
-      const greenLight = 0.24 + ((idx * 13) % 7) * 0.015;
+      const greenLight = baseLightness + ((idx * 13) % 7) * 0.014;
       tint.setHSL(greenHue, 0.45, greenLight);
       crowns1.setColorAt(idx, tint);
       tint.setHSL(greenHue + 0.01, 0.48, greenLight + 0.05);
