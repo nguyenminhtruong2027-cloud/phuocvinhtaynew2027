@@ -35,7 +35,7 @@ import { exportToExcel } from '@/lib/exportExcel';
 import { fetchWorkerFluctuationReport, getVNDateString } from '@/lib/workerFluctuation';
 
 const RoomDrawer = dynamic(() => import('./components/RoomDrawer'), { ssr: false });
-const DashboardCharts = dynamic(() => import('./components/DashboardCharts'), { ssr: false });
+const TopUnitsRankingCard = dynamic(() => import('./components/TopUnitsRankingCard'), { ssr: false });
 const RecentEntriesFeed = dynamic(() => import('./components/RecentEntriesFeed'), { ssr: false });
 
 const EMPTY_TOOLTIP_WORKERS: { hoVaTen: string; maNV: string; gioiTinh?: string }[] = [];
@@ -1945,14 +1945,17 @@ export default function OccupancyDashboardPage() {
             )}
           </div>
 
-          {/* ── 7. Charts + Recent Entries Feed ── */}
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-            <div className="xl:col-span-2">
-              <DashboardCharts />
-            </div>
-            <div className="xl:col-span-1">
-              <RecentEntriesFeed />
-            </div>
+          {/* ── 7. Top Units / Platoons Ranking + Recent Entries Feed (50/50) ── */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+            <TopUnitsRankingCard
+              workers={filteredWorkers}
+              selectedKTX={selectedKTX}
+            />
+            <RecentEntriesFeed
+              workers={filteredWorkers}
+              selectedKTX={selectedKTX}
+              onSelectRoom={handleRoomClick}
+            />
           </div>
 
         </div>
