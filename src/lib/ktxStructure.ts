@@ -84,15 +84,21 @@ export async function fetchDynamicKtxStructure(forceRefresh = false): Promise<Kt
       const supabase = createClient();
       const ktxMap = new Map<string, Set<string>>();
 
+      const isSystemSentinel = (val?: string | null) => {
+        const t = (val || '').trim();
+        return t.startsWith('__') && t.endsWith('__');
+      };
+
       const addEntry = (rawKtx: string, rawDay?: string) => {
+        if (isSystemSentinel(rawKtx) || isSystemSentinel(rawDay)) return;
         const ktx = normalizeKtxLabel(rawKtx);
-        if (!ktx) return;
+        if (!ktx || isSystemSentinel(ktx)) return;
         if (!ktxMap.has(ktx)) {
           ktxMap.set(ktx, new Set());
         }
         if (rawDay) {
           const day = normalizeDayLabel(rawDay);
-          if (day) {
+          if (day && !isSystemSentinel(day)) {
             ktxMap.get(ktx)!.add(day);
           }
         }
@@ -297,7 +303,11 @@ function ensureSharedRealtimeSubscription() {
       .channel('ktx_structure_realtime_shared')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'workers' }, handleWorkerInsertRealtime)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, scheduleSharedStructureReload)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_units' }, scheduleSharedStructureReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_units' }, (payload: { new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
+        const ktxVal = String(payload?.new?.ktx ?? payload?.old?.ktx ?? '').trim();
+        if (ktxVal.startsWith('__') && ktxVal.endsWith('__')) return;
+        scheduleSharedStructureReload();
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, scheduleSharedStructureReload)
       .subscribe();
   } catch (err) {

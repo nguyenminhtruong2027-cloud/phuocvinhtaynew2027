@@ -86,7 +86,12 @@ export default function RoomOccupancyGrid() {
     }
 
     if (data) {
-      setRoomUnitAssignments(data as RoomUnitAssignment[]);
+      const filtered = (data as RoomUnitAssignment[]).filter(row => {
+        const k = (row.ktx || '').trim();
+        const d = (row.day_nha || '').trim();
+        return !(k.startsWith('__') && k.endsWith('__')) && !(d.startsWith('__') && d.endsWith('__'));
+      });
+      setRoomUnitAssignments(filtered);
     }
   }, []);
 

@@ -219,7 +219,10 @@ export async function fetchRoomLabelsAuthoritative(): Promise<{
     const map: Record<string, 'male' | 'female' | 'auto'> = {};
     data.forEach((row: any) => {
       if (!row.ktx || !row.day_nha || !row.phong_so || !row.room_label) return;
-      const key = `${row.ktx.trim()}||${row.day_nha.trim()}||${row.phong_so.trim()}`;
+      const k = row.ktx.trim();
+      const d = row.day_nha.trim();
+      if ((k.startsWith('__') && k.endsWith('__')) || (d.startsWith('__') && d.endsWith('__'))) return;
+      const key = `${k}||${d}||${row.phong_so.trim()}`;
       const norm = row.room_label.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
       if (norm === 'nam' || norm === 'phong nam') {
         map[key] = 'male';

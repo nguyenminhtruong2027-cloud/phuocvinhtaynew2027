@@ -940,7 +940,9 @@ export default function FacilitiesClient() {
     )
   ).sort(compareKtxNames);
 
-  const missingFacilityKtxs = structureKtxNames.filter(k => k && !allKtxTabs.includes(k));
+  const missingFacilityKtxs = structureKtxNames.filter(
+    k => k && !(k.startsWith('__') && k.endsWith('__')) && !allKtxTabs.includes(k)
+  );
 
   // If activeKtx not in tabs (e.g. after data load or deleting last room of a tab), reset to first
   useEffect(() => {
