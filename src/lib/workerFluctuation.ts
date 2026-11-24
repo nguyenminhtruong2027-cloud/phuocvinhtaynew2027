@@ -37,6 +37,8 @@ export interface FluctuationFilterParams {
   day: string;
   cutoffMode: FluctuationCutoffMode;
   preloadedWorkerRows?: RawWorkerRow[];
+  baselineDate?: string | null;
+  ignoreBaseline?: boolean;
 }
 
 export interface FluctuationReportResult {
@@ -45,6 +47,13 @@ export interface FluctuationReportResult {
   today: DailyFluctuation;
   availableKtx: string[];
   availableDays: string[];
+  appliedBaselineDate: string | null;
+}
+
+export interface FluctuationBaselineConfig {
+  baselineDate: string | null; // YYYY-MM-DD (Asia/Ho_Chi_Minh)
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 export interface PreservedWorkerEntry {
@@ -57,8 +66,19 @@ export interface PreservedWorkerEntry {
 }
 
 const PRESERVED_ENTRIES_STORAGE_KEY = 'ktx_fluctuation_preserved_entries_v1';
+const BASELINE_STORAGE_KEY = 'ktx_fluctuation_baseline_v1';
+const BASELINE_REMOTE_SENTINEL = {
+  ktx: '__SYSTEM_CONFIG__',
+  day_nha: '__FLUCTUATION__',
+  phong_so: 'baseline_date',
+} as const;
+const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_PRESERVED_ENTRIES = 5000;
 const PAGE_SIZE = 1000;
+
+let cachedBaselineConfig: FluctuationBaselineConfig | null = null;
+let cachedBaselineFetchedAt = 0;
+const BASELINE_CACHE_TTL_MS = 60_000;
 
 // ─── Vietnam Timezone (Asia/Ho_Chi_Minh, UTC+7) Helpers ───────────────────────
 
@@ -174,6 +194,270 @@ export function preserveDeletedWorkerEntries(
   }
 }
 
+// ─── Operational Go-Live Baseline Config (Supabase room_units sentinel + localStorage) ─
+
+export function isValidIsoDate(val?: string | null): val is string {
+  return Boolean(val && ISO_DATE_REGEX.test(val.trim()));
+}
+
+export function loadLocalFluctuationBaseline(): FluctuationBaselineConfig {
+  if (typeof window === 'undefined') return { baselineDate: null };
+  try {
+    const raw = window.localStorage.getItem(BASELINE_STORAGE_KEY);
+    if (!raw) return { baselineDate: null };
+    const parsed = JSON.parse(raw);
+    const baselineDate = isValidIsoDate(parsed?.baselineDate) ? parsed.baselineDate.trim() : null;
+    return {
+      baselineDate,
+      updatedAt: typeof parsed?.updatedAt === 'string' ? parsed.updatedAt : undefined,
+      updatedBy: typeof parsed?.updatedBy === 'string' ? parsed.updatedBy : undefined,
+    };
+  } catch {
+    return { baselineDate: null };
+  }
+}
+
+function saveLocalFluctuationBaseline(cfg: FluctuationBaselineConfig): void {
+  cachedBaselineConfig = cfg;
+  cachedBaselineFetchedAt = Date.now();
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(BASELINE_STORAGE_KEY, JSON.stringify(cfg));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function invalidateFluctuationBaselineCache(): void {
+  cachedBaselineConfig = null;
+  cachedBaselineFetchedAt = 0;
+}
+
+export async function fetchFluctuationBaselineConfig(
+  force = false
+): Promise<FluctuationBaselineConfig> {
+  if (!force && cachedBaselineConfig && Date.now() - cachedBaselineFetchedAt < BASELINE_CACHE_TTL_MS) {
+    return cachedBaselineConfig;
+  }
+  const local = loadLocalFluctuationBaseline();
+  try {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('room_units')
+      .select('room_label, updated_at')
+      .eq('ktx', BASELINE_REMOTE_SENTINEL.ktx)
+      .eq('day_nha', BASELINE_REMOTE_SENTINEL.day_nha)
+      .eq('phong_so', BASELINE_REMOTE_SENTINEL.phong_so)
+      .maybeSingle();
+
+    if (!error) {
+      if (!data || !data.room_label) {
+        const emptyCfg: FluctuationBaselineConfig = { baselineDate: null };
+        saveLocalFluctuationBaseline(emptyCfg);
+        return emptyCfg;
+      }
+      const rawLabel = String(data.room_label).trim();
+      if (rawLabel.startsWith('{')) {
+        const parsed = JSON.parse(rawLabel);
+        const cfg: FluctuationBaselineConfig = {
+          baselineDate: isValidIsoDate(parsed?.baselineDate) ? parsed.baselineDate.trim() : null,
+          updatedAt: typeof parsed?.updatedAt === 'string' ? parsed.updatedAt : (data.updated_at || undefined),
+          updatedBy: typeof parsed?.updatedBy === 'string' ? parsed.updatedBy : undefined,
+        };
+        saveLocalFluctuationBaseline(cfg);
+        return cfg;
+      }
+      if (isValidIsoDate(rawLabel)) {
+        const cfg: FluctuationBaselineConfig = {
+          baselineDate: rawLabel,
+          updatedAt: data.updated_at || undefined,
+        };
+        saveLocalFluctuationBaseline(cfg);
+        return cfg;
+      }
+    }
+  } catch {
+    // fallback to local
+  }
+  saveLocalFluctuationBaseline(local);
+  return local;
+}
+
+export function clearPreservedEntriesBeforeDate(beforeDate: string | null): number {
+  if (typeof window === 'undefined') return 0;
+  try {
+    const existing = loadPreservedWorkerEntries();
+    if (existing.length === 0) return 0;
+    if (!beforeDate) {
+      window.localStorage.removeItem(PRESERVED_ENTRIES_STORAGE_KEY);
+      return existing.length;
+    }
+    if (!isValidIsoDate(beforeDate)) return 0;
+    const kept = existing.filter(item => {
+      const vnDate = getVNDateString(item.created_at);
+      return Boolean(vnDate && vnDate >= beforeDate);
+    });
+    const removedCount = existing.length - kept.length;
+    window.localStorage.setItem(PRESERVED_ENTRIES_STORAGE_KEY, JSON.stringify(kept));
+    return removedCount;
+  } catch {
+    return 0;
+  }
+}
+
+export async function saveFluctuationBaselineConfig(
+  baselineDate: string | null,
+  actorName?: string
+): Promise<{ savedRemote: boolean; config: FluctuationBaselineConfig }> {
+  const cleanDate = baselineDate && isValidIsoDate(baselineDate) ? baselineDate.trim() : null;
+  const cfg: FluctuationBaselineConfig = {
+    baselineDate: cleanDate,
+    updatedAt: new Date().toISOString(),
+    updatedBy: actorName?.trim() || undefined,
+  };
+
+  saveLocalFluctuationBaseline(cfg);
+  if (cleanDate) {
+    clearPreservedEntriesBeforeDate(cleanDate);
+  }
+
+  let savedRemote = false;
+  try {
+    const supabase = createClient();
+    const payload = JSON.stringify(cfg);
+    const { data: updated, error: updErr } = await supabase
+      .from('room_units')
+      .update({
+        room_label: payload,
+        updated_at: cfg.updatedAt,
+      })
+      .eq('ktx', BASELINE_REMOTE_SENTINEL.ktx)
+      .eq('day_nha', BASELINE_REMOTE_SENTINEL.day_nha)
+      .eq('phong_so', BASELINE_REMOTE_SENTINEL.phong_so)
+      .select('ktx');
+
+    if (!updErr && updated && updated.length > 0) {
+      savedRemote = true;
+    } else {
+      const { error: upsertErr } = await supabase.from('room_units').upsert(
+        {
+          ktx: BASELINE_REMOTE_SENTINEL.ktx,
+          day_nha: BASELINE_REMOTE_SENTINEL.day_nha,
+          phong_so: BASELINE_REMOTE_SENTINEL.phong_so,
+          room_label: payload,
+        },
+        { onConflict: 'ktx,day_nha,phong_so' }
+      );
+      savedRemote = !upsertErr;
+    }
+  } catch {
+    savedRemote = false;
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('ktx_fluctuation_baseline_updated', { detail: cfg }));
+  }
+
+  return { savedRemote, config: cfg };
+}
+
+export async function countFluctuationLogsBeforeDate(beforeDate: string): Promise<{
+  exitsCount: number;
+  entriesCount: number;
+  localCacheCount: number;
+}> {
+  if (!isValidIsoDate(beforeDate)) {
+    return { exitsCount: 0, entriesCount: 0, localCacheCount: 0 };
+  }
+  const cutoffIso = vnDateStartToUTCISO(beforeDate);
+  const localCacheCount = loadPreservedWorkerEntries().filter(item => {
+    const d = getVNDateString(item.created_at);
+    return Boolean(d && d < beforeDate);
+  }).length;
+
+  try {
+    const supabase = createClient();
+    const [delRes, entRes] = await Promise.all([
+      supabase
+        .from('worker_deletion_log')
+        .select('id', { count: 'exact', head: true })
+        .lt('deleted_at', cutoffIso),
+      supabase
+        .from('worker_entry_log')
+        .select('id', { count: 'exact', head: true })
+        .lt('entered_at', cutoffIso),
+    ]);
+
+    return {
+      exitsCount: delRes.error ? 0 : (delRes.count || 0),
+      entriesCount: entRes.error ? 0 : (entRes.count || 0),
+      localCacheCount,
+    };
+  } catch {
+    return { exitsCount: 0, entriesCount: 0, localCacheCount };
+  }
+}
+
+export async function purgeFluctuationLogsBeforeDate(beforeDate: string): Promise<{
+  ok: boolean;
+  rpcMissing?: boolean;
+  deletedExits: number;
+  deletedEntries: number;
+  clearedLocal: number;
+  errorMessage?: string;
+}> {
+  if (!isValidIsoDate(beforeDate)) {
+    return {
+      ok: false,
+      deletedExits: 0,
+      deletedEntries: 0,
+      clearedLocal: 0,
+      errorMessage: 'Ngày cột mốc không hợp lệ.',
+    };
+  }
+
+  const clearedLocal = clearPreservedEntriesBeforeDate(beforeDate);
+
+  try {
+    const supabase = createClient();
+    const { data, error } = await supabase.rpc('purge_fluctuation_logs_before_date', {
+      p_before_date: beforeDate,
+    });
+
+    if (error) {
+      const msg = `${error.message || ''} ${error.details || ''}`.toLowerCase();
+      const rpcMissing =
+        error.code === 'PGRST202' ||
+        msg.includes('could not find the function') ||
+        (msg.includes('function') && msg.includes('purge_fluctuation_logs_before_date') && msg.includes('does not exist'));
+      return {
+        ok: false,
+        rpcMissing,
+        deletedExits: 0,
+        deletedEntries: 0,
+        clearedLocal,
+        errorMessage: error.message || 'Không thể xóa lịch sử biến động trên máy chủ.',
+      };
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+    return {
+      ok: true,
+      deletedExits: Number(row?.deleted_exits || 0),
+      deletedEntries: Number(row?.deleted_entries || 0),
+      clearedLocal,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      deletedExits: 0,
+      deletedEntries: 0,
+      clearedLocal,
+      errorMessage: err?.message || 'Lỗi kết nối khi dọn dữ liệu biến động.',
+    };
+  }
+}
+
 // ─── Pure Aggregation Engine ──────────────────────────────────────────────────
 
 export interface RawWorkerRow {
@@ -217,6 +501,10 @@ export function aggregateWorkerFluctuation(
   const filterDay = (filters.day || '').trim();
   const dateFrom = (filters.dateFrom || '').trim();
   const dateTo = (filters.dateTo || '').trim();
+  const effectiveBaseline =
+    !filters.ignoreBaseline && isValidIsoDate(filters.baselineDate)
+      ? filters.baselineDate.trim()
+      : null;
   const is14h = filters.cutoffMode === '14h';
   const todayVN = getVNDateString();
 
@@ -238,8 +526,15 @@ export function aggregateWorkerFluctuation(
     return true;
   };
 
+  const passesBaseline = (vnDate: string) => {
+    if (!vnDate) return false;
+    if (effectiveBaseline && vnDate < effectiveBaseline) return false;
+    return true;
+  };
+
   const inDateRange = (vnDate: string) => {
     if (!vnDate) return false;
+    if (!passesBaseline(vnDate)) return false;
     if (dateFrom && vnDate < dateFrom) return false;
     if (dateTo && vnDate > dateTo) return false;
     return true;
@@ -292,7 +587,7 @@ export function aggregateWorkerFluctuation(
 
     if (!createdAt || !matchesScope(ktx, day) || !passesCutoff(createdAt)) return;
     const ngay = getVNDateString(createdAt);
-    if (!ngay) return;
+    if (!ngay || !passesBaseline(ngay)) return;
 
     const person: FluctuationPerson = {
       id,
@@ -328,7 +623,7 @@ export function aggregateWorkerFluctuation(
   ) => {
     if (!deletedAt) return;
     const ngay = getVNDateString(deletedAt);
-    if (!ngay) return;
+    if (!ngay || !passesBaseline(ngay)) return;
     if (workerId) {
       loggedExitWorkerKeys.add(`${workerId}::${ngay}`);
     }
@@ -447,6 +742,7 @@ export function aggregateWorkerFluctuation(
     today: todayBucket,
     availableKtx: Array.from(ktxSet).sort(compareKtxNames),
     availableDays: Array.from(daySet).sort(compareKtxNames),
+    appliedBaselineDate: effectiveBaseline,
   };
 }
 
@@ -561,12 +857,23 @@ async function fetchEntryLogsInRange(
 export async function fetchWorkerFluctuationReport(
   filters: FluctuationFilterParams
 ): Promise<FluctuationReportResult> {
+  const resolvedBaseline = filters.ignoreBaseline
+    ? null
+    : filters.baselineDate !== undefined
+      ? (isValidIsoDate(filters.baselineDate) ? filters.baselineDate.trim() : null)
+      : (await fetchFluctuationBaselineConfig()).baselineDate;
+
+  const queryFrom =
+    resolvedBaseline && (!filters.dateFrom || filters.dateFrom < resolvedBaseline)
+      ? resolvedBaseline
+      : filters.dateFrom;
+
   const [workerRows, deletionLogRows, entryLogRows] = await Promise.all([
     filters.preloadedWorkerRows
       ? Promise.resolve(filters.preloadedWorkerRows)
       : fetchAllWorkerEntries(),
-    fetchDeletionLogsInRange(filters.dateFrom, filters.dateTo),
-    fetchEntryLogsInRange(filters.dateFrom, filters.dateTo),
+    fetchDeletionLogsInRange(queryFrom, filters.dateTo),
+    fetchEntryLogsInRange(queryFrom, filters.dateTo),
   ]);
 
   const preservedEntries = loadPreservedWorkerEntries();
@@ -574,7 +881,10 @@ export async function fetchWorkerFluctuationReport(
     workerRows,
     deletionLogRows,
     preservedEntries,
-    filters,
+    {
+      ...filters,
+      baselineDate: resolvedBaseline,
+    },
     entryLogRows
   );
 }

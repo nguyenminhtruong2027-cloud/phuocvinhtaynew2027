@@ -5,13 +5,14 @@ import {
   Users, LayoutGrid, Percent, AlertCircle, VenusAndMars, HardHat,
   Building2, TrendingUp, TrendingDown, UserPlus, UserMinus, ArrowRightLeft,
   Calendar, Clock, RefreshCw, Filter, X, Building, BarChart2, CheckCircle2,
-  ChevronDown, ChevronRight, Download, ShieldCheck, Radio, FileText, FileSpreadsheet,
+  ChevronDown, ChevronRight, Download, ShieldCheck, Radio, FileText, FileSpreadsheet, Flag,
 } from 'lucide-react';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { SlidingTabs } from '@/components/ui/MotionPrimitives';
 import { toast } from 'sonner';
 import { exportMultiSheetExcel } from '@/lib/exportExcel';
 import { useWorkers } from '@/context/WorkerContext';
+import { useAuth } from '@/context/AuthContext';
 import { Worker, DEFAULT_ROOM_CAPACITY, getUniqueBuildings, getUniqueRooms } from '@/data/workers';
 import { computeSystemMetrics, getActiveKtxList } from '@/lib/systemMetrics';
 import {
@@ -27,9 +28,12 @@ import {
   DailyFluctuation,
   FluctuationSummary,
   FluctuationCutoffMode,
+  FluctuationBaselineConfig,
+  fetchFluctuationBaselineConfig,
   fetchWorkerFluctuationReport,
   getDefaultVNDateRange,
   getVNDateString,
+  loadLocalFluctuationBaseline,
 } from '@/lib/workerFluctuation';
 import { daysSinceVN } from '@/lib/vnDate';
 import {
@@ -38,6 +42,7 @@ import {
 } from 'recharts';
 import DailyBriefingModal from '@/app/components/DailyBriefingModal';
 import TamTruExportModal from '@/app/components/TamTruExportModal';
+import FluctuationBaselineModal from './FluctuationBaselineModal';
 import { DailyBriefingInput } from '@/lib/dailyBriefing';
 import { hasFacilityIssueNote } from '@/lib/smartRoomAssign';
 
@@ -145,6 +150,7 @@ function CustomBarTooltip({ active, payload, label }: any) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function ReportDashboard() {
   const { workers, loading: workersLoading, refreshing: workersRefreshing, refreshWorkers } = useWorkers();
+  const { isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState<ActiveTab>('tong-quan');
 
   // ── Tổng quan filters ──
@@ -152,15 +158,36 @@ export default function ReportDashboard() {
   const set = (key: keyof FilterState, val: string) =>
     setFilters(prev => ({ ...prev, [key]: val }));
 
+  // ── Go-live baseline config ──
+  const [baselineConfig, setBaselineConfig] = useState<FluctuationBaselineConfig>(() =>
+    loadLocalFluctuationBaseline()
+  );
+  const [baselineModalOpen, setBaselineModalOpen] = useState(false);
+  const [showPreBaselineData, setShowPreBaselineData] = useState(false);
+
   // ── Biến động filters ──
   const defaultRange = useMemo(() => getDefaultDateRange(), []);
-  const [flFilter, setFlFilter] = useState<FluctuationFilter>({
-    dateFrom: defaultRange.from,
-    dateTo: defaultRange.to,
-    ktx: '',
-    day: '',
-    type: 'all',
-    cutoffMode: 'realtime',
+  const [flFilter, setFlFilter] = useState<FluctuationFilter>(() => {
+    const localBase = loadLocalFluctuationBaseline().baselineDate;
+    if (localBase) {
+      const today = getVNDateString();
+      return {
+        dateFrom: localBase,
+        dateTo: today >= localBase ? today : localBase,
+        ktx: '',
+        day: '',
+        type: 'all',
+        cutoffMode: 'realtime',
+      };
+    }
+    return {
+      dateFrom: defaultRange.from,
+      dateTo: defaultRange.to,
+      ktx: '',
+      day: '',
+      type: 'all',
+      cutoffMode: 'realtime',
+    };
   });
 
   // ── Biến động data ──
@@ -174,6 +201,39 @@ export default function ReportDashboard() {
   const [flError, setFlError] = useState<string | null>(null);
   const [lastFetched, setLastFetched] = useState<string>('');
   const realtimeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetchFluctuationBaselineConfig(false).then(cfg => {
+      if (!active) return;
+      setBaselineConfig(cfg);
+      if (cfg.baselineDate) {
+        const bDate = cfg.baselineDate;
+        const today = getVNDateString();
+        setFlFilter(prev => {
+          if (prev.dateFrom < bDate) {
+            return {
+              ...prev,
+              dateFrom: bDate,
+              dateTo: prev.dateTo >= bDate ? prev.dateTo : (today >= bDate ? today : bDate),
+            };
+          }
+          return prev;
+        });
+      }
+    });
+
+    const onBaselineUpdated = (ev: Event) => {
+      const custom = ev as CustomEvent<FluctuationBaselineConfig>;
+      const nextCfg = custom?.detail ?? loadLocalFluctuationBaseline();
+      setBaselineConfig(nextCfg);
+    };
+    window.addEventListener('ktx_fluctuation_baseline_updated', onBaselineUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener('ktx_fluctuation_baseline_updated', onBaselineUpdated);
+    };
+  }, []);
 
   // ── Physical facilities & capacities (Single Source of Truth) ──
   const [facilitiesList, setFacilitiesList] = useState<FacilityItem[]>([]);
@@ -307,6 +367,8 @@ export default function ReportDashboard() {
         ktx: flFilter.ktx,
         day: flFilter.day,
         cutoffMode: flFilter.cutoffMode,
+        baselineDate: baselineConfig.baselineDate,
+        ignoreBaseline: showPreBaselineData,
       });
 
       setDailyData(report.daily);
@@ -322,16 +384,20 @@ export default function ReportDashboard() {
     } finally {
       if (!silent) setFlLoading(false);
     }
-  }, [flFilter]);
+  }, [flFilter, baselineConfig.baselineDate, showPreBaselineData]);
 
   // Fetch only when bien-dong has been visited & filter changes (no spinner flicker on tab switch)
   useEffect(() => {
     if (!visitedBienDong) return;
-    const key = JSON.stringify(flFilter);
+    const key = JSON.stringify({
+      ...flFilter,
+      baselineDate: baselineConfig.baselineDate,
+      showPreBaselineData,
+    });
     const alreadyFetchedSameKey = lastFetchedFluctKeyRef.current === key && dailyData.length > 0;
     lastFetchedFluctKeyRef.current = key;
     fetchFluctuation({ silent: alreadyFetchedSameKey });
-  }, [visitedBienDong, flFilter, fetchFluctuation, dailyData.length]);
+  }, [visitedBienDong, flFilter, baselineConfig.baselineDate, showPreBaselineData, fetchFluctuation, dailyData.length]);
 
   // Auto-sync silently whenever workers context updates (add / import / delete)
   useEffect(() => {
@@ -369,8 +435,27 @@ export default function ReportDashboard() {
 
   const applyQuickRange = useCallback((days: number) => {
     const r = getDefaultVNDateRange(days);
+    const activeBase = !showPreBaselineData ? baselineConfig.baselineDate : null;
+    if (activeBase) {
+      const clampedFrom = r.from < activeBase ? activeBase : r.from;
+      const clampedTo = r.to < clampedFrom ? clampedFrom : r.to;
+      setFlFilter(prev => ({ ...prev, dateFrom: clampedFrom, dateTo: clampedTo }));
+      return;
+    }
     setFlFilter(prev => ({ ...prev, dateFrom: r.from, dateTo: r.to }));
-  }, []);
+  }, [baselineConfig.baselineDate, showPreBaselineData]);
+
+  const applyFromBaseline = useCallback(() => {
+    if (!baselineConfig.baselineDate) return;
+    const today = getVNDateString();
+    const bDate = baselineConfig.baselineDate;
+    setShowPreBaselineData(false);
+    setFlFilter(prev => ({
+      ...prev,
+      dateFrom: bDate,
+      dateTo: today >= bDate ? today : bDate,
+    }));
+  }, [baselineConfig.baselineDate]);
 
   // ── Filtered chart & table data by type ──
   const filteredDailyAsc = useMemo(() => {
@@ -633,7 +718,11 @@ export default function ReportDashboard() {
         }
       }
 
-      if (w.createdAt && getVNDateString(new Date(w.createdAt)) === todayVN) {
+      if (
+        w.createdAt &&
+        getVNDateString(new Date(w.createdAt)) === todayVN &&
+        (!baselineConfig.baselineDate || todayVN >= baselineConfig.baselineDate)
+      ) {
         fallbackTodayEntered++;
       }
 
@@ -700,7 +789,7 @@ export default function ReportDashboard() {
       pendingCheckoutsCount: supportCounts.pendingCheckouts,
       buildingStats,
     };
-  }, [filters.ktx, activeKtxList, workers, activeFacilities, getRoomCap, todayFluctuation, supportCounts]);
+  }, [filters.ktx, activeKtxList, workers, activeFacilities, getRoomCap, todayFluctuation, supportCounts, baselineConfig.baselineDate]);
 
   const ktxBreakdownCounts = useMemo(() => {
     const metrics = computeSystemMetrics(filtered, {}, 'all', [], getRoomCap, facilitiesList);
@@ -1261,12 +1350,14 @@ export default function ReportDashboard() {
                         Biến động hôm nay ({formatDateVN(todayFluctuation.ngay)})
                       </span>
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-okbg text-ok border border-bdr2">
-                        <span className="w-1.5 h-1.5 rounded-full bg-ok2 animate-pulse" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-ok2" />
                         Cập nhật tức thì
                       </span>
                     </div>
                     <p className="text-xs text-mu mt-0.5">
-                      Ghi nhận tự động mọi công nhân mới vào ở và công nhân rời khỏi KTX trong ngày
+                      {baselineConfig.baselineDate && !showPreBaselineData && todayFluctuation.ngay < baselineConfig.baselineDate
+                        ? `Đang chờ cột mốc bắt đầu vận hành ${formatDateVN(baselineConfig.baselineDate)} — dữ liệu thử nghiệm trước mốc đã được loại trừ.`
+                        : 'Ghi nhận tự động mọi công nhân mới vào ở và công nhân rời khỏi KTX trong ngày'}
                     </p>
                   </div>
                 </div>
@@ -1292,6 +1383,71 @@ export default function ReportDashboard() {
               </div>
             )}
 
+            {/* ── Go-Live Operational Baseline Strip ── */}
+            <div className={`rounded-2xl border px-5 py-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 ${
+              baselineConfig.baselineDate
+                ? 'bg-surf border-pri/30 shadow-md'
+                : 'bg-surf border-bdr/70 shadow-sm'
+            }`}>
+              <div className="flex items-start sm:items-center gap-3">
+                <div className={`w-9 h-9 rounded-xl border flex items-center justify-center flex-shrink-0 ${
+                  baselineConfig.baselineDate
+                    ? 'bg-pri/10 border-pri/30 text-pri'
+                    : 'bg-act border-bdr text-mu'
+                }`}>
+                  <Flag size={16} />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold text-tx">
+                      {baselineConfig.baselineDate
+                        ? `Cột mốc bắt đầu vận hành: ${formatDateVN(baselineConfig.baselineDate)}`
+                        : 'Chưa thiết lập cột mốc bắt đầu vận hành'}
+                    </span>
+                    {baselineConfig.baselineDate && !showPreBaselineData && (
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-okbg text-ok border border-bdr2">
+                        Đã loại dữ liệu test trước mốc
+                      </span>
+                    )}
+                    {baselineConfig.baselineDate && showPreBaselineData && (
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md tint-wn text-wn border border-wn">
+                        Đang tạm xem cả dữ liệu trước mốc
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-mu mt-0.5">
+                    {baselineConfig.baselineDate
+                      ? 'Mọi số liệu tăng/giảm trước ngày mốc được loại khỏi KPI, biểu đồ, báo cáo ngày và xuất Excel (danh sách công nhân đang ở vẫn giữ nguyên).'
+                      : 'Đặt cột mốc (ví dụ 26/11/2026) để tách riêng dữ liệu vận hành thực tế khỏi dữ liệu thử nghiệm cũ.'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap flex-shrink-0">
+                {baselineConfig.baselineDate && (
+                  <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-act border border-bdr text-xs font-medium text-tx cursor-pointer select-none hover:border-bdr2">
+                    <input
+                      type="checkbox"
+                      checked={showPreBaselineData}
+                      onChange={e => setShowPreBaselineData(e.target.checked)}
+                      className="rounded border-bdr accent-blue-600"
+                    />
+                    <span>Xem cả trước mốc</span>
+                  </label>
+                )}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setBaselineModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-pri hover:bg-pri2 text-white text-xs font-bold shadow-sm transition-colors cursor-pointer"
+                  >
+                    <Flag size={13} />
+                    <span>{baselineConfig.baselineDate ? 'Cột mốc & Dọn dữ liệu test' : 'Chốt cột mốc vận hành'}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
             {/* ── Compact & Spacious Filter Bar (Green/Orange Highlights) ── */}
             <div className="bg-surf rounded-2xl border border-bdr/60 shadow-xl p-5">
               <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-bdr/60">
@@ -1302,6 +1458,18 @@ export default function ReportDashboard() {
                   <span className="text-sm font-bold text-tx">Bộ lọc phân tích biến động quân số</span>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
+                  {baselineConfig.baselineDate && (
+                    <button
+                      onClick={applyFromBaseline}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                        !showPreBaselineData && flFilter.dateFrom === baselineConfig.baselineDate
+                          ? 'bg-pri text-white border-pri2'
+                          : 'bg-act text-mu hover:text-tx border-bdr'
+                      }`}
+                    >
+                      Từ mốc {formatDateVN(baselineConfig.baselineDate).slice(0, 5)}
+                    </button>
+                  )}
                   <button
                     onClick={() => applyQuickRange(1)}
                     className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
@@ -1821,6 +1989,36 @@ export default function ReportDashboard() {
           workers={workers}
           ktxFilter={filters.ktx !== 'all' ? filters.ktx : undefined}
           onClose={() => setTamTruModalOpen(false)}
+        />
+      )}
+
+      {baselineModalOpen && (
+        <FluctuationBaselineModal
+          currentConfig={baselineConfig}
+          onClose={() => setBaselineModalOpen(false)}
+          onSaved={nextCfg => {
+            setBaselineConfig(nextCfg);
+            setShowPreBaselineData(false);
+            const today = getVNDateString();
+            if (nextCfg.baselineDate) {
+              const bDate = nextCfg.baselineDate;
+              setFlFilter(prev => ({
+                ...prev,
+                dateFrom: bDate,
+                dateTo: today >= bDate ? today : bDate,
+              }));
+            } else {
+              const def = getDefaultDateRange();
+              setFlFilter(prev => ({
+                ...prev,
+                dateFrom: def.from,
+                dateTo: def.to,
+              }));
+            }
+          }}
+          onPurged={() => {
+            fetchFluctuation();
+          }}
         />
       )}
     </div>

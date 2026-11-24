@@ -1100,10 +1100,13 @@ export default function OccupancyDashboardPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_deletion_log' }, scheduleReload)
       .subscribe();
 
+    window.addEventListener('ktx_fluctuation_baseline_updated', scheduleReload);
+
     return () => {
       active = false;
       if (timer) clearTimeout(timer);
       supabase.removeChannel(channel);
+      window.removeEventListener('ktx_fluctuation_baseline_updated', scheduleReload);
     };
   }, [loading, preloadedFluctuationRows, selectedKTX, selectedBuilding]);
 
