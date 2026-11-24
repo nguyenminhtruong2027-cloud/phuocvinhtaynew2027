@@ -17,7 +17,9 @@ import type {
   HoverInfo,
   RenderPerfStats,
   RoomBedSlot,
+  RoomEquipmentCategory,
   SceneTheme,
+  SiteLandmarkNode,
   UnitXRayFilter,
   ViewLevel,
 } from '../types';
@@ -25,6 +27,7 @@ import {
   applyCampusColorMode,
   buildCampusScene,
   type BuildingVisualHandle,
+  type InfrastructureVisualHandle,
   type RoomVisualHandle,
 } from '../scene/campusBuilder';
 import {
@@ -56,6 +59,8 @@ interface Ktx3DViewportProps {
   unitXRayFilter: UnitXRayFilter | null;
   assignedOnlyFilter: boolean;
   focusedRoomKey: string | null;
+  focusedBuildingKey: string | null;
+  hiddenBuildingKeys: string[];
   hideRoofs: boolean;
   showFunctionalRooms: boolean;
   showHiddenRooms: boolean;
@@ -67,10 +72,14 @@ interface Ktx3DViewportProps {
   cameraPresetRequest: { preset: CameraPreset; seq: number } | null;
   focusRoomRequest: { roomKey: string; seq: number } | null;
   focusBuildingRequest: { buildingKey: string; seq: number } | null;
+  focusLandmarkRequest: { landmarkId: string; seq: number } | null;
   focusBedRequest: { bedId: string; seq: number } | null;
   zoomRequest: { factor: number; seq: number } | null;
   onSelectRoom: (room: CampusRoomNode) => void;
   onSelectBuilding?: (building: CampusBuildingNode) => void;
+  onSelectLandmark?: (landmark: SiteLandmarkNode) => void;
+  onSelectEquipment?: (equipmentType: RoomEquipmentCategory) => void;
+  onLandmarksReady?: (landmarks: SiteLandmarkNode[]) => void;
   onSelectBed: (bed: RoomBedSlot | null) => void;
   onHoverChange: (info: HoverInfo | null) => void;
   onCompassHeadingChange?: (deg: number) => void;
@@ -165,6 +174,8 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     unitXRayFilter,
     assignedOnlyFilter,
     focusedRoomKey,
+    focusedBuildingKey,
+    hiddenBuildingKeys,
     hideRoofs,
     showFunctionalRooms,
     showHiddenRooms,
@@ -176,10 +187,14 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     cameraPresetRequest,
     focusRoomRequest,
     focusBuildingRequest,
+    focusLandmarkRequest,
     focusBedRequest,
     zoomRequest,
     onSelectRoom,
     onSelectBuilding,
+    onSelectLandmark,
+    onSelectEquipment,
+    onLandmarksReady,
     onSelectBed,
     onHoverChange,
     onCompassHeadingChange,
@@ -195,6 +210,9 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
   const callbacksRef = useRef({
     onSelectRoom,
     onSelectBuilding,
+    onSelectLandmark,
+    onSelectEquipment,
+    onLandmarksReady,
     onSelectBed,
     onHoverChange,
     onCompassHeadingChange,
@@ -203,6 +221,9 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
   callbacksRef.current = {
     onSelectRoom,
     onSelectBuilding,
+    onSelectLandmark,
+    onSelectEquipment,
+    onLandmarksReady,
     onSelectBed,
     onHoverChange,
     onCompassHeadingChange,
@@ -217,6 +238,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     unitXRayFilter,
     assignedOnlyFilter,
     focusedRoomKey,
+    focusedBuildingKey,
     hideRoofs,
     showFunctionalRooms,
     showHiddenRooms,
@@ -231,6 +253,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     unitXRayFilter,
     assignedOnlyFilter,
     focusedRoomKey,
+    focusedBuildingKey,
     hideRoofs,
     showFunctionalRooms,
     showHiddenRooms,
@@ -254,9 +277,11 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     hitTargets: THREE.Object3D[];
     functionalHitTargets: THREE.Object3D[];
     buildingHitTargets: THREE.Object3D[];
+    infrastructureHitTargets: THREE.Object3D[];
     roomVisuals: Map<string, RoomVisualHandle>;
     functionalLookup: Map<string, FunctionalAreaNode>;
     buildingVisuals: Map<string, BuildingVisualHandle>;
+    infrastructureVisuals: Map<string, InfrastructureVisualHandle>;
     bedVisuals: Map<string, BedVisualHandle>;
     boundsCenter: THREE.Vector3;
     boundsRadius: number;
@@ -656,6 +681,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
           ? [
               ...eng.hitTargets,
               ...eng.buildingHitTargets,
+              ...eng.infrastructureHitTargets,
               ...(stateRef.current.showFunctionalRooms ? eng.functionalHitTargets : []),
             ]
           : eng.hitTargets;
@@ -695,6 +721,8 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
         const roomKey = hit?.userData?.type === 'room' ? String(hit.userData.roomKey) : null;
         const bldKey =
           hit?.userData?.type === 'building' ? String(hit.userData.buildingKey) : null;
+        const landmarkId =
+          hit?.userData?.type === 'landmark' ? String(hit.userData.landmarkId) : null;
         const funcKey =
           hit?.userData?.type === 'functional' ? String(hit.userData.functionalKey) : null;
 
@@ -707,7 +735,8 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
             stateRef.current.focusedRoomKey,
             stateRef.current.unitXRayFilter,
             stateRef.current.sceneTheme,
-            stateRef.current.assignedOnlyFilter
+            stateRef.current.assignedOnlyFilter,
+            stateRef.current.focusedBuildingKey
           );
           requestRender();
         }
@@ -736,6 +765,18 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
             });
             return;
           }
+        } else if (landmarkId) {
+          renderer.domElement.style.cursor = 'pointer';
+          const lHandle = eng.infrastructureVisuals.get(landmarkId);
+          if (lHandle) {
+            callbacksRef.current.onHoverChange({
+              type: 'landmark',
+              screenX: e.clientX,
+              screenY: e.clientY,
+              landmark: lHandle.landmark,
+            });
+            return;
+          }
         } else if (funcKey) {
           renderer.domElement.style.cursor = 'default';
           const funcNode = eng.functionalLookup.get(funcKey);
@@ -754,6 +795,10 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
         callbacksRef.current.onHoverChange(null);
       } else {
         const bedId = hit?.userData?.type === 'bed' ? String(hit.userData.bedId) : null;
+        const equipmentType =
+          hit?.userData?.type === 'equipment'
+            ? (hit.userData.equipmentType as RoomEquipmentCategory)
+            : null;
         if (bedId !== eng.hoveredBedId) {
           eng.hoveredBedId = bedId;
           applyBedHighlights(
@@ -764,7 +809,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
           );
           requestRender();
         }
-        renderer.domElement.style.cursor = bedId ? 'pointer' : 'grab';
+        renderer.domElement.style.cursor = bedId || equipmentType ? 'pointer' : 'grab';
         if (bedId) {
           const handle = eng.bedVisuals.get(bedId);
           if (handle) {
@@ -776,6 +821,19 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
             });
             return;
           }
+        } else if (equipmentType && hit) {
+          callbacksRef.current.onHoverChange({
+            type: 'equipment',
+            screenX: e.clientX,
+            screenY: e.clientY,
+            equipment: {
+              equipmentType,
+              label: String(hit.userData.label || 'Thiết bị phòng'),
+              count: Number(hit.userData.count || 0),
+              roomLabel: String(hit.userData.roomLabel || ''),
+            },
+          });
+          return;
         }
         callbacksRef.current.onHoverChange(null);
       }
@@ -793,7 +851,8 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
           stateRef.current.focusedRoomKey,
           stateRef.current.unitXRayFilter,
           stateRef.current.sceneTheme,
-          stateRef.current.assignedOnlyFilter
+          stateRef.current.assignedOnlyFilter,
+          stateRef.current.focusedBuildingKey
         );
         requestRender();
       }
@@ -839,6 +898,16 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
             requestRender();
             callbacksRef.current.onSelectBuilding?.(bHandle.building);
           }
+        } else if (hit?.userData?.type === 'landmark') {
+          const lHandle = eng.infrastructureVisuals.get(String(hit.userData.landmarkId));
+          if (lHandle) {
+            eng.cameraTransition.targetLook.copy(lHandle.worldCenter);
+            eng.cameraTransition.targetPos.copy(lHandle.worldCenter).add(lHandle.cameraOffset);
+            eng.cameraTransition.active = true;
+            requestRender();
+            callbacksRef.current.onHoverChange(null);
+            callbacksRef.current.onSelectLandmark?.(lHandle.landmark);
+          }
         }
       } else {
         if (hit?.userData?.type === 'bed') {
@@ -846,6 +915,10 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
           if (handle) {
             callbacksRef.current.onSelectBed(handle.bed);
           }
+        } else if (hit?.userData?.type === 'equipment') {
+          callbacksRef.current.onSelectEquipment?.(
+            hit.userData.equipmentType as RoomEquipmentCategory
+          );
         } else {
           callbacksRef.current.onSelectBed(null);
         }
@@ -945,9 +1018,11 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
       hitTargets: [],
       functionalHitTargets: [],
       buildingHitTargets: [],
+      infrastructureHitTargets: [],
       roomVisuals: new Map(),
       functionalLookup: new Map(),
       buildingVisuals: new Map(),
+      infrastructureVisuals: new Map(),
       bedVisuals: new Map(),
       boundsCenter: new THREE.Vector3(0, 1, 0),
       boundsRadius: 20,
@@ -1056,9 +1131,11 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     eng.hitTargets = [];
     eng.functionalHitTargets = [];
     eng.buildingHitTargets = [];
+    eng.infrastructureHitTargets = [];
     eng.roomVisuals = new Map();
     eng.functionalLookup = new Map();
     eng.buildingVisuals = new Map();
+    eng.infrastructureVisuals = new Map();
     eng.bedVisuals = new Map();
     eng.hoveredRoomKey = null;
     eng.hoveredBedId = null;
@@ -1079,7 +1156,8 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
         blueprintConfig,
         stateRef.current.assignedOnlyFilter,
         showFunctionalRooms,
-        showHiddenRooms
+        showHiddenRooms,
+        hiddenBuildingKeys.length > 0 ? new Set(hiddenBuildingKeys) : undefined
       );
       built.roofsGroup.visible = !stateRef.current.hideRoofs;
       built.functionalGroup.visible = showFunctionalRooms;
@@ -1090,11 +1168,17 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
       eng.hitTargets = built.hitTargets;
       eng.functionalHitTargets = built.functionalHitTargets;
       eng.buildingHitTargets = built.buildingHitTargets;
+      eng.infrastructureHitTargets = built.infrastructureHitTargets;
       eng.roomVisuals = built.roomVisuals;
       eng.functionalLookup = built.functionalLookup;
       eng.buildingVisuals = built.buildingVisuals;
+      eng.infrastructureVisuals = built.infrastructureVisuals;
       eng.boundsCenter.copy(built.boundsCenter);
       eng.boundsRadius = built.boundsRadius;
+
+      callbacksRef.current.onLandmarksReady?.(
+        Array.from(built.infrastructureVisuals.values()).map(v => v.landmark)
+      );
 
       eng.scene.fog = new THREE.FogExp2(
         bgHex,
@@ -1117,7 +1201,8 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
         stateRef.current.focusedRoomKey,
         stateRef.current.unitXRayFilter,
         sceneTheme,
-        stateRef.current.assignedOnlyFilter
+        stateRef.current.assignedOnlyFilter,
+        stateRef.current.focusedBuildingKey
       );
 
       if (shouldResetCamera) {
@@ -1197,6 +1282,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     showBedNames,
     showFunctionalRooms,
     showHiddenRooms,
+    hiddenBuildingKeys,
     restoreSeq,
   ]);
 
@@ -1215,7 +1301,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     eng.requestRender();
   }, [showFunctionalRooms, viewLevel]);
 
-  // ── 5. Instant Color Mode / Unit X-Ray / Assigned Blocks / Focused Room Re-styling ──
+  // ── 5. Instant Color Mode / Unit X-Ray / Assigned Blocks / Focused Room & Row Re-styling ──
   useEffect(() => {
     const eng = engineRef.current;
     if (!eng || viewLevel !== 'campus') return;
@@ -1226,10 +1312,19 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
       focusedRoomKey,
       unitXRayFilter,
       sceneTheme,
-      assignedOnlyFilter
+      assignedOnlyFilter,
+      focusedBuildingKey
     );
     eng.requestRender();
-  }, [colorMode, unitXRayFilter, assignedOnlyFilter, focusedRoomKey, viewLevel, sceneTheme]);
+  }, [
+    colorMode,
+    unitXRayFilter,
+    assignedOnlyFilter,
+    focusedRoomKey,
+    focusedBuildingKey,
+    viewLevel,
+    sceneTheme,
+  ]);
 
   // ── 6. Instant Bed Selection & Bunk Tier Filter Highlight (with Layer-2 Click Pass-Through) ──
   useEffect(() => {
@@ -1274,23 +1369,36 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     eng.requestRender();
   }, [focusRoomRequest, viewLevel]);
 
-  // ── 8b. Smooth Fly-To Specific Building on Campus ──
+  // ── 8b. Smooth Focus & Zoom onto Specific Dormitory Row (Dãy) ──
   useEffect(() => {
     const eng = engineRef.current;
     if (!eng || !focusBuildingRequest || viewLevel !== 'campus') return;
     const bHandle = eng.buildingVisuals.get(focusBuildingRequest.buildingKey);
     if (!bHandle) return;
 
-    const dist = Math.max(12, bHandle.radius * 1.42);
+    const dist = Math.max(11.5, bHandle.radius * 1.18);
     eng.cameraTransition.targetLook.copy(bHandle.worldCenter);
     eng.cameraTransition.targetPos.set(
-      bHandle.worldCenter.x + dist * 0.48,
-      bHandle.worldCenter.y + dist * 0.62,
-      bHandle.worldCenter.z + dist * 0.85
+      bHandle.worldCenter.x + dist * 0.16,
+      bHandle.worldCenter.y + dist * 0.52,
+      bHandle.worldCenter.z + dist * 0.88
     );
     eng.cameraTransition.active = true;
     eng.requestRender();
   }, [focusBuildingRequest, viewLevel]);
+
+  // ── 8c. Smooth Fly-To Specific Vincons Site Infrastructure Landmark ──
+  useEffect(() => {
+    const eng = engineRef.current;
+    if (!eng || !focusLandmarkRequest || viewLevel !== 'campus') return;
+    const lHandle = eng.infrastructureVisuals.get(focusLandmarkRequest.landmarkId);
+    if (!lHandle) return;
+
+    eng.cameraTransition.targetLook.copy(lHandle.worldCenter);
+    eng.cameraTransition.targetPos.copy(lHandle.worldCenter).add(lHandle.cameraOffset);
+    eng.cameraTransition.active = true;
+    eng.requestRender();
+  }, [focusLandmarkRequest, viewLevel]);
 
   // ── 9. Smooth Fly-To Specific Bunk Bed in Room Interior ──
   useEffect(() => {

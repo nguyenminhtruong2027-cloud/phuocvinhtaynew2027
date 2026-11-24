@@ -10,13 +10,15 @@ export type CampusColorMode =
   | 'vacant_only'
   | 'overloaded_only'
   | 'tam_tru'
+  | 'maintenance'
   | 'unit_xray';
 
 export type AlertCategory =
   | 'overloaded'
   | 'mixed_gender'
   | 'unregistered_tam_tru'
-  | 'unassigned_bed';
+  | 'unassigned_bed'
+  | 'maintenance_issue';
 
 export type SceneTheme = 'dark' | 'light';
 
@@ -25,6 +27,8 @@ export type BedTierFilter = 'all' | 'bottom' | 'top';
 export type CameraPreset = 'overview' | 'top' | 'low' | 'left_row' | 'right_row';
 
 export type CameraNavMode = 'orbit' | 'pan';
+
+export type RoomEquipmentCategory = 'ac' | 'fan' | 'locker' | 'light' | 'room_board';
 
 export interface UnitXRayFilter {
   type: 'platoon' | 'unit';
@@ -39,6 +43,33 @@ export interface FunctionalAreaNode {
   name: string;
   ghiChu: string;
   facility: FacilityItem;
+}
+
+export interface SiteLandmarkNode {
+  id: string;
+  code: string; // e.g. "(8)", "(13–17)", "(19)"
+  name: string;
+  category:
+    | 'security'
+    | 'dining'
+    | 'canteen'
+    | 'sanitary'
+    | 'water'
+    | 'wwtp'
+    | 'waste'
+    | 'parking'
+    | 'visitor';
+  zone: string;
+  summary: string;
+  specs: string[];
+  facility?: FacilityItem | null;
+}
+
+export interface RoomEquipmentHoverInfo {
+  equipmentType: RoomEquipmentCategory;
+  label: string;
+  count: number;
+  roomLabel: string;
 }
 
 export interface CampusRoomNode {
@@ -63,6 +94,8 @@ export interface CampusRoomNode {
   unitCounts: Record<string, number>;
   unregisteredTamTruCount: number;
   unassignedBedCount: number;
+  maintenanceBedCount: number;
+  hasFacilityIssue: boolean;
   hasWriteAccess: boolean;
   facility: FacilityItem | null;
 }
@@ -76,6 +109,7 @@ export interface CampusBuildingNode {
   totalCapacity: number;
   totalOccupied: number;
   unregisteredTamTruCount: number;
+  maintenanceIssueRoomsCount: number;
   hasWriteAccess: boolean;
 }
 
@@ -106,13 +140,15 @@ export interface RoomBedSlot {
 }
 
 export interface HoverInfo {
-  type: 'room' | 'bed' | 'functional' | 'building';
+  type: 'room' | 'bed' | 'functional' | 'building' | 'landmark' | 'equipment';
   screenX: number;
   screenY: number;
   room?: CampusRoomNode;
   bed?: RoomBedSlot;
   functional?: FunctionalAreaNode;
   building?: CampusBuildingNode;
+  landmark?: SiteLandmarkNode;
+  equipment?: RoomEquipmentHoverInfo;
 }
 
 export interface RenderPerfStats {

@@ -308,14 +308,14 @@ export function buildRoomInteriorScene(
   rightWall.receiveShadow = true;
   group.add(rightWall);
 
-  // ── 3. Real Equipment Sync from `facilities` (ACs, LED Tubes, Wall Fans, Lockers) ──
+  // ── 3. Real Equipment Sync from `facilities` (ACs, LED Tubes, Wall Fans, up to 20 Personal Lockers) ──
   const fac = room.facility;
-  const acCount = fac ? Math.min(3, Math.max(0, Number(fac.dieu_hoa ?? 0))) : 1;
-  const fanCount = fac ? Math.min(4, Math.max(0, Number(fac.quat ?? 0))) : 0;
-  const lockerCount = fac ? Math.min(4, Math.max(0, Number(fac.tu ?? 0))) : 0;
+  const acCount = fac ? Math.min(4, Math.max(0, Number(fac.dieu_hoa ?? 0))) : 1;
+  const fanCount = fac ? Math.min(6, Math.max(0, Number(fac.quat ?? 0))) : 0;
+  const lockerCount = fac ? Math.min(20, Math.max(0, Number(fac.tu ?? 0))) : 0;
   const rawLights = fac ? Number(fac.bong_tuyp ?? 0) : 0;
   const lightCount =
-    rawLights > 0 ? Math.min(6, rawLights) : Math.max(2, Math.min(4, Math.ceil(bunksPerSide / 2)));
+    rawLights > 0 ? Math.min(8, rawLights) : Math.max(2, Math.min(4, Math.ceil(bunksPerSide / 2)));
 
   // Rear windows
   [-2.0, 2.0].forEach(wx => {
@@ -330,16 +330,30 @@ export function buildRoomInteriorScene(
     group.add(frameGroup);
   });
 
-  // Real AC units spaced along upper back wall
+  // Real AC units spaced along upper back wall (interactive click -> Room Equipment Editor)
   if (acCount > 0) {
     const acBoxGeo = new THREE.BoxGeometry(1.18, 0.32, 0.24);
     const acVentGeo = new THREE.BoxGeometry(1.02, 0.06, 0.04);
     const acPositions =
-      acCount === 1 ? [0] : acCount === 2 ? [-1.85, 1.85] : [-2.2, 0, 2.2];
+      acCount === 1
+        ? [0]
+        : acCount === 2
+          ? [-1.85, 1.85]
+          : acCount === 3
+            ? [-2.25, 0, 2.25]
+            : [-2.55, -0.85, 0.85, 2.55];
     acPositions.forEach(ax => {
       const acGroup = new THREE.Group();
       acGroup.position.set(ax, WALL_H - 0.46, -ROOM_L / 2 + 0.15);
       const acBox = new THREE.Mesh(acBoxGeo, acBodyMat);
+      acBox.userData = {
+        type: 'equipment',
+        equipmentType: 'ac',
+        label: 'Điều hòa nhiệt độ',
+        count: Number(fac?.dieu_hoa ?? acCount),
+        roomLabel: room.roomLabel,
+      };
+      hitTargets.push(acBox);
       const acVent = new THREE.Mesh(acVentGeo, steelFrameMat);
       acVent.position.set(0, -0.09, 0.12);
       acGroup.add(acBox, acVent);
@@ -347,52 +361,167 @@ export function buildRoomInteriorScene(
     });
   }
 
-  // Real wall-mounted electric fans along left & right walls
+  // Real wall-mounted electric fans along left & right walls (up to 6 units, interactive)
   if (fanCount > 0) {
     const fanDiskGeo = new THREE.CylinderGeometry(0.24, 0.24, 0.08, 12);
     const fanMountGeo = new THREE.BoxGeometry(0.16, 0.14, 0.14);
+    const perSide = Math.ceil(fanCount / 2);
     for (let i = 0; i < fanCount; i++) {
       const onLeft = i % 2 === 0;
       const tierIdx = Math.floor(i / 2);
       const zOff =
-        fanCount <= 2 ? 0 : tierIdx === 0 ? -ROOM_L * 0.24 : ROOM_L * 0.24;
+        perSide <= 1
+          ? 0
+          : -ROOM_L * 0.3 + (tierIdx * (ROOM_L * 0.6)) / Math.max(1, perSide - 1);
       const fanGroup = new THREE.Group();
       fanGroup.position.set(
         onLeft ? -ROOM_W / 2 + 0.14 : ROOM_W / 2 - 0.14,
-        2.15,
+        2.18,
         zOff
       );
       const mount = new THREE.Mesh(fanMountGeo, steelFrameMat);
       const head = new THREE.Mesh(fanDiskGeo, fanGuardMat);
       head.rotation.z = Math.PI / 2;
       head.position.x = onLeft ? 0.12 : -0.12;
+      head.userData = {
+        type: 'equipment',
+        equipmentType: 'fan',
+        label: 'Quạt treo tường',
+        count: Number(fac?.quat ?? fanCount),
+        roomLabel: room.roomLabel,
+      };
+      hitTargets.push(head);
       fanGroup.add(mount, head);
       group.add(fanGroup);
     }
   }
 
-  // Real steel locker cabinets along back wall aisle center if `tu > 0`
+  // Real steel personal locker banks (supports up to 20 individual lockers via InstancedMesh!)
+  // Layout: Back wall holds up to 10 (2 stacked tiers × 5 columns), front-left & front-right returns hold up to 10 more
   if (lockerCount > 0) {
-    const lockerW = 0.46;
-    const lockerH = 1.38;
-    const lockerD = 0.42;
-    const lockerGeo = new THREE.BoxGeometry(lockerW, lockerH, lockerD);
-    const startLX = -((lockerCount - 1) * (lockerW + 0.06)) / 2;
-    for (let i = 0; i < lockerCount; i++) {
-      const lMesh = new THREE.Mesh(lockerGeo, lockerMat);
-      lMesh.position.set(startLX + i * (lockerW + 0.06), lockerH / 2 + 0.015, -ROOM_L / 2 + 0.26);
-      lMesh.castShadow = castShadows;
-      group.add(lMesh);
+    const lockerDoorAccentMat = new THREE.MeshStandardMaterial({
+      color: 0x475569,
+      roughness: 0.46,
+      metalness: 0.48,
+    });
+    const lockerHandleMat = new THREE.MeshStandardMaterial({
+      color: 0xe2e8f0,
+      roughness: 0.24,
+      metalness: 0.85,
+    });
+
+    const isStackedBack = lockerCount > 5;
+    const lockerW = 0.44;
+    const lockerH = isStackedBack ? 0.72 : 1.38;
+    const lockerD = 0.4;
+    const bodyGeo = new THREE.BoxGeometry(lockerW, lockerH, lockerD);
+    const doorGeo = new THREE.BoxGeometry(lockerW - 0.06, lockerH - 0.08, 0.025);
+    const handleGeo = new THREE.BoxGeometry(0.025, 0.12, 0.03);
+
+    const bodyTransforms: { pos: [number, number, number]; rot?: [number, number, number] }[] = [];
+    const doorTransforms: { pos: [number, number, number]; rot?: [number, number, number] }[] = [];
+    const handleTransforms: { pos: [number, number, number]; rot?: [number, number, number] }[] = [];
+
+    const pushLocker = (
+      x: number,
+      y: number,
+      z: number,
+      facing: 'south' | 'north'
+    ) => {
+      const fSign = facing === 'south' ? 1 : -1;
+      bodyTransforms.push({ pos: [x, y, z] });
+      doorTransforms.push({ pos: [x, y, z + fSign * (lockerD / 2 + 0.012)] });
+      handleTransforms.push({ pos: [x + fSign * 0.14, y, z + fSign * (lockerD / 2 + 0.032)] });
+    };
+
+    // Bank 1: Back wall center aisle (up to 10 compartments: 5 wide × 2 high, or 1..5 full-height)
+    const backSlots = Math.min(lockerCount, 10);
+    const backCols = isStackedBack ? Math.min(5, Math.ceil(backSlots / 2)) : backSlots;
+    const backStartX = -((backCols - 1) * (lockerW + 0.04)) / 2;
+    for (let i = 0; i < backSlots; i++) {
+      const col = isStackedBack ? Math.floor(i / 2) : i;
+      const tier = isStackedBack ? i % 2 : 0;
+      const lx = backStartX + col * (lockerW + 0.04);
+      const ly = 0.02 + lockerH / 2 + tier * (lockerH + 0.03);
+      pushLocker(lx, ly, -ROOM_L / 2 + 0.24, 'south');
     }
+
+    // Interactive invisible hit proxy for back locker bank
+    const backBankW = Math.max(0.6, backCols * (lockerW + 0.04));
+    const backBankH = isStackedBack ? lockerH * 2 + 0.08 : lockerH + 0.04;
+    const backHit = new THREE.Mesh(
+      new THREE.BoxGeometry(backBankW, backBankH, lockerD + 0.12),
+      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+    );
+    backHit.position.set(0, backBankH / 2 + 0.02, -ROOM_L / 2 + 0.24);
+    backHit.userData = {
+      type: 'equipment',
+      equipmentType: 'locker',
+      label: 'Tủ đồ cá nhân',
+      count: Number(fac?.tu ?? lockerCount),
+      roomLabel: room.roomLabel,
+    };
+    group.add(backHit);
+    hitTargets.push(backHit);
+
+    // Bank 2 & 3: Overflow lockers (11..20) cleanly flanking the front doorway on left & right walls
+    const overflow = lockerCount - backSlots;
+    if (overflow > 0) {
+      const leftCount = Math.ceil(overflow / 2);
+      const rightCount = overflow - leftCount;
+
+      const buildFrontWing = (count: number, side: -1 | 1) => {
+        if (count <= 0) return;
+        const cols = Math.min(3, Math.ceil(count / 2));
+        for (let i = 0; i < count; i++) {
+          const col = Math.floor(i / 2);
+          const tier = i % 2;
+          const baseEdge = side * (ROOM_W / 2 - 0.34);
+          const lx = baseEdge - side * col * (lockerW + 0.04);
+          const ly = 0.02 + lockerH / 2 + tier * (lockerH + 0.03);
+          pushLocker(lx, ly, ROOM_L / 2 - 0.3, 'north');
+        }
+        const wingW = cols * (lockerW + 0.04);
+        const wingCenterX =
+          side * (ROOM_W / 2 - 0.34) - side * ((cols - 1) * (lockerW + 0.04)) / 2;
+        const wingHit = new THREE.Mesh(
+          new THREE.BoxGeometry(wingW + 0.1, lockerH * 2 + 0.08, lockerD + 0.12),
+          new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+        );
+        wingHit.position.set(wingCenterX, lockerH + 0.04, ROOM_L / 2 - 0.3);
+        wingHit.userData = {
+          type: 'equipment',
+          equipmentType: 'locker',
+          label: 'Tủ đồ cá nhân',
+          count: Number(fac?.tu ?? lockerCount),
+          roomLabel: room.roomLabel,
+        };
+        group.add(wingHit);
+        hitTargets.push(wingHit);
+      };
+
+      buildFrontWing(leftCount, -1);
+      buildFrontWing(rightCount, 1);
+    }
+
+    addInstancedBatch(group, bodyGeo, lockerMat, bodyTransforms, castShadows);
+    addInstancedBatch(group, doorGeo, lockerDoorAccentMat, doorTransforms, false);
+    addInstancedBatch(group, handleGeo, lockerHandleMat, handleTransforms, false);
   }
 
-  // Room info plaque centered on back wall
+  // Room info plaque centered on back wall (highlights border in amber/rose if room has CSVC issue!)
+  const hasRoomIssue = room.hasFacilityIssue || room.maintenanceBedCount > 0;
+  const roomSignSubtext = hasRoomIssue
+    ? `${room.occupied}/${room.capacity} CN · ${
+        room.maintenanceBedCount > 0 ? `${room.maintenanceBedCount}G bảo trì` : 'Có sự cố CSVC'
+      }`
+    : `${room.occupied}/${room.capacity} công nhân · ${beds.length} giường`;
   const roomSignTex = createPlaqueTexture(
     `${room.ktx} · ${room.day} · ${room.roomLabel}`,
     {
-      subtext: `${room.occupied}/${room.capacity} công nhân · ${beds.length} giường`,
-      bg: '#0f172a',
-      border: '#38bdf8',
+      subtext: roomSignSubtext,
+      bg: hasRoomIssue ? '#29150b' : '#0f172a',
+      border: hasRoomIssue ? '#f97316' : '#38bdf8',
       width: 512,
       height: 112,
       fontSize: 32,
@@ -404,8 +533,16 @@ export function buildRoomInteriorScene(
     new THREE.PlaneGeometry(2.5, 0.56),
     new THREE.MeshStandardMaterial({ map: roomSignTex, roughness: 0.35 })
   );
-  roomSign.position.set(0, 1.92, -ROOM_L / 2 + 0.05);
+  roomSign.position.set(0, 1.98, -ROOM_L / 2 + 0.05);
+  roomSign.userData = {
+    type: 'equipment',
+    equipmentType: 'room_board',
+    label: 'Bảng thông số & CSVC phòng',
+    count: beds.length,
+    roomLabel: room.roomLabel,
+  };
   group.add(roomSign);
+  hitTargets.push(roomSign);
 
   // Entrance doorway threshold & open door
   const entryThreshold = new THREE.Mesh(

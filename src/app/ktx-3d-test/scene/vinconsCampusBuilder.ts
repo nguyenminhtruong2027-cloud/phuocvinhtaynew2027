@@ -6,6 +6,7 @@ import type {
   CampusRoomNode,
   FunctionalAreaNode,
   SceneTheme,
+  SiteLandmarkNode,
   UnitXRayFilter,
 } from '../types';
 import type {
@@ -27,6 +28,7 @@ import {
   resolveRoomColor,
   type BuildingVisualHandle,
   type CampusBuildResult,
+  type InfrastructureVisualHandle,
   type RoomVisualHandle,
 } from './campusBuilder';
 
@@ -404,7 +406,8 @@ export function buildVinconsCampusScene(
   blueprint: CampusBlueprintConfig,
   assignedOnly = false,
   showFunctionalRooms = true,
-  showHiddenRooms = true
+  showHiddenRooms = true,
+  hiddenBuildingKeys?: ReadonlySet<string>
 ): CampusBuildResult {
   const group = new THREE.Group();
   group.name = 'vincons-ktx-campus-root';
@@ -420,12 +423,44 @@ export function buildVinconsCampusScene(
   const hitTargets: THREE.Object3D[] = [];
   const functionalHitTargets: THREE.Object3D[] = [];
   const buildingHitTargets: THREE.Object3D[] = [];
+  const infrastructureHitTargets: THREE.Object3D[] = [];
   const roomVisuals = new Map<string, RoomVisualHandle>();
   const functionalLookup = new Map<string, FunctionalAreaNode>();
   const buildingVisuals = new Map<string, BuildingVisualHandle>();
+  const infrastructureVisuals = new Map<string, InfrastructureVisualHandle>();
   const plaqueTexCache = new Map<string, THREE.CanvasTexture>();
   const roomPlaqueMatCache = new Map<string, THREE.MeshStandardMaterial>();
   const isLight = theme === 'light';
+
+  // Invisible raycast proxy material (transparent opacity:0, never visible:false so Raycaster hits it cleanly)
+  const landmarkHitMat = new THREE.MeshBasicMaterial({
+    transparent: true,
+    opacity: 0.0,
+    depthWrite: false,
+  });
+
+  const registerInfrastructureLandmark = (
+    landmark: SiteLandmarkNode,
+    center: THREE.Vector3,
+    size: [number, number, number],
+    radius: number,
+    cameraOffset: THREE.Vector3
+  ) => {
+    const hitMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(size[0], size[1], size[2]),
+      landmarkHitMat
+    );
+    hitMesh.position.copy(center);
+    hitMesh.userData = { type: 'landmark', landmarkId: landmark.id };
+    group.add(hitMesh);
+    infrastructureHitTargets.push(hitMesh);
+    infrastructureVisuals.set(landmark.id, {
+      landmark,
+      worldCenter: center.clone(),
+      radius,
+      cameraOffset: cameraOffset.clone(),
+    });
+  };
 
   // Collect all functional rooms from DB so Dining Halls & Canteens can bind to live equipment data
   const allDbFunctional: FunctionalAreaNode[] = [];
@@ -1022,12 +1057,37 @@ export function buildVinconsCampusScene(
   // ── 6. Build the 6 Dormitory Rows (1) & (2) — Single-Story, Pitched Corrugated Gable Roofs ──
   const ROOM_H = 2.45;
   const FLOOR_SLAB_H = 0.24;
+  const issueBeaconGeo = new THREE.OctahedronGeometry(0.32, 0);
 
   const slots = assignBuildingsToSixVinconsSlots(ktxNodes);
 
   slots.forEach(slot => {
-    const southBld = slot.southWing;
-    const northBld = slot.northWing;
+    const rawSouthBld = slot.southWing;
+    const rawNorthBld = slot.northWing;
+    const hadAnyDataBuilding = Boolean(rawSouthBld || rawNorthBld);
+    const southBld =
+      rawSouthBld && !hiddenBuildingKeys?.has(rawSouthBld.key) ? rawSouthBld : null;
+    const northBld =
+      rawNorthBld && !hiddenBuildingKeys?.has(rawNorthBld.key) ? rawNorthBld : null;
+
+    // If every building assigned to this row slot was explicitly hidden by the user, leave only a clean flat ground footprint
+    if (hadAnyDataBuilding && !southBld && !northBld) {
+      const hiddenPad = new THREE.Mesh(
+        new THREE.BoxGeometry(36.8, 0.03, 5.4),
+        new THREE.MeshStandardMaterial({
+          color: isLight ? 0x94a3b8 : 0x334155,
+          roughness: 0.9,
+          metalness: 0.05,
+          transparent: true,
+          opacity: isLight ? 0.22 : 0.25,
+          depthWrite: false,
+        })
+      );
+      hiddenPad.position.set(DORM_CENTER_X, PLINTH_H + 0.03, slot.z);
+      group.add(hiddenPad);
+      return;
+    }
+
     const isEmptyPlaceholder = !southBld && !northBld;
     const singleBigBuildingSplit = Boolean(southBld && !northBld && southBld.rooms.length > 16);
     const isDoubleSided = Boolean(southBld && northBld) || singleBigBuildingSplit;
@@ -1229,6 +1289,8 @@ export function buildVinconsCampusScene(
       strip.position.set(rx, FLOOR_SLAB_H + ROOM_H - 0.14, rz + dir * (wingRoomD / 2 + 0.06));
       bldGroup.add(strip);
 
+      const hasIssue =
+        !isHiddenRoom && (room.maintenanceBedCount > 0 || room.hasFacilityIssue);
       const shortNote = room.ghiChu ? room.ghiChu.slice(0, 12) : '';
       const ratioText = isHiddenRoom
         ? 'Đang ẩn'
@@ -1237,13 +1299,15 @@ export function buildVinconsCampusScene(
           : `${room.occupied}/${room.capacity}`;
       const plaqueBorder = isHiddenRoom
         ? '#64748b'
-        : isFuncRoom
-          ? '#a78bfa'
-          : room.overflow > 0
-            ? '#f43f5e'
-            : room.vacant > 0
-              ? '#10b981'
-              : '#f59e0b';
+        : hasIssue
+          ? '#f97316'
+          : isFuncRoom
+            ? '#a78bfa'
+            : room.overflow > 0
+              ? '#f43f5e'
+              : room.vacant > 0
+                ? '#10b981'
+                : '#f59e0b';
       const plaqueBg = isHiddenRoom ? '#1e293b' : isFuncRoom ? '#1e1038' : '#0b1220';
       const pKey = `${room.roomLabel}|${ratioText}|${plaqueBorder}|${plaqueBg}`;
       let pMat = roomPlaqueMatCache.get(pKey);
@@ -1280,6 +1344,32 @@ export function buildVinconsCampusScene(
       }
       bldGroup.add(rPlaque);
 
+      // 3D Maintenance / Facility Issue Diamond Beacon (visible above eave when room has maintenance beds or issue note)
+      let issueBeacon: THREE.Mesh | undefined;
+      let issueBeaconMat: THREE.MeshStandardMaterial | undefined;
+      if (hasIssue) {
+        const isSevere =
+          room.maintenanceBedCount >= 2 ||
+          (room.maintenanceBedCount > 0 && room.hasFacilityIssue);
+        issueBeaconMat = new THREE.MeshStandardMaterial({
+          color: isSevere ? 0xf43f5e : 0xf97316,
+          emissive: isSevere ? 0xe11d48 : 0xea580c,
+          emissiveIntensity: colorMode === 'maintenance' ? 0.92 : 0.45,
+          roughness: 0.25,
+          metalness: 0.2,
+        });
+        issueBeacon = new THREE.Mesh(issueBeaconGeo, issueBeaconMat);
+        issueBeacon.position.set(
+          rx,
+          FLOOR_SLAB_H + ROOM_H + 0.72,
+          rz + dir * (wingRoomD / 2 + 0.28)
+        );
+        issueBeacon.scale.setScalar(colorMode === 'maintenance' ? 1.32 : 0.92);
+        issueBeacon.userData = { type: 'room', roomKey: room.key };
+        bldGroup.add(issueBeacon);
+        hitTargets.push(issueBeacon);
+      }
+
       const worldCenter = new THREE.Vector3(rx, FLOOR_SLAB_H + ROOM_H / 2, rz).applyMatrix4(
         _bldMatWorld
       );
@@ -1288,6 +1378,8 @@ export function buildVinconsCampusScene(
         bodyMesh,
         bodyMat,
         stripMat,
+        issueBeacon,
+        issueBeaconMat,
         worldCenter,
       });
     };
@@ -2289,6 +2381,259 @@ export function buildVinconsCampusScene(
     group.add(crownUpperInst);
   }
 
+  // ── 12. Register All 13 Interactive Vincons Site Infrastructure Landmarks (3 → 20) ──
+  registerInfrastructureLandmark(
+    {
+      id: 'gate-7',
+      code: '(7)',
+      name: 'Cổng chính 2 cánh 4m & Đường dẫn R8000',
+      category: 'security',
+      zone: 'Mặt Đông · Lối ra vào chính',
+      summary: 'Cổng chính ra vào Khu lán trại Vincons kết nối trục đường bê tông hiện hữu qua sân cua bán kính R8000.',
+      specs: [
+        'Mặt cắt cổng rộng 7,62m',
+        'Cổng xe 2 cánh 4m + cổng phụ đi bộ',
+        'Thanh chắn barie kiểm soát ra vào',
+        'Nút giao đường bê tông bán kính R8000',
+      ],
+    },
+    new THREE.Vector3(hw, PLINTH_H + 2.4, GATE_Z),
+    [3.8, 5.2, GATE_OPENING + 1.8],
+    8,
+    new THREE.Vector3(14, 9.5, 11)
+  );
+
+  registerInfrastructureLandmark(
+    {
+      id: 'face-id-8',
+      code: '(8)',
+      name: 'Container 20ft Kiểm soát Face ID',
+      category: 'security',
+      zone: 'Mặt Đông · Sát cổng chính',
+      summary: 'Trạm bảo vệ và cổng kiểm soát quân số công nhân ra vào KTX tự động bằng nhận diện khuôn mặt Face ID.',
+      specs: [
+        'Container văn phòng 20 feet cách nhiệt',
+        '3 làn cổng xoay tripod tích hợp máy quét Face ID',
+        'Mái che làn đi bộ & điều hòa chốt trực',
+        'Liên kết trực tiếp luồng ra vào Cổng (7)',
+      ],
+    },
+    new THREE.Vector3(36.8, PLINTH_H + 1.8, GATE_Z - 3.9),
+    [5.6, 3.8, 5.0],
+    7,
+    new THREE.Vector3(10.5, 7.5, 10.5)
+  );
+
+  registerInfrastructureLandmark(
+    {
+      id: 'visitor-5',
+      code: '(5)',
+      name: 'Khu thăm thân công nhân',
+      category: 'visitor',
+      zone: 'Mặt Đông · Phía Nam Cổng chính',
+      summary: 'Nhà đón tiếp thân nhân công nhân nằm tách biệt khu vực nhà ở để đảm bảo an ninh và riêng tư KTX.',
+      specs: [
+        'Kết cấu khung thép mái tôn dốc 2 mái',
+        'Bố trí bàn ghế tiếp khách ngoài khu ở',
+        'Liền kề chốt kiểm soát an ninh Face ID (8)',
+      ],
+    },
+    new THREE.Vector3(37.6, PLINTH_H + 1.6, GATE_Z + 4.8),
+    [5.2, 3.6, 4.4],
+    7,
+    new THREE.Vector3(10.5, 7.5, 10.5)
+  );
+
+  DINING_SLOT_ZS.forEach((dz, idx) => {
+    const dbFunc = diningDbNodes[idx];
+    registerInfrastructureLandmark(
+      {
+        id: `dining-${idx + 1}`,
+        code: '(3)(4)',
+        name: dbFunc ? dbFunc.name : `Nhà ăn ${idx + 1} + SHCĐ & 2 Gian soạn đồ ăn`,
+        category: 'dining',
+        zone: idx === 0 ? 'Trục trung tâm · Phía Bắc' : 'Trục trung tâm · Phía Nam',
+        summary:
+          dbFunc?.ghiChu ||
+          'Nhà ăn tập thể kết hợp không gian sinh hoạt cộng đồng công nhân, kèm 2 Gian soạn đồ ăn khép kín ở hai đầu Đông – Tây.',
+        specs: [
+          'Hạng mục (3) Nhà ăn khung thép tiền chế mái thoáng',
+          'Hạng mục (4) 2 Gian soạn đồ ăn ở hai đầu Đông & Tây',
+          'Thông gió nóc kết hợp quả cầu hút nhiệt Inox',
+          'Phục vụ phân luồng ăn ca cho 6 Dãy KTX',
+        ],
+        facility: dbFunc?.facility || null,
+      },
+      new THREE.Vector3(DORM_CENTER_X, PLINTH_H + 2.0, dz),
+      [DINING_HALL_W + KITCHEN_W * 2 + 1.0, 4.4, DINING_D + 1.2],
+      18,
+      new THREE.Vector3(12, 13.5, 20)
+    );
+  });
+
+  registerInfrastructureLandmark(
+    {
+      id: 'canteen-20',
+      code: '(20)',
+      name: 'Cụm 3 Căng Teen Đông Bắc',
+      category: 'canteen',
+      zone: 'Góc Đông Bắc · Dọc hàng rào Đông',
+      summary: 'Cụm 3 gian hàng Căng Teen cung cấp nhu yếu phẩm, nước giải khát và dịch vụ tiện ích cho công nhân trong lán trại.',
+      specs: [
+        '3 module container thương mại độc lập',
+        'Quầy kính trưng bày hướng về bãi xe Đông Bắc',
+        'Mái hiên che nắng mưa & bàn ghế nghỉ ngoài trời',
+      ],
+      facility: canteenDbNodes[0]?.facility || null,
+    },
+    new THREE.Vector3(38.8, PLINTH_H + 1.8, -29.8),
+    [5.8, 3.8, 17.5],
+    11,
+    new THREE.Vector3(-12, 10, 14)
+  );
+
+  registerInfrastructureLandmark(
+    {
+      id: 'wc-zone-13-17',
+      code: '(13–17)',
+      name: 'Khu Tắm rửa · WC Nam/Nữ · Giặt',
+      category: 'sanitary',
+      zone: 'Mặt Tây Bắc · Khu vệ sinh tập trung',
+      summary: 'Cụm 21 container 20ft vệ sinh, tắm rửa và giặt giũ phân tách khu Nam / Nữ rõ ràng theo quy chuẩn bản vẽ Vincons.',
+      specs: [
+        '(13) WC Nữ & (14) Tắm Nữ — cụm phía Bắc (viền hồng)',
+        '(15) WC Nam & (16) Tắm Nam — cụm phía Nam (viền xanh dương)',
+        '(17) Khu giặt Nam/Nữ — cột phía Đông (viền xanh lá)',
+        'Bồn nước dự phòng Inox lắp mái cấp áp trực tiếp',
+      ],
+    },
+    new THREE.Vector3(-31.2, PLINTH_H + 1.8, -17.0),
+    [9.4, 4.0, 29.5],
+    16,
+    new THREE.Vector3(16, 13, 18)
+  );
+
+  registerInfrastructureLandmark(
+    {
+      id: 'water-towers-10',
+      code: '(10)',
+      name: 'Trạm 3× Bồn nước Inox 20m³',
+      category: 'water',
+      zone: 'Góc Tây Bắc · Sát hàng rào B40',
+      summary: 'Trạm dự trữ và cấp nước sinh hoạt chính toàn khu KTX với tổng dung tích 60m³ đặt trên giàn thép mạ kẽm nâng cao.',
+      specs: [
+        '3 bồn Inox SUS304 nằm ngang dung tích 20m³/bồn (tổng 60m³)',
+        'Hệ giàn thép hình chịu lực trên móng bê tông cốt thép',
+        'Tuyến ống trục cấp nước sạch tới khu WC/Tắm (13–17) & Nhà ăn',
+      ],
+    },
+    new THREE.Vector3(-31.1, PLINTH_H + 2.6, -36.4),
+    [9.8, 5.4, 5.6],
+    9,
+    new THREE.Vector3(11, 9.5, 13)
+  );
+
+  registerInfrastructureLandmark(
+    {
+      id: 'wwtp-19',
+      code: '(19)(11)(12)',
+      name: 'Bể XLNT 50m³/h & Bể Composite',
+      category: 'wwtp',
+      zone: 'Mặt Tây · Khu hạ tầng kỹ thuật môi trường',
+      summary: 'Hệ thống thu gom, tự hoại và xử lý nước thải sinh hoạt tập trung công suất 2 module 50m³/h đảm bảo tiêu chuẩn xả thải.',
+      specs: [
+        '(19) 2 module Bể xử lý nước thải 50m³/h có sàn thao tác & lan can',
+        '(11) Bể tự hoại Composite 2×5m³ tách cặn sơ cấp',
+        '(12) Bể Composite bơm đẩy nước thải lên cụm XLNT',
+        'Tủ điện thổi khí & bồn lắng FRP độc lập',
+      ],
+    },
+    new THREE.Vector3(-38.6, PLINTH_H + 1.6, -24.8),
+    [6.2, 3.6, 23.6],
+    14,
+    new THREE.Vector3(16, 11, 14)
+  );
+
+  registerInfrastructureLandmark(
+    {
+      id: 'waste-18-7a',
+      code: '(18)(7A)',
+      name: '2× Nhà rác & Cổng phụ lấy rác (7A)',
+      category: 'waste',
+      zone: 'Góc Tây Nam · Dọc hàng rào Tây',
+      summary: 'Khu tập kết, phân loại rác thải sinh hoạt khép kín nằm cuối hướng gió kèm cổng xe thu gom rác chuyên dụng (7A).',
+      specs: [
+        '(18) 2 Nhà rác có mái che & thùng phân loại rác tại nguồn',
+        '(7A) Cổng phụ mặt Tây dành riêng cho xe chở rác ra vào',
+        'Sân bê tông tách biệt hoàn toàn với luồng sinh hoạt công nhân',
+      ],
+    },
+    new THREE.Vector3(-39.4, PLINTH_H + 1.6, 21.0),
+    [6.8, 3.6, 26.5],
+    14,
+    new THREE.Vector3(16, 11, 12)
+  );
+
+  registerInfrastructureLandmark(
+    {
+      id: 'parking-se',
+      code: '(6)',
+      name: 'Bãi để xe Đông Nam (6 dãy)',
+      category: 'parking',
+      zone: 'Góc Đông Nam · Cụm lớn nhất',
+      summary: 'Cụm nhà để xe máy công nhân quy mô lớn nhất toàn khu gồm 6 dãy mái tôn dài bố trí song song phía Nam lối vào.',
+      specs: [
+        '6 dãy nhà để xe ngang có mái tôn che mưa nắng',
+        'Kẻ vạch phân luồng đỗ xe hai mặt từng dãy',
+        'Phục vụ chính cho công nhân khu Dãy 4–6 (GĐ 2)',
+      ],
+    },
+    new THREE.Vector3(29.8, PLINTH_H + 1.5, 16.3),
+    [21.5, 3.2, 37.5],
+    22,
+    new THREE.Vector3(18, 18, 22)
+  );
+
+  registerInfrastructureLandmark(
+    {
+      id: 'parking-ne',
+      code: '(6)',
+      name: 'Bãi để xe Đông Bắc (4 dãy)',
+      category: 'parking',
+      zone: 'Góc Đông Bắc · Cạnh Căng Teen (20)',
+      summary: 'Cụm 4 dãy nhà để xe bố trí theo trục Bắc – Nam nằm ngay bên trong cổng kiểm soát Face ID (8).',
+      specs: [
+        '4 dãy nhà để xe dọc mái tôn kết cấu cột thép',
+        'Thuận tiện gửi xe cho công nhân khu Dãy 1–3 (GĐ 1)',
+        'Liền kề cụm 3 Căng Teen (20) và lối cổng chính',
+      ],
+    },
+    new THREE.Vector3(26.8, PLINTH_H + 1.5, -29.2),
+    [16.2, 3.2, 18.8],
+    15,
+    new THREE.Vector3(14, 13, 18)
+  );
+
+  registerInfrastructureLandmark(
+    {
+      id: 'parking-sw',
+      code: '(6)',
+      name: 'Bãi để xe Tây Nam (3 dãy)',
+      category: 'parking',
+      zone: 'Góc Tây Nam · Phía Tây Dãy 4–6',
+      summary: 'Cụm 3 dãy nhà để xe bố trí phía Tây Nam tiếp giáp trục đường nội bộ Tây, giảm tải cho bãi xe phía Đông.',
+      specs: [
+        '3 dãy nhà để xe dọc dài có mái che',
+        'Tiếp giáp đường kỹ thuật phía Tây & Dãy 4–6',
+        'Tách biệt với khu tập kết rác (18) bằng khoảng đệm',
+      ],
+    },
+    new THREE.Vector3(-31.3, PLINTH_H + 1.5, 21.0),
+    [9.8, 3.2, 30.2],
+    16,
+    new THREE.Vector3(15, 14, 18)
+  );
+
   // Final world bounds for smooth camera fitting
   const boundsCenter = new THREE.Vector3(2.0, 2.6, 0);
   const boundsRadius = 62.0;
@@ -2300,9 +2645,11 @@ export function buildVinconsCampusScene(
     hitTargets,
     functionalHitTargets,
     buildingHitTargets,
+    infrastructureHitTargets,
     roomVisuals,
     functionalLookup,
     buildingVisuals,
+    infrastructureVisuals,
     boundsCenter,
     boundsRadius,
   };

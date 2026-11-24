@@ -6,6 +6,7 @@ import type {
   CampusRoomNode,
   FunctionalAreaNode,
   SceneTheme,
+  SiteLandmarkNode,
   UnitXRayFilter,
 } from '../types';
 import {
@@ -26,6 +27,8 @@ export interface RoomVisualHandle {
   bodyMesh: THREE.Mesh;
   bodyMat: THREE.MeshStandardMaterial;
   stripMat: THREE.MeshStandardMaterial;
+  issueBeacon?: THREE.Mesh;
+  issueBeaconMat?: THREE.MeshStandardMaterial;
   worldCenter: THREE.Vector3;
 }
 
@@ -38,6 +41,13 @@ export interface BuildingVisualHandle {
   builtRotationDeg: number;
 }
 
+export interface InfrastructureVisualHandle {
+  landmark: SiteLandmarkNode;
+  worldCenter: THREE.Vector3;
+  radius: number;
+  cameraOffset: THREE.Vector3;
+}
+
 export interface CampusBuildResult {
   group: THREE.Group;
   roofsGroup: THREE.Group;
@@ -45,9 +55,11 @@ export interface CampusBuildResult {
   hitTargets: THREE.Object3D[];
   functionalHitTargets: THREE.Object3D[];
   buildingHitTargets: THREE.Object3D[];
+  infrastructureHitTargets: THREE.Object3D[];
   roomVisuals: Map<string, RoomVisualHandle>;
   functionalLookup: Map<string, FunctionalAreaNode>;
   buildingVisuals: Map<string, BuildingVisualHandle>;
+  infrastructureVisuals: Map<string, InfrastructureVisualHandle>;
   boundsCenter: THREE.Vector3;
   boundsRadius: number;
 }
@@ -103,6 +115,27 @@ export function resolveRoomColor(
 
   if (assignedOnly && !room.hasWriteAccess) {
     return { color: ghostColor, emissive: 0x000000, emissiveIntensity: 0, opacity: ghostOpacity };
+  }
+
+  // Dedicated Maintenance / Facility Issue Heatmap Mode (checks both accommodation & functional rooms!)
+  if (mode === 'maintenance') {
+    const hasMaintBed = room.maintenanceBedCount > 0;
+    const hasFacIssue = room.hasFacilityIssue;
+    if (hasMaintBed || hasFacIssue) {
+      const isSevere = (hasMaintBed && hasFacIssue) || room.maintenanceBedCount >= 2;
+      return {
+        color: isSevere ? PALETTE.overloaded : 0xf97316,
+        emissive: isSevere ? 0xe11d48 : 0xea580c,
+        emissiveIntensity: isSevere ? 0.5 : 0.36,
+        opacity: 1,
+      };
+    }
+    return {
+      color: ghostColor,
+      emissive: 0x000000,
+      emissiveIntensity: 0,
+      opacity: theme === 'light' ? 0.3 : 0.24,
+    };
   }
 
   // Functional rooms positioned inside a dormitory row render in unmistakable royal violet
@@ -204,17 +237,28 @@ export function applyCampusColorMode(
   focusedKey: string | null,
   unitFilter: UnitXRayFilter | null,
   theme: SceneTheme,
-  assignedOnly = false
+  assignedOnly = false,
+  focusedBuildingKey: string | null = null
 ): void {
   roomVisuals.forEach((handle, key) => {
     const spec = resolveRoomColor(handle.room, mode, unitFilter, theme, assignedOnly);
     const isHovered = key === hoveredKey;
     const isFocused = key === focusedKey;
+    const roomBldKey = `${handle.room.ktx}||${handle.room.day}`;
+    const isOtherBuildingDimmed = Boolean(focusedBuildingKey && roomBldKey !== focusedBuildingKey);
+    const isFocusedBuilding = Boolean(focusedBuildingKey && roomBldKey === focusedBuildingKey);
+
+    const effectiveOpacity =
+      isHovered || isFocused
+        ? 1
+        : isOtherBuildingDimmed
+          ? Math.min(spec.opacity, theme === 'light' ? 0.24 : 0.18)
+          : spec.opacity;
 
     handle.bodyMat.color.setHex(spec.color);
-    handle.bodyMat.opacity = isHovered || isFocused ? 1 : spec.opacity;
-    handle.bodyMat.transparent = !isHovered && !isFocused && spec.opacity < 0.99;
-    handle.bodyMat.depthWrite = isHovered || isFocused || spec.opacity >= 0.99;
+    handle.bodyMat.opacity = effectiveOpacity;
+    handle.bodyMat.transparent = effectiveOpacity < 0.99;
+    handle.bodyMat.depthWrite = effectiveOpacity >= 0.99;
 
     if (isFocused) {
       handle.bodyMat.emissive.setHex(0x38bdf8);
@@ -222,15 +266,41 @@ export function applyCampusColorMode(
     } else if (isHovered) {
       handle.bodyMat.emissive.setHex(0x7dd3fc);
       handle.bodyMat.emissiveIntensity = 0.48;
+    } else if (isOtherBuildingDimmed) {
+      handle.bodyMat.emissive.setHex(0x000000);
+      handle.bodyMat.emissiveIntensity = 0;
+    } else if (isFocusedBuilding) {
+      handle.bodyMat.emissive.setHex(spec.emissive || 0x0ea5e9);
+      handle.bodyMat.emissiveIntensity = Math.max(spec.emissiveIntensity, 0.2);
     } else {
       handle.bodyMat.emissive.setHex(spec.emissive);
       handle.bodyMat.emissiveIntensity = spec.emissiveIntensity;
     }
 
     handle.stripMat.color.setHex(isFocused || isHovered ? 0x7dd3fc : spec.color);
-    handle.stripMat.emissive.setHex(isFocused || isHovered ? 0x38bdf8 : spec.color);
+    handle.stripMat.emissive.setHex(
+      isFocused || isHovered ? 0x38bdf8 : isOtherBuildingDimmed ? 0x000000 : spec.color
+    );
     handle.stripMat.emissiveIntensity =
-      isFocused || isHovered ? 0.9 : spec.opacity < 0.5 ? 0.05 : 0.45;
+      isFocused || isHovered
+        ? 0.9
+        : isOtherBuildingDimmed
+          ? 0.02
+          : isFocusedBuilding
+            ? 0.65
+            : effectiveOpacity < 0.5
+              ? 0.05
+              : 0.45;
+
+    if (handle.issueBeacon && handle.issueBeaconMat) {
+      const hasIssue =
+        handle.room.isVisible &&
+        (handle.room.maintenanceBedCount > 0 || handle.room.hasFacilityIssue);
+      handle.issueBeacon.visible = hasIssue && !isOtherBuildingDimmed;
+      const emphasize = mode === 'maintenance' || isFocused || isHovered;
+      handle.issueBeacon.scale.setScalar(emphasize ? 1.28 : 0.92);
+      handle.issueBeaconMat.emissiveIntensity = emphasize ? 0.95 : 0.48;
+    }
   });
 }
 
@@ -301,7 +371,8 @@ export function buildCampusScene(
   blueprint: CampusBlueprintConfig = CAMPUS_BLUEPRINT_CONFIG,
   assignedOnly = false,
   showFunctionalRooms = true,
-  showHiddenRooms = true
+  showHiddenRooms = true,
+  hiddenBuildingKeys?: ReadonlySet<string>
 ): CampusBuildResult {
   if (blueprint.mode === 'vincons') {
     return buildVinconsCampusScene(
@@ -314,7 +385,8 @@ export function buildCampusScene(
       blueprint,
       assignedOnly,
       showFunctionalRooms,
-      showHiddenRooms
+      showHiddenRooms,
+      hiddenBuildingKeys
     );
   }
 
@@ -612,6 +684,10 @@ export function buildCampusScene(
       const bldTotalD = ROOM_D + CORRIDOR_D;
       const bldCenterZLocal = bldCursorZ + bldTotalD / 2;
       bldCursorZ += bldTotalD + BUILDING_GAP_Z;
+
+      if (hiddenBuildingKeys?.has(building.key)) {
+        return;
+      }
 
       const bldWorldX = blueprint.mode === 'blueprint' && bp ? bp.x : zoneCenterX;
       const bldWorldZ = blueprint.mode === 'blueprint' && bp ? bp.z : zoneCenterZ + bldCenterZLocal;
@@ -1144,9 +1220,11 @@ export function buildCampusScene(
     hitTargets,
     functionalHitTargets,
     buildingHitTargets,
+    infrastructureHitTargets: [],
     roomVisuals,
     functionalLookup,
     buildingVisuals,
+    infrastructureVisuals: new Map(),
     boundsCenter,
     boundsRadius,
   };
