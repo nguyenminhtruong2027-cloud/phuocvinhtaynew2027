@@ -2,14 +2,15 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { Worker, calcSoNgay, compareKtxNames } from '@/data/workers';
-import { X, Loader2, Save, ScanLine, CheckCircle2, Camera, AlertTriangle, AlertCircle, Check, RefreshCw } from 'lucide-react';
+import { X, Loader2, Save, ScanLine, CheckCircle2, Camera, AlertTriangle, AlertCircle, Check, RefreshCw, Sparkles } from 'lucide-react';
 import { useKtxStructure, compareDayNames } from '@/lib/ktxStructure';
 import { fetchRoomBedAvailability, RoomBedAvailability } from '@/lib/workerHierarchy';
-import { normalizeRoomLabel } from '@/lib/facilityCapacity';
+import { FacilityItem, fetchFacilitiesList, formatRoomDisplay, normalizeRoomLabel } from '@/lib/facilityCapacity';
 import { normalizeBedLabel } from '@/lib/bedSync';
 import { parseVNDateSafe } from '@/lib/vnDate';
 import { loadSavedRoomGenderMap, normalizeGender } from '@/lib/roomGender';
 import { createClient } from '@/lib/supabase/client';
+import { RoomAssignmentCandidate, suggestOptimalRooms } from '@/lib/smartRoomAssign';
 
 interface Props {
   worker: Worker | null;
@@ -558,11 +559,61 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
   const watchedMaNV = watch('maNV') || '';
   const watchedCccd = watch('cccd') || '';
   const watchedGioiTinh = watch('gioiTinh') || '';
+  const watchedDonVi = watch('donVi') || '';
+  const watchedTieuDoan = watch('tieuDoan') || '';
   const watchedKtx = watch('ktx') || '';
   const watchedDay = watch('day') || '';
   const watchedPhong = watch('phongSo') || '';
   const watchedGiuong = watch('giuong') || '';
   const previewDays = calcSoNgay(watchedCheckIn || '', watchedCheckOut || '');
+
+  const [facilitiesCatalog, setFacilitiesCatalog] = useState<FacilityItem[]>([]);
+  const [showSmartSuggestions, setShowSmartSuggestions] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    fetchFacilitiesList(false)
+      .then(list => {
+        if (active && list) setFacilitiesCatalog(list);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  const smartRoomCandidates = useMemo<RoomAssignmentCandidate[]>(() => {
+    if (!showSmartSuggestions || facilitiesCatalog.length === 0) return [];
+    const genderMap = loadSavedRoomGenderMap();
+    return suggestOptimalRooms(
+      {
+        id: worker?.id,
+        gioiTinh: watchedGioiTinh,
+        donVi: watchedDonVi,
+        tieuDoan: watchedTieuDoan,
+        ktx: watchedKtx || undefined,
+      },
+      allWorkers,
+      facilitiesCatalog,
+      genderMap,
+      { preferPhase1: true, limit: 4 }
+    );
+  }, [
+    showSmartSuggestions,
+    facilitiesCatalog,
+    worker?.id,
+    watchedGioiTinh,
+    watchedDonVi,
+    watchedTieuDoan,
+    watchedKtx,
+    allWorkers,
+  ]);
+
+  const applySmartCandidate = (cand: RoomAssignmentCandidate) => {
+    setValue('ktx', cand.ktx, { shouldDirty: true });
+    setValue('day', cand.day, { shouldDirty: true });
+    setValue('phongSo', cand.room, { shouldDirty: true });
+    setValue('giuong', cand.firstFreeBed, { shouldDirty: true });
+    setShowSmartSuggestions(false);
+  };
 
   const dayList = useMemo(() => {
     const k = watchedKtx.trim();
@@ -871,11 +922,70 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
 
               {/* Thông tin KTX */}
               <div>
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 pb-1 border-b border-border">Thông tin KTX</p>
+                <div className="flex items-center justify-between gap-2 mb-3 pb-1 border-b border-border">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Thông tin KTX
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowSmartSuggestions(v => !v)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-bdg hover:opacity-90 border border-bdr2 text-[11px] font-bold text-lnk transition-colors cursor-pointer"
+                    title="Tự gợi ý phòng & giường trống tối ưu theo giới tính, đơn vị và GĐ 1 (Dãy 1–3)"
+                  >
+                    <Sparkles size={12} />
+                    <span>Gợi ý phòng thông minh</span>
+                  </button>
+                </div>
+
+                {showSmartSuggestions && (
+                  <div className="mb-3 p-3 rounded-xl bg-act/60 border border-bdr2 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-tx">
+                        Đề xuất phòng tối ưu ({watchedGioiTinh || 'Chưa chọn GT'} · Ưu tiên GĐ 1)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowSmartSuggestions(false)}
+                        className="text-mu hover:text-tx"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                    {smartRoomCandidates.length === 0 ? (
+                      <p className="text-xs text-mu">
+                        Không tìm thấy phòng trống phù hợp với giới tính hoặc KTX đang chọn.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {smartRoomCandidates.map(c => (
+                          <button
+                            key={`${c.ktx}-${c.day}-${c.room}`}
+                            type="button"
+                            onClick={() => applySmartCandidate(c)}
+                            className="p-2.5 rounded-lg bg-surf hover:bg-bdg/40 border border-bdr hover:border-pri2 text-left transition-colors cursor-pointer"
+                          >
+                            <div className="flex items-center justify-between gap-1 text-xs font-bold text-tx">
+                              <span>
+                                {c.day} · {formatRoomDisplay(c.room)} · G.{c.firstFreeBed}
+                              </span>
+                              <span className="text-[11px] font-mono tabular-nums text-ok">
+                                Còn {c.availableSlots}/{c.capacity}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-mu mt-0.5 truncate">
+                              {c.reasons.slice(0, 2).join(' · ') || c.ktx}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <div className="form-group">
                     <label className="label-field">KTX</label>
-                    <input {...register('ktx')} className="input-field" list="ktx-list" placeholder="VD: KTX 2" />
+                    <input {...register('ktx')} className="input-field" list="ktx-list" placeholder="VD: KTX Phước Vĩnh Tây" />
                     <datalist id="ktx-list">{ktxList.map(k => <option key={k} value={k} />)}</datalist>
                   </div>
                   <div className="form-group">

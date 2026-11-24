@@ -19,14 +19,22 @@ import {
   Command,
   X,
   UserCheck,
+  Box,
+  DoorOpen,
 } from 'lucide-react';
 import { useWorkers } from '@/context/WorkerContext';
 import { useAuth } from '@/context/AuthContext';
 import { MonoChip, StatusTag } from '@/components/ui/StatusTag';
+import {
+  FacilityItem,
+  fetchFacilitiesList,
+  formatRoomDisplay,
+  normalizeRoomLabel,
+} from '@/lib/facilityCapacity';
 
 interface CommandItem {
   id: string;
-  group: 'worker' | 'route' | 'action';
+  group: 'worker' | 'room' | 'route' | 'action';
   label: string;
   sublabel?: string;
   badge?: React.ReactNode;
@@ -59,6 +67,18 @@ export default function CommandPalette() {
   const { workers, refreshWorkers, refreshing } = useWorkers();
   const { isAdmin } = useAuth();
   const [themeMode, setThemeMode] = useState<'midnight' | 'light'>('midnight');
+  const [roomsCatalog, setRoomsCatalog] = useState<FacilityItem[]>([]);
+
+  useEffect(() => {
+    if (!open || roomsCatalog.length > 0) return;
+    let active = true;
+    fetchFacilitiesList(false)
+      .then(list => {
+        if (active && list) setRoomsCatalog(list);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [open, roomsCatalog.length]);
 
   useEffect(() => {
     const syncTheme = () => {
@@ -160,6 +180,14 @@ export default function CommandPalette() {
         onSelect: () => navigate('/bed-management'),
       },
       {
+        id: 'route-ktx-3d',
+        group: 'route',
+        label: 'Bản Đồ 3D KTX',
+        sublabel: 'Mô hình 3D trực quan 6 Dãy × 15 Phòng, nội thất & hạ tầng Vincons',
+        icon: Box,
+        onSelect: () => navigate('/ktx-3d'),
+      },
+      {
         id: 'route-qr',
         group: 'route',
         label: 'QR Portal',
@@ -255,6 +283,43 @@ export default function CommandPalette() {
     });
   }, [query, workers, navigate]);
 
+  const roomMatches: CommandItem[] = useMemo(() => {
+    const q = stripVN(query.trim());
+    if (!q || roomsCatalog.length === 0) return [];
+    const tokens = q.split(/\s+/).filter(Boolean);
+    const matched = roomsCatalog
+      .filter(f => {
+        if (f.is_visible === false) return false;
+        const normR = normalizeRoomLabel(f.phong_khu_vuc);
+        const hay = stripVN(
+          `${f.ktx} ${f.day} phong ${normR} p.${normR} p${normR} ${f.phong_khu_vuc} ${f.ghi_chu || ''}`
+        );
+        return tokens.every(tok => hay.includes(tok));
+      })
+      .slice(0, 6);
+
+    return matched.map(f => {
+      const normR = normalizeRoomLabel(f.phong_khu_vuc);
+      const roomLabel = formatRoomDisplay(f.phong_khu_vuc);
+      return {
+        id: `room-${f.id}`,
+        group: 'room' as const,
+        label: `${f.day} · ${roomLabel}`,
+        sublabel: `${f.ktx} · ${f.giuong || 20} chỗ · Mở trực tiếp trong Phòng 3D`,
+        badge: (
+          <div className="flex items-center gap-1.5">
+            <MonoChip tone="blue">Phòng 3D</MonoChip>
+          </div>
+        ),
+        icon: DoorOpen,
+        onSelect: () =>
+          navigate(
+            `/ktx-3d?ktx=${encodeURIComponent(f.ktx)}&day=${encodeURIComponent(f.day)}&room=${encodeURIComponent(normR)}`
+          ),
+      };
+    });
+  }, [query, roomsCatalog, navigate]);
+
   const filteredRoutes = useMemo(() => {
     const q = stripVN(query.trim());
     if (!q) return routeItems;
@@ -272,8 +337,8 @@ export default function CommandPalette() {
   }, [query, actionItems]);
 
   const allItems = useMemo(
-    () => [...workerMatches, ...filteredRoutes, ...filteredActions],
-    [workerMatches, filteredRoutes, filteredActions]
+    () => [...roomMatches, ...workerMatches, ...filteredRoutes, ...filteredActions],
+    [roomMatches, workerMatches, filteredRoutes, filteredActions]
   );
 
   useEffect(() => {
@@ -406,6 +471,7 @@ export default function CommandPalette() {
                 </div>
               ) : (
                 <>
+                  {renderSection(`Phòng KTX → Mở 3D (${roomMatches.length})`, roomMatches)}
                   {renderSection(`Công nhân (${workerMatches.length})`, workerMatches)}
                   {renderSection('Điều hướng nhanh', filteredRoutes)}
                   {renderSection('Tiện ích hệ thống', filteredActions)}

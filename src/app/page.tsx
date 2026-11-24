@@ -10,7 +10,8 @@ import {
   Users, LayoutGrid, FileSpreadsheet, Radio,
   ChevronDown, Search, X, Download, UserPlus, AlertTriangle,
   TrendingUp, TrendingDown, XCircle, GitBranch, HardHat,
-  VenusAndMars, Sparkles, Building2, Layers, UserCheck, CheckCircle, ArrowRight, Activity
+  VenusAndMars, Sparkles, Building2, Layers, UserCheck, CheckCircle, ArrowRight, Activity,
+  Wrench, Printer, FileText, ClipboardCheck,
 } from 'lucide-react';
 import { CraftIconBadge, type CraftTone } from '@/components/ui/CraftIcon';
 import { AnimatedNumber, SlidingTabs, StaggerGrid, StaggerItem } from '@/components/ui/MotionPrimitives';
@@ -19,6 +20,10 @@ import { createClient } from '@/lib/supabase/client';
 import WorkerFormModal from '@/app/worker-management/components/WorkerFormModal';
 import ExecutiveSpecialistsCard from './components/ExecutiveSpecialistsCard';
 import DataQualityAlert from './components/DataQualityAlert';
+import OperationalReadinessCard from './components/OperationalReadinessCard';
+import MaintenanceTrackerModal, { MaintenanceBedItem } from './components/MaintenanceTrackerModal';
+import DailyBriefingModal from './components/DailyBriefingModal';
+import BulkGenderAndPrintModal, { BulkRoomDescriptor } from './components/BulkGenderAndPrintModal';
 import { SpecialistWithDuty } from '@/lib/dutyRoster';
 import {
   getRoomGenderInfo,
@@ -33,6 +38,9 @@ import { computeSystemMetrics, getActiveKtxList } from '@/lib/systemMetrics';
 import { useKtxStructure } from '@/lib/ktxStructure';
 import { exportToExcel } from '@/lib/exportExcel';
 import { fetchWorkerFluctuationReport, getVNDateString } from '@/lib/workerFluctuation';
+import { hasFacilityIssueNote } from '@/lib/smartRoomAssign';
+import { daysSinceVN } from '@/lib/vnDate';
+import type { DailyBriefingInput } from '@/lib/dailyBriefing';
 
 const RoomDrawer = dynamic(() => import('./components/RoomDrawer'), { ssr: false });
 const TopUnitsRankingCard = dynamic(() => import('./components/TopUnitsRankingCard'), { ssr: false });
@@ -643,6 +651,18 @@ export default function OccupancyDashboardPage() {
   const [facilitiesList, setFacilitiesList] = useState<FacilityItem[]>([]);
   const [roomFilterMode, setRoomFilterMode] = useState<'all' | 'overloaded' | 'empty'>('all');
   const [showOverloadedModal, setShowOverloadedModal] = useState(false);
+  const [showReadinessCard, setShowReadinessCard] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    return localStorage.getItem('ktx_hide_readiness_checklist_v1') !== '1';
+  });
+  const [showMaintenanceModal, setShowMaintenanceModal] = useState(false);
+  const [showBriefingModal, setShowBriefingModal] = useState(false);
+  const [bulkModalMode, setBulkModalMode] = useState<'gender' | 'print' | null>(null);
+  const [maintenanceBeds, setMaintenanceBeds] = useState<MaintenanceBedItem[]>([]);
+  const [pendingQrSummary, setPendingQrSummary] = useState<{ registrations: number; checkouts: number }>({
+    registrations: 0,
+    checkouts: 0,
+  });
 
   // Load and sync room gender designations (Supabase room_units is authoritative)
   useEffect(() => {
@@ -722,6 +742,41 @@ export default function OccupancyDashboardPage() {
     };
   }, []);
 
+  // Load maintenance beds + pending QR counts for Maintenance Tracker & Daily Briefing
+  const reloadOperationalSupportData = useCallback(async () => {
+    try {
+      const supabase = createClient();
+      const [bedsRes, qrRes] = await Promise.all([
+        supabase
+          .from('beds')
+          .select('id, ktx, day, phong_so, giuong')
+          .eq('status', 'maintenance'),
+        supabase
+          .from('worker_registrations')
+          .select('id, ghi_chu')
+          .eq('status', 'pending'),
+      ]);
+      if (!bedsRes.error && bedsRes.data) {
+        setMaintenanceBeds(bedsRes.data as MaintenanceBedItem[]);
+      }
+      if (!qrRes.error && qrRes.data) {
+        let reg = 0;
+        let chk = 0;
+        for (const r of qrRes.data) {
+          if (r.ghi_chu?.startsWith('[CHECKOUT]')) chk++;
+          else reg++;
+        }
+        setPendingQrSummary({ registrations: reg, checkouts: chk });
+      }
+    } catch {
+      // non-blocking
+    }
+  }, []);
+
+  useEffect(() => {
+    void reloadOperationalSupportData();
+  }, [reloadOperationalSupportData]);
+
   const isEmpty = !loading && workers.length === 0 && facilitiesList.length === 0;
 
   // ── Unified Single Source of Truth for all operational metrics ───────────
@@ -764,6 +819,40 @@ export default function OccupancyDashboardPage() {
 
     // Persist to Supabase
     await syncRoomGenderToSupabase(ktx, building, room, gender);
+  }, []);
+
+  const handleBulkAssignGender = useCallback(
+    async (
+      targets: Array<{ ktx: string; day: string; room: string }>,
+      gender: 'male' | 'female' | 'auto'
+    ) => {
+      setRoomGenderMap(prev => {
+        const next = { ...prev };
+        for (const t of targets) {
+          const key = `${t.ktx.trim()}||${t.day.trim()}||${t.room.trim()}`;
+          if (gender === 'auto') delete next[key];
+          else next[key] = gender;
+        }
+        saveRoomGenderMap(next);
+        return next;
+      });
+      const BATCH = 12;
+      for (let i = 0; i < targets.length; i += BATCH) {
+        const slice = targets.slice(i, i + BATCH);
+        await Promise.all(
+          slice.map(t => syncRoomGenderToSupabase(t.ktx, t.day, t.room, gender))
+        );
+      }
+    },
+    []
+  );
+
+  const toggleReadinessCard = useCallback((show: boolean) => {
+    setShowReadinessCard(show);
+    try {
+      if (show) localStorage.removeItem('ktx_hide_readiness_checklist_v1');
+      else localStorage.setItem('ktx_hide_readiness_checklist_v1', '1');
+    } catch {}
   }, []);
 
   // Filtered workers by selected KTX
@@ -1196,6 +1285,171 @@ export default function OccupancyDashboardPage() {
   const kpiWithRoom = selectedKTX === 'all' ? workersWithRoom.length : filteredWithRoom;
   const kpiVacant = selectedKTX === 'all' ? totalVacant : Math.max(0, filteredCapacity - filteredWithRoom);
 
+  const scopedFacilities = useMemo(
+    () =>
+      facilitiesList.filter(
+        f => selectedKTX === 'all' || f.ktx.trim() === selectedKTX.trim()
+      ),
+    [facilitiesList, selectedKTX]
+  );
+
+  const scopedMaintenanceBeds = useMemo(
+    () =>
+      maintenanceBeds.filter(
+        b => selectedKTX === 'all' || b.ktx.trim() === selectedKTX.trim()
+      ),
+    [maintenanceBeds, selectedKTX]
+  );
+
+  const facilityIssuesCount = useMemo(
+    () => scopedFacilities.filter(f => hasFacilityIssueNote(f.ghi_chu)).length,
+    [scopedFacilities]
+  );
+
+  const totalMaintenanceCount = facilityIssuesCount + scopedMaintenanceBeds.length;
+
+  const roomsMissingEquipment = useMemo(() => {
+    return accommodationFacilities.filter(f => {
+      if (selectedKTX !== 'all' && f.ktx.trim() !== selectedKTX.trim()) return false;
+      return (
+        (f.dieu_hoa || 0) === 0 &&
+        (f.tu || 0) === 0 &&
+        (f.quat || 0) === 0 &&
+        (f.bong_tuyp || 0) === 0
+      );
+    }).length;
+  }, [accommodationFacilities, selectedKTX]);
+
+  const unassignedBuildingsCount = useMemo(() => {
+    const assignedSet = new Set(blockAssignments.map(a => a.blockKey.toLowerCase()));
+    let unassigned = 0;
+    for (const ktx of ktxListForGrid) {
+      const bList = heatmapIndex.ktxBuildingsSortedMap.get(ktx) || [];
+      for (const b of bList) {
+        if (!assignedSet.has(`${ktx} - ${b}`.toLowerCase())) unassigned++;
+      }
+    }
+    return unassigned;
+  }, [blockAssignments, ktxListForGrid, heatmapIndex.ktxBuildingsSortedMap]);
+
+  const genderLockedRoomsCount = useMemo(() => {
+    let locked = 0;
+    for (const f of accommodationFacilities) {
+      if (selectedKTX !== 'all' && f.ktx.trim() !== selectedKTX.trim()) continue;
+      const rawKey = `${f.ktx.trim()}||${f.day.trim()}||${f.phong_khu_vuc.trim()}`;
+      const normKey = `${f.ktx.trim()}||${f.day.trim()}||${normalizeRoomLabel(f.phong_khu_vuc)}`;
+      if (roomGenderMap[rawKey] || roomGenderMap[normKey]) locked++;
+    }
+    return locked;
+  }, [accommodationFacilities, selectedKTX, roomGenderMap]);
+
+  const bulkRoomDescriptors = useMemo<BulkRoomDescriptor[]>(() => {
+    const list: BulkRoomDescriptor[] = [];
+    for (const ktx of ktxListForGrid) {
+      const bList = heatmapIndex.ktxBuildingsSortedMap.get(ktx) || [];
+      for (const building of bList) {
+        const bKey = `${ktx}||${building}`;
+        const rooms = heatmapIndex.buildingRoomsSortedMap.get(bKey) || [];
+        for (const room of rooms) {
+          const normR = normalizeRoomLabel(room);
+          const roomWorkers = heatmapIndex.roomWorkersMap.get(`${bKey}||${normR}`) || [];
+          const gInfo = heatmapIndex.roomGenderByKeyMap.get(`${bKey}||${room}`) || getRoomGenderInfo([], null);
+          const cap = getRoomCapacity(capacities, ktx, building, room) || DEFAULT_ROOM_CAPACITY;
+          list.push({
+            ktx,
+            day: building,
+            room,
+            capacity: cap,
+            workers: roomWorkers,
+            genderLabel: gInfo.label,
+          });
+        }
+      }
+    }
+    return list;
+  }, [ktxListForGrid, heatmapIndex, capacities]);
+
+  const dailyBriefingData = useMemo<DailyBriefingInput>(() => {
+    const activeScopedWorkers = filteredWorkers.filter(
+      w => !w.ngayRaKTX && !w.ghiChu?.includes('[Đã Check-out') && !w.ghiChu?.includes('[CHECKOUT]')
+    );
+    const unregisteredTamTru = activeScopedWorkers.filter(w => w.tamTruStatus !== 'registered').length;
+    const overdueTamTru = activeScopedWorkers.filter(w => {
+      if (w.tamTruStatus === 'registered') return false;
+      const d = daysSinceVN(w.ngayVaoKTX || w.createdAt);
+      return d !== null && d > 7;
+    }).length;
+
+    const assignedMap = new Map<string, string>();
+    blockAssignments.forEach(a => assignedMap.set(a.blockKey.toLowerCase(), a.staffName));
+
+    const buildingStats: DailyBriefingInput['buildingStats'] = [];
+    for (const ktx of ktxListForGrid) {
+      const bList = heatmapIndex.ktxBuildingsSortedMap.get(ktx) || [];
+      for (const b of bList) {
+        const bKey = `${ktx}||${b}`;
+        const rooms = heatmapIndex.buildingRoomsSortedMap.get(bKey) || [];
+        const bWorkers = heatmapIndex.buildingWorkersMap.get(bKey) || [];
+        let cap = 0;
+        let empty = 0;
+        for (const r of rooms) {
+          const normR = normalizeRoomLabel(r);
+          const cnt = (heatmapIndex.roomWorkersMap.get(`${bKey}||${normR}`) || []).length;
+          cap += getRoomCapacity(capacities, ktx, b, r) || DEFAULT_ROOM_CAPACITY;
+          if (cnt === 0) empty++;
+        }
+        buildingStats.push({
+          day: ktxListForGrid.length > 1 ? `${ktx} · ${b}` : b,
+          workers: bWorkers.length,
+          capacity: cap,
+          rooms: rooms.length,
+          emptyRooms: empty,
+          staffName: assignedMap.get(`${ktx} - ${b}`.toLowerCase()),
+        });
+      }
+    }
+
+    return {
+      ktxLabel: selectedKTX === 'all' ? (allKTX[0] || 'KTX Phước Vĩnh Tây') : selectedKTX,
+      totalWorkers: kpiWorkers,
+      totalCapacity: kpiCapacity,
+      totalRooms: kpiRooms,
+      emptyRooms: systemMetrics.emptyRooms,
+      overloadedRooms,
+      maleWorkers: genderStats.male,
+      femaleWorkers: genderStats.female,
+      todayEntered: todayStats.entered,
+      todayLeft: todayStats.left,
+      unregisteredTamTru,
+      overdueTamTru,
+      facilityIssuesCount,
+      maintenanceBedsCount: scopedMaintenanceBeds.length,
+      pendingRegistrationsCount: pendingQrSummary.registrations,
+      pendingCheckoutsCount: pendingQrSummary.checkouts,
+      buildingStats,
+    };
+  }, [
+    filteredWorkers,
+    blockAssignments,
+    ktxListForGrid,
+    heatmapIndex,
+    capacities,
+    selectedKTX,
+    allKTX,
+    kpiWorkers,
+    kpiCapacity,
+    kpiRooms,
+    systemMetrics.emptyRooms,
+    overloadedRooms,
+    genderStats.male,
+    genderStats.female,
+    todayStats.entered,
+    todayStats.left,
+    facilityIssuesCount,
+    scopedMaintenanceBeds.length,
+    pendingQrSummary,
+  ]);
+
   return (
     <AppLayout>
       <div className="min-h-screen bg-transparent text-tx transition-colors duration-200">
@@ -1281,6 +1535,27 @@ export default function OccupancyDashboardPage() {
               <Download size={16} className="text-lnk" />
               <span>Xuất Báo Cáo Ngày</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setShowBriefingModal(true)}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-bdr2 bg-bdg text-lnk hover:opacity-90 text-xs sm:text-sm font-bold shadow-sm transition-colors duration-100 active:scale-[0.98] cursor-pointer"
+              title="Tạo bản tin giao ban cuối ngày gửi Zalo Ban Chỉ Huy hoặc in PDF 1 trang"
+            >
+              <FileText size={16} />
+              <span>Bản tin Giao ban</span>
+            </button>
+
+            {!showReadinessCard && (
+              <button
+                type="button"
+                onClick={() => toggleReadinessCard(true)}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-bdr bg-surf text-mu hover:text-tx hover:bg-act text-xs font-semibold transition-colors cursor-pointer"
+              >
+                <ClipboardCheck size={15} />
+                <span>Bảng kiểm vận hành</span>
+              </button>
+            )}
 
             {loading && (
               <span className="text-xs text-lnk font-medium flex items-center gap-1.5 sm:ml-auto">
@@ -1372,6 +1647,27 @@ export default function OccupancyDashboardPage() {
             </StaggerItem>
           </StaggerGrid>
 
+          {/* ── 3a. Pre-flight Operational Readiness Checklist ── */}
+          {!loading && showReadinessCard && (
+            <OperationalReadinessCard
+              totalRooms={kpiRooms}
+              totalCapacity={kpiCapacity}
+              roomsMissingEquipment={roomsMissingEquipment}
+              unassignedBuildingsCount={unassignedBuildingsCount}
+              totalBuildings={kpiBuildings}
+              genderLockedRoomsCount={genderLockedRoomsCount}
+              missingWorkerDataCount={missingData}
+              facilityIssuesCount={facilityIssuesCount}
+              maintenanceBedsCount={scopedMaintenanceBeds.length}
+              onGoFacilities={() => router.push('/facilities')}
+              onGoUserMgmt={() => router.push('/user-management')}
+              onGoWorkers={handleMissingDataClick}
+              onOpenBulkGender={() => setBulkModalMode('gender')}
+              onOpenMaintenance={() => setShowMaintenanceModal(true)}
+              onDismiss={() => toggleReadinessCard(false)}
+            />
+          )}
+
           {/* ── 3b. Smart Operational Alerts ── */}
           {!isEmpty && (
             <DataQualityAlert
@@ -1391,7 +1687,7 @@ export default function OccupancyDashboardPage() {
             </div>
 
             <div className="lg:col-span-2 flex flex-col justify-between gap-3.5">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
                 <ExecutiveAlertCard
                   icon={XCircle}
                   tone="slate"
@@ -1408,6 +1704,13 @@ export default function OccupancyDashboardPage() {
                     setShowOverloadedModal(true);
                     setRoomFilterMode('overloaded');
                   }}
+                />
+                <ExecutiveAlertCard
+                  icon={Wrench}
+                  tone={totalMaintenanceCount > 0 ? 'amber' : 'slate'}
+                  label="Sự cố & Bảo trì"
+                  value={`${totalMaintenanceCount} mục`}
+                  onClick={() => setShowMaintenanceModal(true)}
                 />
                 <ExecutiveAlertCard
                   icon={TrendingUp}
@@ -1641,6 +1944,29 @@ export default function OccupancyDashboardPage() {
               </div>
 
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5 flex-wrap">
+                {!isEmpty && bulkRoomDescriptors.length > 0 && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setBulkModalMode('gender')}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surf hover:bg-act border border-bdr2 text-xs font-bold text-tx transition-colors whitespace-nowrap cursor-pointer"
+                      title="Gán nhanh công năng Phòng Nam / Phòng Nữ cho cả Dãy hoặc cụm phòng"
+                    >
+                      <VenusAndMars size={13} className="text-lnk" />
+                      <span>Gán Nam/Nữ hàng loạt</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBulkModalMode('print')}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surf hover:bg-act border border-bdr2 text-xs font-bold text-tx transition-colors whitespace-nowrap cursor-pointer"
+                      title="In bảng danh sách niêm yết cửa phòng hàng loạt theo Dãy (khổ A4)"
+                    >
+                      <Printer size={13} className="text-ok" />
+                      <span>In bảng cửa phòng</span>
+                    </button>
+                  </div>
+                )}
+
                 <SlidingTabs
                   layoutId="dashboard-heatmap-filter"
                   compact
@@ -1713,7 +2039,7 @@ export default function OccupancyDashboardPage() {
                 {[
                   { label: 'Còn trống', dot: 'bg-ok2', badge: 'bg-okbg border-ok2/35 text-ok' },
                   { label: 'Đầy 100%', dot: 'bg-wn', badge: 'tint-wn border-wn/40 text-wn' },
-                  { label: 'Quá tải (>10)', dot: 'bg-dgr', badge: 'tint-dgr border-dgr/40 text-dgr' },
+                  { label: 'Quá tải (>định mức)', dot: 'bg-dgr', badge: 'tint-dgr border-dgr/40 text-dgr' },
                   { label: 'Trống (0)', dot: 'bg-mu', badge: 'bg-act border-bdr2 text-mu' },
                 ].map(leg => (
                   <div key={leg.label} className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[11px] font-semibold ${leg.badge}`}>
@@ -2081,6 +2407,36 @@ export default function OccupancyDashboardPage() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* Maintenance & Facility Issues Tracker Modal */}
+        {showMaintenanceModal && (
+          <MaintenanceTrackerModal
+            facilities={scopedFacilities}
+            maintenanceBeds={scopedMaintenanceBeds}
+            onClose={() => setShowMaintenanceModal(false)}
+            onResolved={() => {
+              void reloadOperationalSupportData();
+            }}
+          />
+        )}
+
+        {/* Executive Daily Briefing Modal (Zalo / PDF) */}
+        {showBriefingModal && (
+          <DailyBriefingModal
+            data={dailyBriefingData}
+            onClose={() => setShowBriefingModal(false)}
+          />
+        )}
+
+        {/* Bulk Room Gender Assignment & Batch Door Poster Print Modal */}
+        {bulkModalMode && (
+          <BulkGenderAndPrintModal
+            mode={bulkModalMode}
+            rooms={bulkRoomDescriptors}
+            onApplyBulkGender={handleBulkAssignGender}
+            onClose={() => setBulkModalMode(null)}
+          />
         )}
 
         {/* Quick Add Modal */}

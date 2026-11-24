@@ -1,5 +1,6 @@
 'use client';
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import Link from 'next/link';
 import { Worker, calcSoNgay, getProfileStatus } from '@/data/workers';
 import {
   X,
@@ -16,11 +17,15 @@ import {
   Shield,
   AlertCircle,
   Clock,
+  Box,
+  Wrench,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
 import { printHtmlViaIframe, escapeHtml } from '@/lib/printHtml';
 import { getVNDateTimeDisplay } from '@/lib/vnDate';
+import { FacilityItem, fetchFacilitiesList, normalizeRoomLabel } from '@/lib/facilityCapacity';
+import { hasFacilityIssueNote } from '@/lib/smartRoomAssign';
 import {
   getRoomGenderInfo,
   syncRoomGenderToSupabase,
@@ -85,6 +90,7 @@ export default function RoomDrawer({
   });
   const [savingGender, setSavingGender] = useState(false);
   const [genderToast, setGenderToast] = useState<string | null>(null);
+  const [roomFacility, setRoomFacility] = useState<FacilityItem | null>(null);
 
   /** Resolve the effective day_nha value for Supabase queries */
   const resolveEffectiveDayNha = useCallback((): string => {
@@ -143,6 +149,27 @@ export default function RoomDrawer({
     };
 
     fetchFreshData();
+
+    // Load matching room facility record for equipment & maintenance summary
+    let active = true;
+    const effectiveDayNha = resolveEffectiveDayNha();
+    const normR = normalizeRoomLabel(room);
+    fetchFacilitiesList(false)
+      .then(list => {
+        if (!active) return;
+        const found = list.find(
+          f =>
+            f.ktx.trim() === ktx.trim() &&
+            f.day.trim() === effectiveDayNha.trim() &&
+            normalizeRoomLabel(f.phong_khu_vuc) === normR
+        );
+        setRoomFacility(found || null);
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
   }, [ktx, room, buildingRaw, building, roomNote, resolveEffectiveDayNha]);
 
   useEffect(() => {
@@ -371,6 +398,14 @@ export default function RoomDrawer({
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
+              <Link
+                href={`/ktx-3d?ktx=${encodeURIComponent(ktx)}&day=${encodeURIComponent(resolveEffectiveDayNha())}&room=${encodeURIComponent(normalizeRoomLabel(room))}`}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-bdg hover:opacity-90 border border-bdr2 text-xs font-semibold text-lnk transition-colors whitespace-nowrap"
+                title="Mở phòng này trong Bản đồ 3D KTX"
+              >
+                <Box size={14} />
+                <span className="hidden sm:inline">Phòng 3D</span>
+              </Link>
               {workers.length > 0 && (
                 <button
                   type="button"
@@ -410,6 +445,30 @@ export default function RoomDrawer({
                   className={`h-full rounded-full transition-[width] duration-300 ease-out ${isOver ? 'bg-dgr' : isFull ? 'bg-wn' : 'bg-ok2'}`}
                 />
               </div>
+            </div>
+          )}
+
+          {/* Compact Equipment & Maintenance Summary */}
+          {roomFacility && (
+            <div className="pt-1.5 border-t border-bdr/70 space-y-1.5">
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-mu tabular-nums">
+                <span className="font-semibold text-tx">CSVC:</span>
+                <span>{roomFacility.dieu_hoa} ĐH</span>
+                <span>·</span>
+                <span>{roomFacility.tu} Tủ</span>
+                <span>·</span>
+                <span>{roomFacility.quat} Quạt</span>
+                <span>·</span>
+                <span>{roomFacility.bong_tuyp} Đèn</span>
+                <span>·</span>
+                <span>{roomFacility.o_cam_dien} Ổ cắm</span>
+              </div>
+              {hasFacilityIssueNote(roomFacility.ghi_chu) && (
+                <div className="flex items-start gap-1.5 px-2.5 py-1.5 rounded-lg tint-wn border border-wn/35 text-[11px] text-wn font-medium">
+                  <Wrench size={13} className="shrink-0 mt-0.5" />
+                  <span className="break-words">Sự cố CSVC: {roomFacility.ghi_chu}</span>
+                </div>
+              )}
             </div>
           )}
         </div>

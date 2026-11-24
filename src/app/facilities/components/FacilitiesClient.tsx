@@ -1,5 +1,6 @@
 'use client';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
@@ -8,11 +9,12 @@ import { toast } from 'sonner';
 import {
   Search, Edit2, Check, X, Plus, Loader2, BedDouble, Wind, Package, Fan,
   Zap, Tv, Lightbulb, UtensilsCrossed, ChevronDown, ChevronUp, Upload,
-  AlertCircle, CheckCircle2, Download, Trash2, Filter, Snowflake, AlertTriangle, CheckSquare, Square, Lock, Building2, Box, Eye, EyeOff,
+  AlertCircle, CheckCircle2, Download, Trash2, Filter, Snowflake, AlertTriangle, CheckSquare, Square, Lock, Building2, Box, Eye, EyeOff, Layers,
 } from 'lucide-react';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { SlidingTabs } from '@/components/ui/MotionPrimitives';
 import Sync3DBlueprintModal from './Sync3DBlueprintModal';
+import BulkEquipmentModal, { EquipmentNumericField } from './BulkEquipmentModal';
 import * as XLSX from 'xlsx';
 import { exportToExcel } from '@/lib/exportExcel';
 import {
@@ -865,6 +867,7 @@ export default function FacilitiesClient() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [showSync3DModal, setShowSync3DModal] = useState(false);
+  const [showBulkEquipmentModal, setShowBulkEquipmentModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const supabase = createClient();
@@ -1724,6 +1727,81 @@ export default function FacilitiesClient() {
     }
   }, [sortedRows, selectedIds, canWriteFacility, checkRoomsOccupancy, supabase, addLog, currentUser, activeKtx, reloadKtxStructure]);
 
+  const handleBulkApplyEquipment = useCallback(
+    async (
+      targetIds: string[],
+      patch: Partial<Record<EquipmentNumericField, number>>
+    ) => {
+      const targetRows = rows.filter(
+        r => targetIds.includes(r.id) && canWriteFacility(r.ktx, r.day)
+      );
+      if (targetRows.length === 0) {
+        toast.error('Bạn không có quyền cập nhật thiết bị cho các phòng đã chọn.');
+        return;
+      }
+      setBulkUpdating(true);
+      try {
+        const ids = targetRows.map(r => r.id);
+        const BATCH = 50;
+        for (let i = 0; i < ids.length; i += BATCH) {
+          const chunk = ids.slice(i, i + BATCH);
+          const { error } = await supabase
+            .from('facilities')
+            .update(patch)
+            .in('id', chunk);
+          if (error) throw error;
+        }
+
+        // If giuong capacity changed, sync beds table for updated rooms
+        if (typeof patch.giuong === 'number') {
+          for (const room of targetRows) {
+            if (room.giuong !== patch.giuong) {
+              await syncBedsForFacilityRoom(supabase, {
+                ...room,
+                giuong: patch.giuong,
+              });
+            }
+          }
+        }
+
+        setRows(prev =>
+          prev.map(r => (ids.includes(r.id) ? { ...r, ...patch } : r))
+        );
+
+        const changedLabels = Object.entries(patch)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(', ');
+        try {
+          addLog(
+            currentUser?.email || 'system',
+            'FACILITY_UPDATE',
+            `Áp định mức thiết bị hàng loạt cho ${targetRows.length} phòng (${activeKtx}): ${changedLabels}`
+          );
+        } catch {}
+
+        invalidateFacilitiesCache();
+        invalidateKtxStructureCache();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('ktx_facilities_updated'));
+        }
+
+        setShowBulkEquipmentModal(false);
+        setSelectedIds(new Set());
+        const msg = `Đã áp định mức thiết bị cho ${targetRows.length} phòng thành công.`;
+        setBulkActionSuccess(msg);
+        setTimeout(() => setBulkActionSuccess(null), 7000);
+        toast.success(msg);
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : 'Lỗi cập nhật định mức thiết bị hàng loạt'
+        );
+      } finally {
+        setBulkUpdating(false);
+      }
+    },
+    [rows, canWriteFacility, supabase, addLog, currentUser, activeKtx]
+  );
+
   // Request deletion of all rooms in active view/tab (Super Admin only)
   const handleRequestDeleteAll = useCallback(async () => {
     if (!canDeleteAll) {
@@ -1952,6 +2030,17 @@ export default function FacilitiesClient() {
         />
       )}
 
+      {showBulkEquipmentModal && (
+        <BulkEquipmentModal
+          allRows={rows}
+          selectedIds={selectedIds}
+          activeKtx={activeKtx}
+          applying={bulkUpdating}
+          onApply={handleBulkApplyEquipment}
+          onClose={() => setShowBulkEquipmentModal(false)}
+        />
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 pb-3 border-b border-bdr">
         <div className="flex items-center gap-3">
@@ -1972,6 +2061,18 @@ export default function FacilitiesClient() {
             >
               <Box size={15} />
               <span>Đồng bộ chuẩn 3D</span>
+            </button>
+          )}
+          {(isAdmin || (currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && rows.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowBulkEquipmentModal(true)}
+              disabled={loading || bulkUpdating}
+              title="Áp định mức điều hòa, tủ, quạt, bóng tuýp... hàng loạt cho nhiều phòng hoặc cả Dãy"
+              className="flex items-center justify-center gap-1.5 px-3 py-2 border border-bdr2 bg-bdg text-lnk hover:opacity-90 rounded-xl text-xs sm:text-sm font-bold disabled:opacity-60 transition-colors flex-1 sm:flex-initial shadow-sm cursor-pointer"
+            >
+              <Layers size={15} />
+              <span>Áp định mức hàng loạt</span>
             </button>
           )}
           {isAdmin && (
@@ -2211,6 +2312,15 @@ export default function FacilitiesClient() {
             </button>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              disabled={bulkUpdating}
+              onClick={() => setShowBulkEquipmentModal(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-pri hover:opacity-90 text-white text-xs font-semibold shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              <Layers size={13} />
+              <span>Áp thiết bị ({selectedIds.size})</span>
+            </button>
             <button
               type="button"
               disabled={bulkUpdating}
@@ -2495,26 +2605,35 @@ export default function FacilitiesClient() {
                             )}
                           </td>
                           <td className="px-3 py-2 text-right">
-                            {canWriteFacility(row.ktx, row.day) ? (
-                              <div className="flex items-center justify-end gap-1">
-                                <button onClick={() => startEdit(row)}
-                                  className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" title="Sửa">
-                                  <Edit2 size={14} />
-                                </button>
-                                <button
-                                  onClick={() => handleRequestDelete(row)}
-                                  disabled={checkingDeleteId === row.id}
-                                  className="p-1.5 rounded-lg text-mu hover:bg-dgrbg hover:text-dgr transition-colors disabled:opacity-50"
-                                  title="Xóa phòng (Chỉ cho phép khi 0 công nhân)"
-                                >
-                                  {checkingDeleteId === row.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/60" title="Chỉ xem">
-                                <Lock size={12} />
-                              </span>
-                            )}
+                            <div className="flex items-center justify-end gap-1">
+                              <Link
+                                href={`/ktx-3d?ktx=${encodeURIComponent(row.ktx)}&day=${encodeURIComponent(row.day)}&room=${encodeURIComponent(normalizeRoomLabel(row.phong_khu_vuc))}`}
+                                className="p-1.5 rounded-lg text-lnk hover:bg-bdg transition-colors"
+                                title="Mở phòng này trên Bản đồ 3D"
+                              >
+                                <Box size={14} />
+                              </Link>
+                              {canWriteFacility(row.ktx, row.day) ? (
+                                <>
+                                  <button onClick={() => startEdit(row)}
+                                    className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" title="Sửa">
+                                    <Edit2 size={14} />
+                                  </button>
+                                  <button
+                                    onClick={() => handleRequestDelete(row)}
+                                    disabled={checkingDeleteId === row.id}
+                                    className="p-1.5 rounded-lg text-mu hover:bg-dgrbg hover:text-dgr transition-colors disabled:opacity-50"
+                                    title="Xóa phòng (Chỉ cho phép khi 0 công nhân)"
+                                  >
+                                    {checkingDeleteId === row.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                                  </button>
+                                </>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/60" title="Chỉ xem">
+                                  <Lock size={12} />
+                                </span>
+                              )}
+                            </div>
                           </td>
                         </>
                       )}
@@ -2540,7 +2659,7 @@ export default function FacilitiesClient() {
 
       {/* Import Help */}
       <div className="text-xs text-muted-foreground bg-muted/40 border border-border rounded-lg px-3 py-2">
-        <span className="font-medium">Hướng dẫn Import Excel:</span> Hỗ trợ file <code className="bg-muted px-1 rounded">.xlsx</code> có 1 hoặc nhiều sheet với tên bất kỳ (KTX 1, KTX 2, KTX 3...). Hàng tiêu đề tự động nhận dạng qua từ khóa <strong>STT</strong>. Các cột nhận dạng tự động: <em>Dãy, Phòng/Khu vực, Giường, Điều hòa, Tủ, Quạt, Ổ cắm điện, Remote, Bóng tuýp, Bàn ăn, Ghế ăn</em>.
+        <span className="font-medium">Hướng dẫn Import Excel:</span> Hỗ trợ file <code className="bg-muted px-1 rounded">.xlsx</code> có 1 hoặc nhiều sheet (ví dụ: KTX Phước Vĩnh Tây). Hàng tiêu đề tự động nhận dạng qua từ khóa <strong>STT</strong>. Các cột nhận dạng tự động: <em>Dãy, Phòng/Khu vực, Giường, Điều hòa, Tủ, Quạt, Ổ cắm điện, Remote, Bóng tuýp, Bàn ăn, Ghế ăn</em>.
       </div>
     </div>
   );

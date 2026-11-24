@@ -67,6 +67,8 @@ import {
   fetchAuthoritativeDeletedRegistrationTombstones,
   isRegistrationTombstoned,
 } from '@/lib/workerDeletionIntegrity';
+import { Worker } from '@/data/workers';
+import { suggestOptimalRooms } from '@/lib/smartRoomAssign';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function toValidWorkerUuid(candidate?: string | null): string {
@@ -141,6 +143,8 @@ function DetailModal({
   onReject,
   processing,
   hierarchy,
+  workers,
+  facilities,
 }: {
   reg: WorkerRegistration;
   onClose: () => void;
@@ -148,6 +152,8 @@ function DetailModal({
   onReject: (id: string) => void;
   processing: string | null;
   hierarchy: WorkerHierarchyData;
+  workers: Worker[];
+  facilities: FacilityItem[];
 }) {
   const isProcessing = processing === reg.id;
   const cfg = STATUS_CONFIG[reg.status];
@@ -327,86 +333,41 @@ function DetailModal({
 
   const smartRoomSuggestions = useMemo(() => {
     if (!isPending) return [];
-    const applicantG = normalizeGender(editForm.gioi_tinh);
-    const targetUnit = (isCustomUnit ? customUnit : editForm.don_vi).trim().toLowerCase();
+    const targetUnit = (isCustomUnit ? customUnit : editForm.don_vi).trim();
+    const allowedDays = !isAdmin
+      ? availableDays.filter(d => canWriteBlock(d, editForm.ktx))
+      : undefined;
 
-    const occByRoom = new Map<string, WorkerRef[]>();
-    for (const w of hierarchy.workers) {
-      if (!w.ktx || !w.day || !w.phongSo) continue;
-      const key = buildRoomKey(w.ktx, w.day, w.phongSo);
-      const arr = occByRoom.get(key) || [];
-      arr.push(w);
-      occByRoom.set(key, arr);
-    }
-
-    const candidates: Array<{
-      ktx: string;
-      day: string;
-      room: string;
-      vacant: number;
-      cap: number;
-      sameUnit: boolean;
-      sameGenderActive: boolean;
-      score: number;
-    }> = [];
-
-    for (const kdKey of Object.keys(hierarchy.roomsByKtxDay)) {
-      const [ktx, day] = kdKey.split('__');
-      if (!ktx || !day) continue;
-      if (!isAdmin && !canWriteBlock(day, ktx)) continue;
-
-      for (const room of hierarchy.roomsByKtxDay[kdKey] || []) {
-        const roomKey = buildRoomKey(ktx, day, room);
-        const cap = hierarchy.roomCapacities[roomKey] || 8;
-        const occ = occByRoom.get(roomKey) || [];
-        const vacant = cap - occ.length;
-        if (vacant <= 0) continue;
-
-        const normRoom = normalizeRoomLabel(room);
-        const adminLabel = savedGenderMap[`${ktx}||${day}||${room}`] ?? savedGenderMap[`${ktx}||${day}||${normRoom}`];
-        const hasMale = occ.some(w => normalizeGender(w.gioiTinh) === 'nam');
-        const hasFemale = occ.some(w => normalizeGender(w.gioiTinh) === 'nu');
-
-        if (applicantG === 'nam' && (adminLabel === 'female' || hasFemale)) continue;
-        if (applicantG === 'nu' && (adminLabel === 'male' || hasMale)) continue;
-
-        const sameUnit = Boolean(targetUnit && occ.some(w => (w.donVi || '').trim().toLowerCase() === targetUnit));
-        const sameGenderActive =
-          (applicantG === 'nam' && (hasMale || adminLabel === 'male')) ||
-          (applicantG === 'nu' && (hasFemale || adminLabel === 'female'));
-
-        let score = 0;
-        if (ktx === editForm.ktx) score += 100;
-        if (sameUnit) score += 40;
-        if (sameGenderActive) score += 20;
-        score -= vacant * 0.5;
-
-        candidates.push({
-          ktx,
-          day,
-          room,
-          vacant,
-          cap,
-          sameUnit,
-          sameGenderActive,
-          score,
-        });
+    return suggestOptimalRooms(
+      {
+        gioiTinh: editForm.gioi_tinh,
+        donVi: targetUnit,
+        tieuDoan: editForm.tieu_doan,
+        ktx: editForm.ktx || undefined,
+      },
+      workers,
+      facilities,
+      savedGenderMap,
+      {
+        preferPhase1: true,
+        allowedDays,
+        limit: 4,
       }
-    }
-
-    candidates.sort((a, b) => b.score - a.score);
-    return candidates.slice(0, 3);
+    );
   }, [
     isPending,
     editForm.gioi_tinh,
     editForm.don_vi,
+    editForm.tieu_doan,
     editForm.ktx,
     isCustomUnit,
     customUnit,
-    hierarchy,
-    isAdmin,
-    canWriteBlock,
+    workers,
+    facilities,
     savedGenderMap,
+    isAdmin,
+    availableDays,
+    canWriteBlock,
   ]);
 
   const selectedBedError = useMemo(() => {
@@ -703,12 +664,34 @@ function DetailModal({
               </div>
 
               {smartRoomSuggestions.length > 0 && (
-                <div className="rounded bg-page border border-bdr p-2.5 text-xs space-y-1.5">
-                  <div className="flex items-center gap-1.5 font-semibold text-lnk">
-                    <Sparkles size={13} />
-                    <span>Gợi ý phòng phù hợp (còn trống & cùng giới {editForm.gioi_tinh || 'phù hợp'})</span>
+                <div className="rounded bg-page border border-bdr p-2.5 text-xs space-y-2">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 font-semibold text-lnk">
+                      <Sparkles size={13} />
+                      <span>Gợi ý phòng tối ưu ({editForm.gioi_tinh || 'phù hợp'} · GĐ 1 ưu tiên)</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const top = smartRoomSuggestions[0];
+                        if (!top) return;
+                        autoPickFirstBedRef.current = true;
+                        setEditForm(prev => ({
+                          ...prev,
+                          ktx: top.ktx,
+                          day: top.day,
+                          phong_so: top.room,
+                          giuong: top.firstFreeBed,
+                        }));
+                        toast.success(`Đã chọn ${top.day} · P.${top.room} · Giường ${top.firstFreeBed}`);
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-pri hover:opacity-95 text-white text-[11px] font-bold cursor-pointer whitespace-nowrap"
+                    >
+                      <Sparkles size={11} />
+                      <span>Chọn phòng tối ưu nhất</span>
+                    </button>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     {smartRoomSuggestions.map((s, idx) => (
                       <button
                         key={`${s.ktx}-${s.day}-${s.room}-${idx}`}
@@ -720,17 +703,24 @@ function DetailModal({
                             ktx: s.ktx,
                             day: s.day,
                             phong_so: s.room,
-                            giuong: '',
+                            giuong: s.firstFreeBed,
                           }));
                         }}
-                        className="px-2.5 py-1 rounded border border-bdr bg-surf hover:border-lnk hover:bg-bdg/40 text-left transition-colors cursor-pointer"
+                        className="px-2.5 py-1.5 rounded border border-bdr bg-surf hover:border-lnk hover:bg-bdg/40 text-left transition-colors cursor-pointer"
                       >
-                        <div className="font-bold text-tx">
-                          {s.ktx} · {s.day} · P.{s.room}
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-tx">
+                            {s.day} · P.{s.room} · G.{s.firstFreeBed}
+                          </span>
+                          <span className="text-[10px] font-mono tabular-nums text-ok font-bold">
+                            Trống {s.availableSlots}/{s.capacity}
+                          </span>
                         </div>
-                        <div className="text-[10px] text-mu">
-                          Còn {s.vacant}/{s.cap} giường{s.sameUnit ? ' · Cùng đơn vị' : ''}
-                        </div>
+                        {s.reasons.length > 0 && (
+                          <div className="text-[10px] text-mu truncate mt-0.5">
+                            {s.reasons.slice(0, 3).join(' · ')}
+                          </div>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -1511,12 +1501,65 @@ export default function QRPortalClient({
       }
     } catch {}
 
+    const genderMap = loadSavedRoomGenderMap();
+    const extraOccupiedByRoom = new Map<string, number>();
+    const extraOccupiedBeds = new Map<string, Set<string>>();
+    const extraAssignedGender = new Map<string, 'male' | 'female'>();
+
     let approvedCount = 0;
+    let autoAssignedCount = 0;
     const skipped: Array<{ name: string; reason: string }> = [];
 
     for (const reg of regsToApprove) {
       try {
-        await approveSingleRegistration(reg, 'unregistered', {
+        let preparedReg = reg;
+        const missingLocation = !reg.day?.trim() || !reg.phong_so?.trim();
+        if (missingLocation) {
+          const suggestions = suggestOptimalRooms(
+            {
+              gioiTinh: reg.gioi_tinh,
+              donVi: reg.don_vi,
+              tieuDoan: reg.tieu_doan,
+              ktx: reg.ktx || undefined,
+            },
+            workers,
+            facilities,
+            genderMap,
+            {
+              preferPhase1: true,
+              limit: 1,
+              extraOccupiedByRoom,
+              extraOccupiedBeds,
+              extraAssignedGender,
+            }
+          );
+          const best = suggestions[0];
+          if (best) {
+            preparedReg = {
+              ...reg,
+              ktx: best.ktx,
+              day: best.day,
+              phong_so: best.room,
+              giuong: reg.giuong?.trim() || best.firstFreeBed,
+            };
+            autoAssignedCount++;
+            const roomKey = `${best.ktx}||${best.day}||${best.room}`;
+            extraOccupiedByRoom.set(roomKey, (extraOccupiedByRoom.get(roomKey) || 0) + 1);
+            let bedSet = extraOccupiedBeds.get(roomKey);
+            if (!bedSet) {
+              bedSet = new Set<string>();
+              extraOccupiedBeds.set(roomKey, bedSet);
+            }
+            bedSet.add(preparedReg.giuong);
+            const gNorm = normalizeGender(reg.gioi_tinh);
+            const gBucket = gNorm === 'nam' ? 'male' : gNorm === 'nu' ? 'female' : null;
+            if (gBucket && !extraAssignedGender.has(roomKey)) {
+              extraAssignedGender.set(roomKey, gBucket);
+            }
+          }
+        }
+
+        await approveSingleRegistration(preparedReg, 'unregistered', {
           skipPostRefresh: true,
           nextSttOverride: nextStt,
         });
@@ -1533,11 +1576,12 @@ export default function QRPortalClient({
     await refreshWorkers().catch(() => {});
     setBatchApproving(false);
 
+    const autoSuffix = autoAssignedCount > 0 ? ` (tự động xếp phòng thông minh ${autoAssignedCount} hồ sơ)` : '';
     if (approvedCount > 0 && skipped.length === 0) {
-      toast.success(`Đã duyệt hàng loạt ${approvedCount} hồ sơ thành công.`);
+      toast.success(`Đã duyệt hàng loạt ${approvedCount} hồ sơ thành công${autoSuffix}.`);
     } else if (approvedCount > 0 && skipped.length > 0) {
       toast.warning(
-        `Đã duyệt ${approvedCount} hồ sơ. Bỏ qua ${skipped.length} hồ sơ có xung đột (${skipped.slice(0, 2).map(s => s.name).join(', ')}).`
+        `Đã duyệt ${approvedCount} hồ sơ${autoSuffix}. Bỏ qua ${skipped.length} hồ sơ có xung đột (${skipped.slice(0, 2).map(s => s.name).join(', ')}).`
       );
     } else if (skipped.length > 0) {
       toast.error(`Không duyệt được hồ sơ nào: ${skipped[0].reason}`);
@@ -1823,6 +1867,8 @@ export default function QRPortalClient({
           onReject={handleReject}
           processing={processing}
           hierarchy={hierarchy}
+          workers={workers}
+          facilities={facilities}
         />
       )}
       {deleteTarget && (
@@ -1978,30 +2024,51 @@ export default function QRPortalClient({
       {/* THANH BỘ LỌC LIỀN KHỐI (Requirement: Segmented filter button group + console filters) */}
       <div className="bg-surf border border-bdr rounded-md p-3 space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          {/* Nhóm nút lọc trạng thái liền khối (Navy #1b2430 khi active) */}
-          <div className="inline-flex border border-bdr rounded overflow-hidden divide-x divide-bdr">
-            {[
-              { key: 'all', label: `Tất cả (${scopedRegistrations.length})` },
-              { key: 'pending', label: `Chờ duyệt (${counts.pending})` },
-              { key: 'approved', label: `Đã duyệt (${counts.approved})` },
-              { key: 'rejected', label: `Từ chối (${counts.rejected})` },
-            ].map(t => {
-              const isActive = filterStatus === t.key;
-              return (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => setFilterStatus(t.key as any)}
-                  className={`px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                    isActive
-                      ? 'bg-side text-tx'
-                      : 'bg-surf text-mu hover:bg-act'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              );
-            })}
+          {/* Nhóm nút lọc trạng thái liền khối + Chọn nhanh chờ duyệt */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="inline-flex border border-bdr rounded overflow-hidden divide-x divide-bdr">
+              {[
+                { key: 'all', label: `Tất cả (${scopedRegistrations.length})` },
+                { key: 'pending', label: `Chờ duyệt (${counts.pending})` },
+                { key: 'approved', label: `Đã duyệt (${counts.approved})` },
+                { key: 'rejected', label: `Từ chối (${counts.rejected})` },
+              ].map(t => {
+                const isActive = filterStatus === t.key;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => setFilterStatus(t.key as any)}
+                    className={`px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                      isActive
+                        ? 'bg-side text-tx'
+                        : 'bg-surf text-mu hover:bg-act'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+            {counts.pending > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  const pendingVisible = filtered.filter(r => r.status === 'pending');
+                  if (pendingVisible.length === 0) {
+                    setFilterStatus('pending');
+                    const allPendingIds = scopedRegistrations.filter(r => r.status === 'pending').map(r => r.id);
+                    setSelectedIds(new Set(allPendingIds));
+                  } else {
+                    setSelectedIds(new Set(pendingVisible.map(r => r.id)));
+                  }
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-ok2/40 bg-okbg text-ok text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer whitespace-nowrap"
+              >
+                <CheckCircle2 size={12} />
+                <span>Chọn tất cả chờ duyệt ({counts.pending})</span>
+              </button>
+            )}
           </div>
 
           {/* Ô tìm kiếm console */}

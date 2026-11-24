@@ -1,16 +1,17 @@
 'use client';
 import React from 'react';
-import { Trash2, X, CheckCircle2, Clock, ArrowRightLeft, Layers } from 'lucide-react';
+import { Trash2, X, CheckCircle2, Clock, ArrowRightLeft, Layers, Sparkles } from 'lucide-react';
 
 interface Props {
   selectedCount: number;
   onDelete?: () => void;
   onBulkTamTru?: (status: 'registered' | 'unregistered') => void;
   onBulkMove?: () => void;
+  onBulkSmartAssign?: () => void;
   onClear: () => void;
 }
 
-export default function BulkActionBar({ selectedCount, onDelete, onBulkTamTru, onBulkMove, onClear }: Props) {
+export default function BulkActionBar({ selectedCount, onDelete, onBulkTamTru, onBulkMove, onBulkSmartAssign, onClear }: Props) {
   if (selectedCount <= 0) return null;
 
   return (
@@ -50,6 +51,17 @@ export default function BulkActionBar({ selectedCount, onDelete, onBulkTamTru, o
               <span>Chưa ĐK tạm trú</span>
             </button>
           </>
+        )}
+
+        {onBulkSmartAssign && (
+          <button
+            type="button"
+            onClick={onBulkSmartAssign}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-pri hover:opacity-90 text-white text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-sm"
+          >
+            <Sparkles size={13} />
+            <span>Xếp phòng tự động</span>
+          </button>
         )}
 
         {onBulkMove && (

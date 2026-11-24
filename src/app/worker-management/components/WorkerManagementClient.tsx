@@ -8,6 +8,7 @@ import WorkerFormModal from './WorkerFormModal';
 import WorkerDetailModal from './WorkerDetailModal';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import BulkActionBar from './BulkActionBar';
+import BatchSmartAssignModal from './BatchSmartAssignModal';
 import { Plus, Download, Upload, X, FileText, AlertCircle, AlertTriangle, FileCheck, ChevronLeft, ChevronRight, Trash2, Building2, CheckSquare, Filter, Users, ArrowRightLeft } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { exportToExcel } from '@/lib/exportExcel';
@@ -17,7 +18,9 @@ import { useAudit } from '@/context/AuditContext';
 import { useWorkers } from '@/context/WorkerContext';
 import { useSearchParams } from 'next/navigation';
 import { useKtxStructure } from '@/lib/ktxStructure';
-import { fetchRoomCapacities, getRoomCapacity, normalizeRoomLabel, RoomCapacityMap } from '@/lib/facilityCapacity';
+import { FacilityItem, fetchFacilitiesList, fetchRoomCapacities, getRoomCapacity, normalizeRoomLabel, RoomCapacityMap } from '@/lib/facilityCapacity';
+import { loadSavedRoomGenderMap } from '@/lib/roomGender';
+import { BatchAssignmentPlanItem } from '@/lib/smartRoomAssign';
 import { daysSinceVN } from '@/lib/vnDate';
 
 export interface FilterState {
@@ -1359,7 +1362,7 @@ function BulkTransferWorkersModal({
   );
   const skippedCount = selectedWorkers.length - authorizedSelected.length;
 
-  const [targetKtx, setTargetKtx] = useState<string>(() => ktxOptions[0] || 'KTX 1');
+  const [targetKtx, setTargetKtx] = useState<string>(() => ktxOptions[0] || 'KTX Phước Vĩnh Tây');
   const [targetDay, setTargetDay] = useState<string>('');
   const [targetRoom, setTargetRoom] = useState<string>('');
   const [tieuDoanMode, setTieuDoanMode] = useState<'keep' | 'clear' | 'set'>('keep');
@@ -1608,6 +1611,9 @@ export function WorkerManagementClient() {
   const { currentUser, canDeleteSingle, canBulkDelete, canDeleteAll, isAdmin, canWriteBlock } = useAuth();
   const { addLog } = useAudit();
   const [roomCapacities, setRoomCapacities] = useState<RoomCapacityMap>({});
+  const [facilitiesCatalog, setFacilitiesCatalog] = useState<FacilityItem[]>([]);
+  const [showBatchSmartAssign, setShowBatchSmartAssign] = useState(false);
+  const [applyingSmartAssign, setApplyingSmartAssign] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -1615,6 +1621,11 @@ export function WorkerManagementClient() {
       fetchRoomCapacities()
         .then(map => {
           if (active) setRoomCapacities(map);
+        })
+        .catch(() => {});
+      fetchFacilitiesList(false)
+        .then(list => {
+          if (active && list) setFacilitiesCatalog(list);
         })
         .catch(() => {});
     };
@@ -2060,6 +2071,51 @@ export function WorkerManagementClient() {
     }
   }, [workers, selectedIds, isAdmin, canWriteBlock, currentUser, bulkUpdateWorkers, addLog, roomCapacities]);
 
+  const handleApplyBatchSmartAssign = useCallback(
+    async (plan: BatchAssignmentPlanItem[]) => {
+      const valid = plan.filter(p => p.assigned !== null);
+      if (valid.length === 0) return;
+      setApplyingSmartAssign(true);
+      let okCount = 0;
+      let skipCount = 0;
+      try {
+        for (const item of valid) {
+          const target = item.assigned!;
+          const existing = workers.find(w => w.id === item.workerId);
+          if (!existing) {
+            skipCount++;
+            continue;
+          }
+          if (!(isAdmin || (canWriteBlock(existing.day, existing.ktx) && canWriteBlock(target.day, target.ktx)))) {
+            skipCount++;
+            continue;
+          }
+          await updateWorker({
+            ...existing,
+            ktx: target.ktx,
+            day: target.day,
+            phongSo: target.room,
+            giuong: target.bed,
+            khoaTraCuu: `${target.ktx}|${target.day}|${target.room}`,
+          });
+          okCount++;
+        }
+        writeAuditLog(
+          'UPDATE',
+          `Xếp phòng & giường tự động thông minh cho ${okCount} công nhân${skipCount > 0 ? ` (bỏ qua ${skipCount})` : ''}`
+        );
+        setSelectedIds(new Set());
+        setShowBatchSmartAssign(false);
+        toast.success(`Đã xếp phòng & giường tự động cho ${okCount} công nhân!`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Lỗi xếp phòng tự động');
+      } finally {
+        setApplyingSmartAssign(false);
+      }
+    },
+    [workers, isAdmin, canWriteBlock, updateWorker, writeAuditLog]
+  );
+
   const handleExport = useCallback(() => {
     const data = filtered.map((w, idx) => {
       const soNgay = calcSoNgay(w.ngayVaoKTX, w.ngayRaKTX);
@@ -2228,6 +2284,7 @@ export function WorkerManagementClient() {
         selectedCount={selectedIds.size}
         onDelete={canBulkDelete ? () => setDeleteTarget(workers.filter(w => selectedIds.has(w.id))) : undefined}
         onBulkTamTru={handleBulkTamTru}
+        onBulkSmartAssign={() => setShowBatchSmartAssign(true)}
         onBulkMove={() => setShowBulkTransfer(true)}
         onClear={() => setSelectedIds(new Set())}
       />
@@ -2287,6 +2344,17 @@ export function WorkerManagementClient() {
           onTransfer={handleBulkTransfer}
           isAdmin={isAdmin}
           canWriteBlock={canWriteBlock}
+        />
+      )}
+      {showBatchSmartAssign && (
+        <BatchSmartAssignModal
+          selectedWorkers={workers.filter(w => selectedIds.has(w.id))}
+          allWorkers={workers}
+          facilities={facilitiesCatalog}
+          roomGenderMap={loadSavedRoomGenderMap()}
+          applying={applyingSmartAssign}
+          onApplyPlan={handleApplyBatchSmartAssign}
+          onClose={() => setShowBatchSmartAssign(false)}
         />
       )}
       {showDeleteAll && isAdmin && <DeleteAllConfirmModal onConfirm={handleDeleteAll} onClose={() => setShowDeleteAll(false)} loading={deleteAllLoading} />}

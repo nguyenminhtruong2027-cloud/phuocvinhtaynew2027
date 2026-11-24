@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useWorkers } from '@/context/WorkerContext';
+import { createClient } from '@/lib/supabase/client';
 import ThemeSwitcher from '@/components/ui/ThemeSwitcher';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { openCommandPalette } from '@/components/ui/CommandPalette';
@@ -39,6 +40,7 @@ const SidebarNavLink = React.memo(function SidebarNavLink({
   pathname,
   collapsed,
   workerCount,
+  pendingQrCount = 0,
   isMobile = false,
   onMobileClose,
 }: {
@@ -46,12 +48,14 @@ const SidebarNavLink = React.memo(function SidebarNavLink({
   pathname: string | null;
   collapsed: boolean;
   workerCount: number;
+  pendingQrCount?: number;
   isMobile?: boolean;
   onMobileClose?: () => void;
 }) {
   const IconComponent = item.icon;
   const isActive = pathname === item.href;
-  const badge = item.dynamicBadge ? workerCount : undefined;
+  const isQrPending = item.id === 'nav-qr' && pendingQrCount > 0;
+  const badge = item.dynamicBadge ? workerCount : isQrPending ? pendingQrCount : undefined;
 
   if (isMobile) {
     return (
@@ -128,12 +132,23 @@ const SidebarNavLink = React.memo(function SidebarNavLink({
         </span>
       )}
       {!collapsed && badge !== undefined && badge > 0 && (
-        <span className="relative z-10 text-[11px] bg-bdg text-lnk border border-bdr2 rounded-md px-1.5 py-0.5 font-mono font-tabular font-bold">
+        <span
+          className={`relative z-10 text-[11px] rounded-md px-1.5 py-0.5 font-mono font-tabular font-bold ${
+            isQrPending
+              ? 'tint-wn text-wn border border-wn/40'
+              : 'bg-bdg text-lnk border border-bdr2'
+          }`}
+          title={isQrPending ? `${badge} hồ sơ QR chờ duyệt` : undefined}
+        >
           {badge}
         </span>
       )}
       {collapsed && badge !== undefined && badge > 0 && (
-        <span className="relative z-10 absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-pri2" />
+        <span
+          className={`relative z-10 absolute top-1.5 right-1.5 w-2 h-2 rounded-full ${
+            isQrPending ? 'bg-wn' : 'bg-pri2'
+          }`}
+        />
       )}
     </Link>
   );
@@ -144,12 +159,53 @@ export default function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const { currentUser, isAdmin, signOut } = useAuth();
+  const { currentUser, isAdmin, canWriteBlock, signOut } = useAuth();
   const { workerCount, refreshWorkers, refreshing } = useWorkers();
+  const [pendingQrCount, setPendingQrCount] = useState(0);
 
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const supabase = createClient();
+
+    const loadPending = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('worker_registrations')
+          .select('id, day, ktx')
+          .eq('status', 'pending');
+        if (!active || error || !data) return;
+        const count = data.filter(r => isAdmin || canWriteBlock(r.day, r.ktx)).length;
+        setPendingQrCount(count);
+      } catch {
+        // non-blocking
+      }
+    };
+
+    const scheduleLoad = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (active) void loadPending();
+      }, 450);
+    };
+
+    void loadPending();
+    const channel = supabase
+      .channel('sidebar_pending_qr_count')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_registrations' }, scheduleLoad)
+      .subscribe();
+
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser, isAdmin, canWriteBlock]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -251,6 +307,7 @@ export default function Sidebar() {
               pathname={pathname}
               collapsed={collapsed}
               workerCount={workerCount}
+              pendingQrCount={pendingQrCount}
             />
           ))}
 
@@ -423,6 +480,7 @@ export default function Sidebar() {
                     pathname={pathname}
                     collapsed={false}
                     workerCount={workerCount}
+                    pendingQrCount={pendingQrCount}
                     isMobile
                     onMobileClose={() => setMobileOpen(false)}
                   />

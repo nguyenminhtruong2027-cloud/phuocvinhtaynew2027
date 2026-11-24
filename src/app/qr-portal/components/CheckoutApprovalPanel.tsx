@@ -312,6 +312,7 @@ export default function CheckoutApprovalPanel({
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchApproving, setBatchApproving] = useState(false);
   const [batchRejecting, setBatchRejecting] = useState(false);
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
   const [batchDeleting, setBatchDeleting] = useState(false);
@@ -486,11 +487,17 @@ export default function CheckoutApprovalPanel({
    * XÓA hẳn khỏi bảng workers (xác nhận số dòng đã xóa), giải phóng giường, cập nhật state tức thì.
    * TUYỆT ĐỐI không đánh dấu 'approved' nếu bước xóa hoặc giải phóng giường thất bại.
    */
-  const handleApprove = async (req: CheckoutRequest) => {
+  const handleApprove = async (
+    req: CheckoutRequest,
+    opts?: { silent?: boolean }
+  ): Promise<boolean> => {
+    const silent = Boolean(opts?.silent);
     processingIdRef.current = req.id;
     setProcessingId(req.id);
-    setActionSuccessMsg(null);
-    setActionErrorMsg(null);
+    if (!silent) {
+      setActionSuccessMsg(null);
+      setActionErrorMsg(null);
+    }
     try {
       const nowStr = new Date().toISOString();
       const reqKtx = normalizeKtxLabel((req.ktx || '').trim());
@@ -1122,19 +1129,25 @@ export default function CheckoutApprovalPanel({
         refreshWorkers().catch(() => {});
       }
 
-      const roomLiberatedText = `${req.ktx} - ${req.day} - Phòng ${req.phong_so}`;
-      setActionSuccessMsg(
-        actuallyDeletedIds.length > 0
-          ? `✓ Đã duyệt check-out và xóa "${req.ho_va_ten}" khỏi hệ thống (${actuallyDeletedIds.length} bản ghi). Chỗ ở tại ${roomLiberatedText} đã được giải phóng.`
-          : `✓ Đã duyệt đơn và giải phóng chỗ ở tại ${roomLiberatedText} (hồ sơ công nhân đã được gỡ trước đó).`
-      );
-      toast.success(`Đã duyệt check-out cho ${req.ho_va_ten}`);
-      if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
-      successTimeoutRef.current = setTimeout(() => setActionSuccessMsg(null), 8000);
+      if (!silent) {
+        const roomLiberatedText = `${req.ktx} - ${req.day} - Phòng ${req.phong_so}`;
+        setActionSuccessMsg(
+          actuallyDeletedIds.length > 0
+            ? `✓ Đã duyệt check-out và xóa "${req.ho_va_ten}" khỏi hệ thống (${actuallyDeletedIds.length} bản ghi). Chỗ ở tại ${roomLiberatedText} đã được giải phóng.`
+            : `✓ Đã duyệt đơn và giải phóng chỗ ở tại ${roomLiberatedText} (hồ sơ công nhân đã được gỡ trước đó).`
+        );
+        toast.success(`Đã duyệt check-out cho ${req.ho_va_ten}`);
+        if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+        successTimeoutRef.current = setTimeout(() => setActionSuccessMsg(null), 8000);
+      }
+      return true;
     } catch (err: any) {
       const msg = err?.message || 'Không thể phê duyệt check-out';
-      setActionErrorMsg(msg);
-      toast.error(`Lỗi khi phê duyệt: ${msg}`);
+      if (!silent) {
+        setActionErrorMsg(msg);
+        toast.error(`Lỗi khi phê duyệt: ${msg}`);
+      }
+      return false;
     } finally {
       processingIdRef.current = null;
       setProcessingId(null);
@@ -1266,6 +1279,47 @@ export default function CheckoutApprovalPanel({
       else next.add(id);
       return next;
     });
+  };
+
+  const handleBatchApprove = async () => {
+    if (selectedPendingCheckouts.length === 0 || batchApproving) return;
+    setBatchApproving(true);
+    setActionSuccessMsg(null);
+    setActionErrorMsg(null);
+    let okCount = 0;
+    const failedNames: string[] = [];
+    const approvedIds: string[] = [];
+
+    for (const req of selectedPendingCheckouts) {
+      const ok = await handleApprove(req, { silent: true });
+      if (ok) {
+        okCount++;
+        approvedIds.push(req.id);
+      } else {
+        failedNames.push(req.ho_va_ten || req.id);
+      }
+    }
+
+    if (approvedIds.length > 0) {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        approvedIds.forEach(id => next.delete(id));
+        return next;
+      });
+    }
+
+    setBatchApproving(false);
+
+    if (okCount > 0 && failedNames.length === 0) {
+      toast.success(`Đã duyệt check-out hàng loạt ${okCount} công nhân và giải phóng chỗ ở thành công.`);
+      setActionSuccessMsg(`✓ Đã duyệt check-out hàng loạt ${okCount} yêu cầu và giải phóng toàn bộ giường tương ứng.`);
+    } else if (okCount > 0 && failedNames.length > 0) {
+      toast.warning(
+        `Đã duyệt ${okCount} yêu cầu, bỏ qua ${failedNames.length} yêu cầu gặp lỗi (${failedNames.slice(0, 2).join(', ')}).`
+      );
+    } else if (failedNames.length > 0) {
+      toast.error(`Không duyệt được yêu cầu check-out nào (${failedNames.length} lỗi).`);
+    }
   };
 
   const handleBatchReject = async () => {
@@ -1642,30 +1696,51 @@ export default function CheckoutApprovalPanel({
       {/* THANH BỘ LỌC LIỀN KHỐI (Requirement: Segmented filter button group + console filters) */}
       <div className="bg-surf border border-bdr rounded-md p-3 space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          {/* Nhóm nút lọc trạng thái liền khối (Navy #1b2430 khi active) */}
-          <div className="inline-flex border border-bdr rounded overflow-hidden divide-x divide-bdr">
-            {[
-              { key: 'pending', label: `Chờ duyệt (${pendingCount})` },
-              { key: 'approved', label: `Đã duyệt (${approvedCount})` },
-              { key: 'rejected', label: `Từ chối (${rejectedCount})` },
-              { key: 'all', label: `Tất cả (${scopedCheckouts.length})` },
-            ].map(tab => {
-              const isActive = filterStatus === tab.key;
-              return (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setFilterStatus(tab.key as any)}
-                  className={`px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                    isActive
-                      ? 'bg-side text-tx'
-                      : 'bg-surf text-mu hover:bg-act'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
+          {/* Nhóm nút lọc trạng thái liền khối + Chọn nhanh chờ duyệt */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="inline-flex border border-bdr rounded overflow-hidden divide-x divide-bdr">
+              {[
+                { key: 'pending', label: `Chờ duyệt (${pendingCount})` },
+                { key: 'approved', label: `Đã duyệt (${approvedCount})` },
+                { key: 'rejected', label: `Từ chối (${rejectedCount})` },
+                { key: 'all', label: `Tất cả (${scopedCheckouts.length})` },
+              ].map(tab => {
+                const isActive = filterStatus === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setFilterStatus(tab.key as any)}
+                    className={`px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                      isActive
+                        ? 'bg-side text-tx'
+                        : 'bg-surf text-mu hover:bg-act'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+            {pendingCount > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  const pendingVisible = filteredCheckouts.filter(c => c.status === 'pending');
+                  if (pendingVisible.length === 0) {
+                    setFilterStatus('pending');
+                    const allPendingIds = scopedCheckouts.filter(c => c.status === 'pending').map(c => c.id);
+                    setSelectedIds(new Set(allPendingIds));
+                  } else {
+                    setSelectedIds(new Set(pendingVisible.map(c => c.id)));
+                  }
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-ok2/40 bg-okbg text-ok text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer whitespace-nowrap"
+              >
+                <CheckCircle2 size={12} />
+                <span>Chọn tất cả chờ duyệt ({pendingCount})</span>
+              </button>
+            )}
           </div>
 
           {/* Ô tìm kiếm console */}
@@ -1783,21 +1858,36 @@ export default function CheckoutApprovalPanel({
           </span>
           <div className="flex items-center gap-2 flex-wrap">
             {selectedPendingCheckouts.length > 0 && (
-              <button
-                type="button"
-                onClick={handleBatchReject}
-                disabled={batchRejecting || batchDeleting}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-dgr text-dgr hover:bg-dgrbg rounded-lg text-xs font-semibold disabled:opacity-50 cursor-pointer whitespace-nowrap"
-              >
-                {batchRejecting ? <Loader2 size={13} className="animate-spin" /> : <XCircle size={13} />}
-                <span>Từ chối hàng loạt ({selectedPendingCheckouts.length})</span>
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={handleBatchApprove}
+                  disabled={batchApproving || batchRejecting || batchDeleting}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-ok2 hover:opacity-90 text-ok2-fg rounded-lg text-xs font-bold disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                >
+                  {batchApproving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                  <span>
+                    {batchApproving
+                      ? 'Đang duyệt check-out...'
+                      : `Duyệt Check-out hàng loạt (${selectedPendingCheckouts.length})`}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleBatchReject}
+                  disabled={batchApproving || batchRejecting || batchDeleting}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-dgr text-dgr hover:bg-dgrbg rounded-lg text-xs font-semibold disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                >
+                  {batchRejecting ? <Loader2 size={13} className="animate-spin" /> : <XCircle size={13} />}
+                  <span>Từ chối hàng loạt ({selectedPendingCheckouts.length})</span>
+                </button>
+              </>
             )}
             {isSuperAdmin && (
               <button
                 type="button"
                 onClick={() => setBatchDeleteOpen(true)}
-                disabled={batchRejecting || batchDeleting}
+                disabled={batchApproving || batchRejecting || batchDeleting}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-dgr hover:opacity-90 text-white rounded-lg text-xs font-bold disabled:opacity-50 cursor-pointer whitespace-nowrap"
               >
                 <Trash2 size={13} />
@@ -1807,7 +1897,7 @@ export default function CheckoutApprovalPanel({
             <button
               type="button"
               onClick={() => setSelectedIds(new Set())}
-              disabled={batchRejecting || batchDeleting}
+              disabled={batchApproving || batchRejecting || batchDeleting}
               className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-bdr rounded-lg text-xs font-semibold text-mu hover:text-tx hover:bg-act cursor-pointer whitespace-nowrap"
             >
               <X size={12} /> Bỏ chọn

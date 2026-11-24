@@ -5,7 +5,7 @@ import {
   Users, LayoutGrid, Percent, AlertCircle, VenusAndMars, HardHat,
   Building2, TrendingUp, TrendingDown, UserPlus, UserMinus, ArrowRightLeft,
   Calendar, Clock, RefreshCw, Filter, X, Building, BarChart2, CheckCircle2,
-  ChevronDown, ChevronRight, Download, ShieldCheck, Radio,
+  ChevronDown, ChevronRight, Download, ShieldCheck, Radio, FileText, FileSpreadsheet,
 } from 'lucide-react';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { SlidingTabs } from '@/components/ui/MotionPrimitives';
@@ -36,10 +36,14 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, LineChart, Line, ReferenceLine,
 } from 'recharts';
+import DailyBriefingModal from '@/app/components/DailyBriefingModal';
+import TamTruExportModal from '@/app/components/TamTruExportModal';
+import { DailyBriefingInput } from '@/lib/dailyBriefing';
+import { hasFacilityIssueNote } from '@/lib/smartRoomAssign';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type GenderFilter = 'all' | 'male' | 'female';
-type UnitFilter = 'all' | 'xd' | 'me' | 'vinalpha' | 'other';
+type UnitFilter = 'all' | 'xd' | 'me' | 'vincons' | 'other';
 type TamTruFilter = 'all' | 'registered' | 'unregistered' | 'overdue';
 type KtxFilter = string;
 type ActiveTab = 'tong-quan' | 'bien-dong';
@@ -82,11 +86,11 @@ function matchesUnit(w: Worker, u: UnitFilter): boolean {
   const dv = (w.donVi || '').toLowerCase();
   if (u === 'xd') return dv.includes('xd') || dv.includes('xây') || dv.includes('xay');
   if (u === 'me') return dv.includes('me') || dv.includes('cơ') || dv.includes('co');
-  if (u === 'vinalpha') return dv.includes('vinalpha') || dv.includes('alpha');
+  if (u === 'vincons') return dv.includes('vincons');
   if (u === 'other') {
     return !dv.includes('xd') && !dv.includes('xây') && !dv.includes('xay') &&
       !dv.includes('me') && !dv.includes('cơ') && !dv.includes('co') &&
-      !dv.includes('vinalpha') && !dv.includes('alpha');
+      !dv.includes('vincons');
   }
   return true;
 }
@@ -174,6 +178,13 @@ export default function ReportDashboard() {
   // ── Physical facilities & capacities (Single Source of Truth) ──
   const [facilitiesList, setFacilitiesList] = useState<FacilityItem[]>([]);
   const [capacities, setCapacities] = useState<RoomCapacityMap>({});
+  const [briefingOpen, setBriefingOpen] = useState(false);
+  const [tamTruModalOpen, setTamTruModalOpen] = useState(false);
+  const [supportCounts, setSupportCounts] = useState({
+    maintenanceBeds: 0,
+    pendingRegistrations: 0,
+    pendingCheckouts: 0,
+  });
 
   const [visitedBienDong, setVisitedBienDong] = useState(false);
   const lastFetchedFluctKeyRef = useRef<string>('');
@@ -227,6 +238,35 @@ export default function ReportDashboard() {
       supabase.removeChannel(channel);
     };
   }, [loadFacilities]);
+
+  const loadSupportCounts = useCallback(async () => {
+    try {
+      const supabase = createClient();
+      const [bedsRes, qrRes] = await Promise.all([
+        supabase.from('beds').select('id', { count: 'exact', head: true }).eq('status', 'maintenance'),
+        supabase.from('worker_registrations').select('id, ghi_chu').eq('status', 'pending'),
+      ]);
+      let pendingReg = 0;
+      let pendingChk = 0;
+      if (!qrRes.error && qrRes.data) {
+        for (const r of qrRes.data) {
+          if (r.ghi_chu?.startsWith('[CHECKOUT]')) pendingChk++;
+          else pendingReg++;
+        }
+      }
+      setSupportCounts({
+        maintenanceBeds: bedsRes.count || 0,
+        pendingRegistrations: pendingReg,
+        pendingCheckouts: pendingChk,
+      });
+    } catch {
+      // non-blocking
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSupportCounts();
+  }, [loadSupportCounts]);
 
   // ── Unique buildings from workers & facilities for filter ──
   const activeKtxList = useMemo(
@@ -474,8 +514,8 @@ export default function ReportDashboard() {
     }).length;
     const xd = filtered.filter(w => { const dv = (w.donVi || '').toLowerCase(); return dv.includes('xd') || dv.includes('xây') || dv.includes('xay'); }).length;
     const me = filtered.filter(w => { const dv = (w.donVi || '').toLowerCase(); return dv.includes('me') || dv.includes('cơ') || dv.includes('co'); }).length;
-    const vinalpha = filtered.filter(w => { const dv = (w.donVi || '').toLowerCase(); return dv.includes('vinalpha') || dv.includes('alpha'); }).length;
-    const otherUnit = Math.max(0, total - xd - me - vinalpha);
+    const vincons = filtered.filter(w => { const dv = (w.donVi || '').toLowerCase(); return dv.includes('vincons'); }).length;
+    const otherUnit = Math.max(0, total - xd - me - vincons);
 
     let tamTruRegistered = 0;
     let tamTruUnregistered = 0;
@@ -557,11 +597,110 @@ export default function ReportDashboard() {
     const fillRate = capacity > 0 ? Math.round((workersWithRoom / capacity) * 100) : 0;
 
     return {
-      total, male, female, xd, me, vinalpha, otherUnit,
+      total, male, female, xd, me, vincons, otherUnit,
       tamTruRegistered, tamTruUnregistered, tamTruOverdue, topContractors,
       buildingCount, roomCount, capacity, fillRate, workersWithRoom, missingData
     };
   }, [filtered, activeFacilities, facilitiesList, filters.ktx, filters.building, filters.room, getRoomCap]);
+
+  const dailyBriefingData = useMemo<DailyBriefingInput>(() => {
+    const scopeKtx = filters.ktx !== 'all' ? filters.ktx : (activeKtxList[0] || 'KTX Phước Vĩnh Tây');
+    const scopedWorkers = filters.ktx !== 'all'
+      ? workers.filter(w => (w.ktx || '').trim() === filters.ktx.trim())
+      : workers;
+    const scopedFacilities = filters.ktx !== 'all'
+      ? activeFacilities.filter(f => (f.ktx || '').trim() === filters.ktx.trim())
+      : activeFacilities;
+
+    const occByRoom = new Map<string, number>();
+    let maleW = 0;
+    let femaleW = 0;
+    let unreg = 0;
+    let overdue = 0;
+    const todayVN = getVNDateString();
+    let fallbackTodayEntered = 0;
+
+    for (const w of scopedWorkers) {
+      const g = (w.gioiTinh || '').toLowerCase();
+      if (g.includes('nữ') || g.includes('nu')) femaleW++;
+      else if (g.includes('nam')) maleW++;
+
+      if (w.tamTruStatus !== 'registered') {
+        unreg++;
+        if (!w.ngayRaKTX && !w.ghiChu?.includes('[Đã Check-out') && !w.ghiChu?.includes('[CHECKOUT]')) {
+          const days = daysSinceVN(w.ngayVaoKTX || w.createdAt);
+          if (days !== null && days > 7) overdue++;
+        }
+      }
+
+      if (w.createdAt && getVNDateString(new Date(w.createdAt)) === todayVN) {
+        fallbackTodayEntered++;
+      }
+
+      if (w.day && w.phongSo) {
+        const key = `${(w.ktx || '').trim()}||${w.day.trim()}||${normalizeRoomLabel(w.phongSo)}`;
+        occByRoom.set(key, (occByRoom.get(key) || 0) + 1);
+      }
+    }
+
+    const byDay = new Map<string, { workers: number; capacity: number; rooms: number; emptyRooms: number }>();
+    let totalCapacity = 0;
+    let emptyRooms = 0;
+    let overloadedRooms = 0;
+    let facilityIssuesCount = 0;
+
+    for (const f of scopedFacilities) {
+      const fk = (f.ktx || '').trim();
+      const fd = (f.day || '').trim();
+      const fr = normalizeRoomLabel(f.phong_khu_vuc || '');
+      if (!fk || !fd || !fr) continue;
+
+      if (hasFacilityIssueNote(f.ghi_chu)) facilityIssuesCount++;
+
+      const cap = getRoomCap(fk, fd, fr);
+      const occ = occByRoom.get(`${fk}||${fd}||${fr}`) || 0;
+      totalCapacity += cap;
+      if (occ === 0) emptyRooms++;
+      if (occ > cap) overloadedRooms++;
+
+      const cur = byDay.get(fd) || { workers: 0, capacity: 0, rooms: 0, emptyRooms: 0 };
+      cur.workers += occ;
+      cur.capacity += cap;
+      cur.rooms += 1;
+      if (occ === 0) cur.emptyRooms += 1;
+      byDay.set(fd, cur);
+    }
+
+    const buildingStats = Array.from(byDay.entries())
+      .sort((a, b) => a[0].localeCompare(b[0], 'vi', { numeric: true }))
+      .map(([day, st]) => ({
+        day,
+        workers: st.workers,
+        capacity: st.capacity,
+        rooms: st.rooms,
+        emptyRooms: st.emptyRooms,
+      }));
+
+    return {
+      ktxLabel: scopeKtx,
+      totalWorkers: scopedWorkers.length,
+      totalCapacity,
+      totalRooms: scopedFacilities.length,
+      emptyRooms,
+      overloadedRooms,
+      maleWorkers: maleW,
+      femaleWorkers: femaleW,
+      todayEntered: todayFluctuation ? todayFluctuation.so_tang : fallbackTodayEntered,
+      todayLeft: todayFluctuation ? todayFluctuation.so_giam : 0,
+      unregisteredTamTru: unreg,
+      overdueTamTru: overdue,
+      facilityIssuesCount,
+      maintenanceBedsCount: supportCounts.maintenanceBeds,
+      pendingRegistrationsCount: supportCounts.pendingRegistrations,
+      pendingCheckoutsCount: supportCounts.pendingCheckouts,
+      buildingStats,
+    };
+  }, [filters.ktx, activeKtxList, workers, activeFacilities, getRoomCap, todayFluctuation, supportCounts]);
 
   const ktxBreakdownCounts = useMemo(() => {
     const metrics = computeSystemMetrics(filtered, {}, 'all', [], getRoomCap, facilitiesList);
@@ -745,6 +884,27 @@ export default function ReportDashboard() {
 
           {/* Quick Refresh & Export Status */}
           <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => {
+                void loadSupportCounts();
+                setBriefingOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-surf border border-bdr2 hover:bg-act text-xs font-bold text-tx shadow-sm transition-colors cursor-pointer"
+              title="Mở Bản tin Giao ban cuối ngày (Copy Zalo / In PDF 1 trang)"
+            >
+              <FileText size={13} className="text-lnk" />
+              <span>Bản tin Giao ban</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTamTruModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-surf border border-bdr2 hover:bg-act text-xs font-bold text-tx shadow-sm transition-colors cursor-pointer"
+              title="Xuất danh sách Khai báo Tạm trú theo nhóm nộp Công an xã"
+            >
+              <FileSpreadsheet size={13} className="text-ok" />
+              <span>Xuất Tạm Trú</span>
+            </button>
             {activeTab === 'tong-quan' && (
               <button
                 onClick={handleExportOverview}
@@ -772,7 +932,7 @@ export default function ReportDashboard() {
                 if (activeTab === 'bien-dong') {
                   await fetchFluctuation();
                 } else {
-                  await Promise.all([refreshWorkers(), loadFacilities()]);
+                  await Promise.all([refreshWorkers(), loadFacilities(), loadSupportCounts()]);
                   toast.success('Đã làm mới số liệu tổng quan.');
                 }
               }}
@@ -780,7 +940,7 @@ export default function ReportDashboard() {
               className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-surf border border-bdr2 hover:bg-act text-xs font-semibold text-tx shadow-sm transition-colors disabled:opacity-60 cursor-pointer"
             >
               <RefreshCw size={13} className={flLoading || workersRefreshing ? 'animate-spin text-pri2' : 'text-mu'} />
-              <span>Làm mới số liệu</span>
+              <span>Làm mới</span>
             </button>
           </div>
         </div>
@@ -826,7 +986,7 @@ export default function ReportDashboard() {
                     <option value="all">Tất cả</option>
                     <option value="xd">XD</option>
                     <option value="me">ME</option>
-                    <option value="vinalpha">Vinalpha</option>
+                    <option value="vincons">Vincons</option>
                     <option value="other">Khác</option>
                   </select>
                 </div>
@@ -1009,8 +1169,8 @@ export default function ReportDashboard() {
                     <span className="text-base font-bold text-wn font-tabular">{stats.me}</span>
                   </div>
                   <div className="bg-act/80 border border-bdr px-3 py-2 rounded-xl flex justify-between items-center">
-                    <span className="text-xs font-semibold text-mu">Vinalpha</span>
-                    <span className="text-base font-bold text-wn font-tabular">{stats.vinalpha}</span>
+                    <span className="text-xs font-semibold text-mu">Vincons</span>
+                    <span className="text-base font-bold text-wn font-tabular">{stats.vincons}</span>
                   </div>
                   <div className="bg-act/80 border border-bdr px-3 py-2 rounded-xl flex justify-between items-center">
                     <span className="text-xs font-semibold text-mu">Khác</span>
@@ -1043,17 +1203,15 @@ export default function ReportDashboard() {
                 </span>
               </div>
               <div className={`grid gap-3 ${activeKtxList.length >= 3 ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
-                {activeKtxList.map(ktx => {
+                {activeKtxList.map((ktx, idx) => {
                   const data = ktxBreakdownCounts[ktx] || { total: 0, male: 0, female: 0, rooms: 0, fillRate: 0 };
                   const isSelected = filters.ktx === ktx;
-                  const colorClasses =
-                    ktx === 'KTX 1'
-                      ? { bg: 'bg-blue-950/40 border-bdr2', title: 'text-lnk', num: 'text-lnk' }
-                      : ktx === 'KTX 2'
-                      ? { bg: 'tint-wn border-wn', title: 'text-wn', num: 'text-wn' }
-                      : ktx === 'KTX 3'
-                      ? { bg: 'bg-okbg border-bdr2', title: 'text-ok', num: 'text-ok' }
-                      : { bg: 'bg-act border-bdr2', title: 'text-lnk', num: 'text-lnk' };
+                  const palette = [
+                    { bg: 'bg-blue-950/40 border-bdr2', title: 'text-lnk', num: 'text-lnk' },
+                    { bg: 'tint-wn border-wn', title: 'text-wn', num: 'text-wn' },
+                    { bg: 'bg-okbg border-bdr2', title: 'text-ok', num: 'text-ok' },
+                  ];
+                  const colorClasses = palette[idx % palette.length];
 
                   return (
                     <div
@@ -1650,6 +1808,21 @@ export default function ReportDashboard() {
           </div>
         )}
       </div>
+
+      {briefingOpen && (
+        <DailyBriefingModal
+          data={dailyBriefingData}
+          onClose={() => setBriefingOpen(false)}
+        />
+      )}
+
+      {tamTruModalOpen && (
+        <TamTruExportModal
+          workers={workers}
+          ktxFilter={filters.ktx !== 'all' ? filters.ktx : undefined}
+          onClose={() => setTamTruModalOpen(false)}
+        />
+      )}
     </div>
   );
 }
