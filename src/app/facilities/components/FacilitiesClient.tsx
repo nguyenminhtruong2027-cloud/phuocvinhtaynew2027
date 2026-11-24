@@ -8,10 +8,11 @@ import { toast } from 'sonner';
 import {
   Search, Edit2, Check, X, Plus, Loader2, BedDouble, Wind, Package, Fan,
   Zap, Tv, Lightbulb, UtensilsCrossed, ChevronDown, ChevronUp, Upload,
-  AlertCircle, CheckCircle2, Download, Trash2, Filter, Snowflake, AlertTriangle, CheckSquare, Square, Lock, Building2,
+  AlertCircle, CheckCircle2, Download, Trash2, Filter, Snowflake, AlertTriangle, CheckSquare, Square, Lock, Building2, Box,
 } from 'lucide-react';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { SlidingTabs } from '@/components/ui/MotionPrimitives';
+import Sync3DBlueprintModal from './Sync3DBlueprintModal';
 import * as XLSX from 'xlsx';
 import { exportToExcel } from '@/lib/exportExcel';
 import {
@@ -857,9 +858,10 @@ export default function FacilitiesClient() {
   const [sortField, setSortField] = useState<keyof FacilityRow>('day');
   const [sortAsc, setSortAsc] = useState(true);
 
-  // Import Excel state
+  // Import Excel & 3D Blueprint Sync modal state
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [showSync3DModal, setShowSync3DModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const supabase = createClient();
@@ -1703,6 +1705,41 @@ export default function FacilitiesClient() {
         </div>
       )}
 
+      {showSync3DModal && isAdmin && (
+        <Sync3DBlueprintModal
+          existingRows={rows}
+          workerCount={workers.length}
+          actorEmail={currentUser?.email || 'admin'}
+          onAuditLog={details => {
+            try {
+              addLog(currentUser?.email || 'system', 'FACILITY_UPDATE', details);
+            } catch {}
+          }}
+          onCompleted={async summary => {
+            setShowSync3DModal(false);
+            setActiveKtx(summary.ktxName);
+            setFilterDay('');
+            setSearchPhong('');
+            await fetchFacilities();
+            reloadKtxStructure(true);
+            toast.success(
+              `Đã khởi tạo xong ${summary.ktxName}: ${summary.roomCount} phòng · ${summary.bedCount.toLocaleString('vi-VN')} giường trống khớp 1:1 với Sơ đồ 3D!`
+            );
+            if (summary.staleStaffCount > 0) {
+              toast.info(
+                `Lưu ý: Có ${summary.staleStaffCount} tài khoản Nhân viên đang gắn tên dãy cũ — hãy cập nhật lại trong Quản lý Tài khoản.`,
+                { duration: 8000 }
+              );
+            }
+            setBulkActionSuccess(
+              `✓ Đã đồng bộ hoàn tất ${summary.ktxName} (${summary.roomCount} phòng · ${summary.bedCount.toLocaleString('vi-VN')} chỗ) khớp 1:1 với Bản đồ 3D.`
+            );
+            setTimeout(() => setBulkActionSuccess(null), 9000);
+          }}
+          onClose={() => setShowSync3DModal(false)}
+        />
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 pb-3 border-b border-bdr">
         <div className="flex items-center gap-3">
@@ -1714,6 +1751,17 @@ export default function FacilitiesClient() {
         </div>
         <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
           <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImportExcel} />
+          {isAdmin && (
+            <button
+              onClick={() => setShowSync3DModal(true)}
+              disabled={loading || importing || deleting}
+              title="Khởi tạo đồng bộ 90 phòng chuẩn KTX Phước Vĩnh Tây (6 Dãy × 15 Phòng × 20 giường) khớp 1:1 với Sơ đồ 3D"
+              className="flex items-center justify-center gap-1.5 px-3 py-2 border border-pri/45 bg-pri/10 text-pri hover:bg-pri/20 rounded-xl text-xs sm:text-sm font-bold disabled:opacity-60 transition-colors flex-1 sm:flex-initial shadow-sm cursor-pointer"
+            >
+              <Box size={15} />
+              <span>Đồng bộ chuẩn 3D</span>
+            </button>
+          )}
           {isAdmin && (
             <button
               onClick={() => fileInputRef.current?.click()}

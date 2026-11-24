@@ -52,37 +52,37 @@ export interface CampusLandmarkConfig {
 }
 
 export interface CampusBlueprintConfig {
-  mode: 'auto' | 'blueprint';
-  /** Số tầng mặc định khi chạy chế độ tự động (1 = nhà cấp 4 / 1 tầng) */
-  defaultFloors: number;
-  /** Danh sách ghi đè tọa độ từng Khu KTX (dùng khi có bản vẽ thật) */
+  mode: 'vincons' | 'blueprint';
+  /** KTX lán trại 1 tầng cố định */
+  defaultFloors: 1;
+  /** Danh sách ghi đè tọa độ từng Khu KTX */
   ktxZones: KtxZoneBlueprintOverride[];
-  /** Danh sách ghi đè tọa độ & số tầng từng Dãy nhà */
+  /** Danh sách ghi đè tọa độ & góc xoay từng Dãy nhà */
   buildings: BuildingBlueprintOverride[];
   /** Các hạng mục hạ tầng phụ trợ (Cổng bảo vệ, Nhà xe, Sân chung...) */
   landmarks: CampusLandmarkConfig[];
 }
 
 export const CAMPUS_BLUEPRINT_CONFIG: CampusBlueprintConfig = {
-  mode: 'auto',
+  mode: 'vincons',
   defaultFloors: 1,
   ktxZones: [],
   buildings: [],
   landmarks: [],
 };
 
-const LOCAL_STORAGE_KEY = 'ktx_3d_blueprint_config_v1';
+const LOCAL_STORAGE_KEY = 'ktx_3d_blueprint_config_v2';
 const REMOTE_SENTINEL = {
   ktx: '__SYSTEM__',
   day_nha: '__3D_BLUEPRINT__',
-  phong_so: 'config_v1',
+  phong_so: 'config_v2',
 };
 
 export function sanitizeBlueprintConfig(raw: unknown): CampusBlueprintConfig {
   if (!raw || typeof raw !== 'object') return { ...CAMPUS_BLUEPRINT_CONFIG };
   const obj = raw as Partial<CampusBlueprintConfig>;
-  const mode: 'auto' | 'blueprint' = obj.mode === 'blueprint' ? 'blueprint' : 'auto';
-  const defaultFloors = Math.max(1, Math.min(5, Number(obj.defaultFloors) || 1));
+  const mode: 'vincons' | 'blueprint' = obj.mode === 'blueprint' ? 'blueprint' : 'vincons';
+  const defaultFloors: 1 = 1;
   const buildings: BuildingBlueprintOverride[] = Array.isArray(obj.buildings)
     ? obj.buildings
         .filter(b => b && typeof b.ktx === 'string' && typeof b.day === 'string')
@@ -92,11 +92,8 @@ export function sanitizeBlueprintConfig(raw: unknown): CampusBlueprintConfig {
           x: Number.isFinite(Number(b.x)) ? Number(b.x) : 0,
           z: Number.isFinite(Number(b.z)) ? Number(b.z) : 0,
           rotationDeg: Number.isFinite(Number(b.rotationDeg)) ? Number(b.rotationDeg) : 0,
-          floors: Math.max(1, Math.min(5, Number(b.floors) || 1)),
-          roomsPerFloor:
-            b.roomsPerFloor && Number(b.roomsPerFloor) > 0
-              ? Math.max(1, Math.floor(Number(b.roomsPerFloor)))
-              : undefined,
+          floors: 1,
+          roomsPerFloor: undefined,
         }))
     : [];
   const ktxZones: KtxZoneBlueprintOverride[] = Array.isArray(obj.ktxZones)

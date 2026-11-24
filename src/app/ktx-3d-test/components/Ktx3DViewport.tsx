@@ -362,9 +362,9 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     const scene = new THREE.Scene();
     const initBg = getThemeBgHex(stateRef.current.sceneTheme);
     scene.background = new THREE.Color(initBg);
-    scene.fog = new THREE.FogExp2(initBg, 0.0055);
+    scene.fog = new THREE.FogExp2(initBg, 0.0034);
 
-    const camera = new THREE.PerspectiveCamera(44, width / height, 0.15, 420);
+    const camera = new THREE.PerspectiveCamera(44, width / height, 0.15, 580);
     // Enable layer 2 on camera so dimmed ghost bunks render transparently while raycaster (layer 0) passes right through them!
     camera.layers.enable(2);
     camera.position.set(24, 24, 30);
@@ -401,16 +401,16 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     scene.add(hemiLight);
 
     const keyLight = new THREE.DirectionalLight(0xfff5e4, 1.55);
-    keyLight.position.set(32, 48, 28);
+    keyLight.position.set(48, 72, 42);
     keyLight.castShadow = !isSoftwareGl;
-    keyLight.shadow.mapSize.width = 1024;
-    keyLight.shadow.mapSize.height = 1024;
+    keyLight.shadow.mapSize.width = isSoftwareGl ? 1024 : 2048;
+    keyLight.shadow.mapSize.height = isSoftwareGl ? 1024 : 2048;
     keyLight.shadow.camera.near = 2;
-    keyLight.shadow.camera.far = 160;
-    keyLight.shadow.camera.left = -45;
-    keyLight.shadow.camera.right = 45;
-    keyLight.shadow.camera.top = 45;
-    keyLight.shadow.camera.bottom = -45;
+    keyLight.shadow.camera.far = 260;
+    keyLight.shadow.camera.left = -68;
+    keyLight.shadow.camera.right = 68;
+    keyLight.shadow.camera.top = 68;
+    keyLight.shadow.camera.bottom = -68;
     keyLight.shadow.bias = -0.0005;
     keyLight.shadow.normalBias = 0.025;
     scene.add(keyLight);

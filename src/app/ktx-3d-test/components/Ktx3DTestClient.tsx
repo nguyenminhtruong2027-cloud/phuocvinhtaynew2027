@@ -1063,13 +1063,13 @@ export default function Ktx3DTestClient() {
     if (!isAdmin) return;
     const resetCfg: CampusBlueprintConfig = {
       ...blueprintConfig,
-      mode: 'auto',
+      mode: 'vincons',
       buildings: [],
       landmarks: [],
     };
     setBlueprintConfig(resetCfg);
     await saveCampusBlueprintConfig(resetCfg);
-    toast.success('Đã khôi phục bố cục sa bàn 3D tự động');
+    toast.success('Đã khôi phục bố cục sa bàn 3D theo bản vẽ Vincons');
   }, [isAdmin, blueprintConfig]);
 
   const actorLabel = currentUser?.name || currentUser?.email || 'Quản trị viên';
@@ -1637,7 +1637,7 @@ export default function Ktx3DTestClient() {
           <p className="text-sm font-semibold">Đang tải dữ liệu Ký Túc Xá cho bản đồ 3D...</p>
           <p className={`text-xs ${hudMuted}`}>Đồng bộ trực tiếp với Cơ sở vật chất & Danh sách công nhân</p>
         </div>
-      ) : allKtxNodes.length === 0 ? (
+      ) : allKtxNodes.length === 0 && blueprintConfig.mode !== 'vincons' ? (
         <div
           className={`w-full h-full flex flex-col items-center justify-center gap-3 p-6 text-center ${
             isLight ? 'text-slate-700' : 'text-slate-300'
@@ -1654,7 +1654,7 @@ export default function Ktx3DTestClient() {
           ref={viewportRef}
           viewLevel={viewLevel}
           sceneTheme={sceneTheme}
-          campusScopeKey={selectedKtxFilter}
+          campusScopeKey={`${selectedKtxFilter}|${blueprintConfig.mode}`}
           navMode={navMode}
           blueprintConfig={blueprintConfig}
           ktxNodes={visibleKtxNodes}
@@ -1813,7 +1813,7 @@ export default function Ktx3DTestClient() {
                     setBlueprintEditorOpen(prev => !prev);
                     setSearchOpen(false);
                   }}
-                  title="Cấu hình tọa độ dãy nhà, số tầng & công trình phụ (Dành cho Quản trị)"
+                  title="Chỉnh vị trí dãy nhà & công trình phụ theo bản vẽ (Quản trị)"
                   className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition-colors ${
                     blueprintEditorOpen ? 'bg-blue-600 border-blue-500 text-white' : hudSubtleBtn
                   }`}

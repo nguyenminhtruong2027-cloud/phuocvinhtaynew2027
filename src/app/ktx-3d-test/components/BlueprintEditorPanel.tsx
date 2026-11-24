@@ -102,12 +102,12 @@ export default function BlueprintEditorPanel({
       x: built ? built.x : 0,
       z: built ? built.z : 0,
       rotationDeg: built ? built.rotationDeg : 0,
-      floors: config.defaultFloors || 1,
+      floors: 1,
       roomsPerFloor: undefined,
     };
   }, [activeBuilding, config, getBuiltBuildingPositions]);
 
-  // Seed all current auto-built positions when switching to blueprint mode so NO building ever jumps to (0, 0)
+  // Seed all current built positions when switching to custom override mode so NO building ever jumps to (0, 0)
   const buildSeededBuildings = () => {
     const builtMap = getBuiltBuildingPositions();
     const seeded: BuildingBlueprintOverride[] = [...config.buildings];
@@ -121,7 +121,7 @@ export default function BlueprintEditorPanel({
           x: pos ? pos.x : 0,
           z: pos ? pos.z : 0,
           rotationDeg: pos ? pos.rotationDeg : 0,
-          floors: config.defaultFloors || 1,
+          floors: 1,
           roomsPerFloor: undefined,
         });
       }
@@ -132,7 +132,7 @@ export default function BlueprintEditorPanel({
   const updateBuildingOverride = (patch: Partial<BuildingBlueprintOverride>) => {
     if (!activeBuilding || !activeOverride) return;
     const baseList =
-      config.mode === 'auto' || config.buildings.length < allBuildings.length
+      config.mode === 'vincons' || config.buildings.length < allBuildings.length
         ? buildSeededBuildings()
         : config.buildings;
 
@@ -246,7 +246,7 @@ export default function BlueprintEditorPanel({
           <div className="min-w-0">
             <h3 className="text-xs font-bold truncate">Chỉnh mặt bằng 3D (Admin)</h3>
             <p className={`text-[10px] truncate ${mutedCls}`}>
-              Xem trước trực tiếp trên Sa bàn · Hỗ trợ nhiều tầng
+              Sơ đồ 1 tầng theo bản vẽ VHM.PVT.CTT.KTX-00
             </p>
           </div>
         </div>
@@ -262,21 +262,21 @@ export default function BlueprintEditorPanel({
 
       {/* Mode Switch + Tabs */}
       <div className={`px-3.5 py-2.5 border-b space-y-2 ${dividerCls}`}>
-        <div className="flex items-center justify-between gap-2">
-          <span className={`text-[11px] font-semibold ${mutedCls}`}>Chế độ bố trí:</span>
+        <div className="space-y-1">
+          <span className={`text-[11px] font-semibold block ${mutedCls}`}>Bố cục mặt bằng:</span>
           <div
-            className={`flex items-center gap-0.5 rounded-lg border p-0.5 text-[11px] ${
+            className={`grid grid-cols-2 gap-0.5 rounded-lg border p-0.5 text-[11px] ${
               isLight ? 'bg-slate-100 border-slate-300' : 'bg-slate-900 border-slate-800'
             }`}
           >
             <button
               type="button"
-              onClick={() => onChange({ ...config, mode: 'auto' })}
-              className={`px-2 py-0.5 rounded-md font-semibold transition-colors ${
-                config.mode === 'auto' ? 'bg-blue-600 text-white' : mutedCls
+              onClick={() => onChange({ ...config, mode: 'vincons' })}
+              className={`px-2 py-1 rounded-md font-semibold transition-colors ${
+                config.mode === 'vincons' ? 'bg-blue-600 text-white' : mutedCls
               }`}
             >
-              Tự động
+              Bản vẽ gốc
             </button>
             <button
               type="button"
@@ -290,13 +290,18 @@ export default function BlueprintEditorPanel({
                       : config.buildings,
                 })
               }
-              className={`px-2 py-0.5 rounded-md font-semibold transition-colors ${
+              className={`px-2 py-1 rounded-md font-semibold transition-colors ${
                 config.mode === 'blueprint' ? 'bg-blue-600 text-white' : mutedCls
               }`}
             >
-              Theo bản vẽ
+              Tùy chỉnh tọa độ
             </button>
           </div>
+          {config.mode === 'vincons' && (
+            <p className={`text-[10px] leading-snug ${mutedCls}`}>
+              Khớp 1:1 bản vẽ <strong>VHM.PVT.CTT.KTX-00</strong> — <strong>Khu Lán Trại Vincons</strong> (151,2m × 145,6m · 1 tầng): 6 dãy nhà ở (3 Bắc + 3 Nam), 2 nhà ăn &amp; 4 gian soạn đồ ăn, 3 Căng Teen (20), Container Face ID (8), Khu thăm thân (5), 3 Bồn Inox 20m³ (10), WC/Tắm/Giặt (13–17), Bể XLNT (19), 13 nhà xe (6) &amp; rào B40 phía Bắc.
+            </p>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-1.5 text-[11px]">
@@ -490,56 +495,13 @@ export default function BlueprintEditorPanel({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className={`text-[10px] font-semibold block mb-1 ${mutedCls}`}>
-                      Số tầng (1–3+ tầng)
-                    </label>
-                    <div className="flex items-center gap-1">
-                      {[1, 2, 3].map(fl => (
-                        <button
-                          key={fl}
-                          type="button"
-                          onClick={() => updateBuildingOverride({ floors: fl })}
-                          className={`flex-1 py-1 rounded-lg border text-[11px] font-semibold ${
-                            (activeOverride.floors || 1) === fl
-                              ? 'bg-blue-600 border-blue-500 text-white'
-                              : subtleBtn
-                          }`}
-                        >
-                          {fl}T
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <label className={`text-[10px] font-semibold block mb-1 ${mutedCls}`}>
-                      Phòng / tầng (trống = tự chia)
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      placeholder="Tự chia"
-                      value={activeOverride.roomsPerFloor || ''}
-                      onChange={e => {
-                        const v = parseInt(e.target.value, 10);
-                        updateBuildingOverride({
-                          roomsPerFloor: Number.isFinite(v) && v > 0 ? v : undefined,
-                        });
-                      }}
-                      className={`w-full rounded-lg border px-2 py-1 text-xs font-mono font-tabular focus:outline-none focus:border-blue-500 ${inputCls}`}
-                    />
-                  </div>
-                </div>
-
                 <div
                   className={`rounded-xl border px-2.5 py-2 text-[11px] ${
                     isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-900/75 border-slate-800'
                   } ${mutedCls}`}
                 >
                   <Layers size={12} className="inline mr-1 text-blue-500" />
-                  Đang có <strong className="font-tabular">{config.buildings.length}</strong> dãy được
-                  định tọa độ bản vẽ.
+                  Toàn bộ dãy nhà KTX được thiết lập cố định <strong>1 tầng</strong> theo bản vẽ thực tế.
                 </div>
               </div>
             )}
@@ -676,7 +638,7 @@ export default function BlueprintEditorPanel({
           <button
             type="button"
             onClick={onResetAuto}
-            title="Đưa toàn bộ về chế độ Tự động"
+            title="Khôi phục về bản vẽ gốc Vincons"
             className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold ${subtleBtn}`}
           >
             <RotateCcw size={13} />

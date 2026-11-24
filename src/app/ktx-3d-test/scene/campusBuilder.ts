@@ -19,6 +19,7 @@ import {
   createPlaqueTexture,
   createRoadTexture,
 } from './materials';
+import { buildVinconsCampusScene } from './vinconsCampusBuilder';
 
 export interface RoomVisualHandle {
   room: CampusRoomNode;
@@ -276,6 +277,19 @@ export function buildCampusScene(
   blueprint: CampusBlueprintConfig = CAMPUS_BLUEPRINT_CONFIG,
   assignedOnly = false
 ): CampusBuildResult {
+  if (blueprint.mode === 'vincons') {
+    return buildVinconsCampusScene(
+      ktxNodes,
+      colorMode,
+      unitFilter,
+      theme,
+      maxAnisotropy,
+      castShadows,
+      blueprint,
+      assignedOnly
+    );
+  }
+
   const group = new THREE.Group();
   group.name = 'ktx-campus-root';
 
@@ -399,9 +413,7 @@ export function buildCampusScene(
     const maxRoomsInRow = Math.max(
       1,
       ...ktxNode.buildings.map(b => {
-        const bp = findBuildingBlueprint(blueprint, ktxNode.ktx, b.day);
-        const floors = Math.max(1, bp?.floors || blueprint.defaultFloors || 1);
-        const accPerFloor = bp?.roomsPerFloor || Math.ceil(Math.max(1, b.rooms.length) / floors);
+        const accPerFloor = Math.max(1, b.rooms.length);
         const attachedCount = b.functionalAreas?.length || 0;
         return Math.max(1, accPerFloor + attachedCount);
       })
@@ -563,9 +575,8 @@ export function buildCampusScene(
 
     buildings.forEach(building => {
       const bp = findBuildingBlueprint(blueprint, zl.node.ktx, building.day);
-      const floors = Math.max(1, bp?.floors || blueprint.defaultFloors || 1);
-      const accPerFloor =
-        bp?.roomsPerFloor || Math.ceil(Math.max(1, building.rooms.length) / floors);
+      const floors = 1;
+      const accPerFloor = Math.max(1, building.rooms.length);
       const attachedFuncs = building.functionalAreas || [];
       const rowRoomCount = Math.max(1, accPerFloor + attachedFuncs.length);
 
