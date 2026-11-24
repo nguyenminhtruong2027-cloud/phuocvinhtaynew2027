@@ -19,6 +19,7 @@ import {
   createGroundTileTexture,
   createPlaqueTexture,
   createRoadTexture,
+  createRoofInfoBoardTexture,
 } from './materials';
 import { buildVinconsCampusScene } from './vinconsCampusBuilder';
 
@@ -52,6 +53,7 @@ export interface CampusBuildResult {
   group: THREE.Group;
   roofsGroup: THREE.Group;
   functionalGroup: THREE.Group;
+  roofLabelMeshes: THREE.Object3D[];
   hitTargets: THREE.Object3D[];
   functionalHitTargets: THREE.Object3D[];
   buildingHitTargets: THREE.Object3D[];
@@ -402,6 +404,7 @@ export function buildCampusScene(
   functionalGroup.name = 'ktx-campus-functional';
   group.add(functionalGroup);
 
+  const roofLabelMeshes: THREE.Object3D[] = [];
   const hitTargets: THREE.Object3D[] = [];
   const functionalHitTargets: THREE.Object3D[] = [];
   const buildingHitTargets: THREE.Object3D[] = [];
@@ -800,6 +803,69 @@ export function buildCampusScene(
       );
       fascia.position.set(0, roofY - 0.04, bldTotalD / 2 + 0.4);
       bldRoofGroup.add(fascia);
+
+      // Architectural Rooftop Telemetry Board (flush on top roof plane for effortless aerial legibility)
+      const bldVacantRoof = Math.max(0, building.totalCapacity - building.totalOccupied);
+      const bldOverflowRoof = building.rooms.reduce(
+        (s, r) => s + (r.isVisible && r.roomType === 'accommodation' ? r.overflow : 0),
+        0
+      );
+      const bldActiveAcc = building.rooms.filter(
+        r => r.isVisible && r.roomType === 'accommodation'
+      ).length;
+      const bldFuncCnt = building.rooms.filter(
+        r => r.isVisible && r.roomType === 'functional'
+      ).length;
+      const bldHiddenCnt = building.rooms.filter(r => !r.isVisible).length;
+      const roofAccent =
+        bldOverflowRoof > 0
+          ? '#f43f5e'
+          : building.totalCapacity > 0 && building.totalOccupied >= building.totalCapacity
+            ? '#f59e0b'
+            : building.totalOccupied > 0
+              ? '#10b981'
+              : '#38bdf8';
+      const roofBoardTex = createRoofInfoBoardTexture(
+        {
+          title: building.day.toUpperCase(),
+          subtitle: zl.node.ktx,
+          occupied: building.totalOccupied,
+          capacity: building.totalCapacity,
+          vacant: bldVacantRoof,
+          overflow: bldOverflowRoof,
+          activeRooms: bldActiveAcc,
+          functionalRooms: bldFuncCnt,
+          hiddenRooms: bldHiddenCnt,
+          maintenanceRooms: building.maintenanceIssueRoomsCount,
+          unregisteredTamTru: building.unregisteredTamTruCount,
+          directionHint: `1 → ${Math.max(1, building.rooms.length)}`,
+          accentHex: roofAccent,
+          theme,
+        },
+        maxAnisotropy,
+        plaqueTexCache
+      );
+      const roofBoardMat = new THREE.MeshStandardMaterial({
+        map: roofBoardTex,
+        emissiveMap: roofBoardTex,
+        emissive: 0xffffff,
+        emissiveIntensity: isLight ? 0.16 : 0.4,
+        roughness: 0.4,
+        metalness: 0.1,
+        transparent: true,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+      });
+      const rBoardH = Math.min((bldTotalD + 0.4) * 0.42, 2.0);
+      const rBoardW = Math.min(bldW * 0.82, rBoardH * (2048 / 240));
+      const rBoard = new THREE.Mesh(new THREE.PlaneGeometry(rBoardW, rBoardH), roofBoardMat);
+      rBoard.position.set(0, roofY + 0.14, bldTotalD * 0.22);
+      rBoard.rotation.x = -Math.PI / 2;
+      rBoard.userData = { type: 'building', buildingKey: building.key };
+      bldRoofGroup.add(rBoard);
+      roofLabelMeshes.push(rBoard);
+      buildingHitTargets.push(rBoard);
 
       roofsGroup.add(bldRoofGroup);
 
@@ -1217,6 +1283,7 @@ export function buildCampusScene(
     group,
     roofsGroup,
     functionalGroup,
+    roofLabelMeshes,
     hitTargets,
     functionalHitTargets,
     buildingHitTargets,

@@ -89,8 +89,8 @@ Deno?.serve(async (req) => {
     const { email, password, full_name, role, assigned_blocks } = await req?.json();
     const targetRole = (role || 'staff') as string;
 
-    if (!['admin', 'staff'].includes(targetRole)) {
-      return new Response(JSON.stringify({ error: 'Vai trò tạo mới chỉ được phép là Admin hoặc Staff.' }), {
+    if (!['admin', 'staff', 'technician'].includes(targetRole)) {
+      return new Response(JSON.stringify({ error: 'Vai trò tạo mới chỉ được phép là Admin, Chuyên viên hoặc Kỹ thuật viên.' }), {
         status: 403,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });

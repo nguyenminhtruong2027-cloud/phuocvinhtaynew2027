@@ -6,17 +6,19 @@ import AttendancePortalClient from './AttendancePortalClient';
 import CheckoutPortalClient from './CheckoutPortalClient';
 import CheckoutApprovalPanel from './CheckoutApprovalPanel';
 import BedInspectClient from './BedInspectClient';
+import RoomIssueQrPortalTab from './RoomIssueQrPortalTab';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
-import { QrCode, ClipboardList, LogOut, UserCheck, ScanLine } from 'lucide-react';
+import { QrCode, ClipboardList, LogOut, UserCheck, ScanLine, Wrench } from 'lucide-react';
 import { SlidingTabs } from '@/components/ui/MotionPrimitives';
 
-type PortalTab = 'attendance' | 'registration' | 'checkout_approval' | 'checkout' | 'bed_inspect';
+type PortalTab = 'attendance' | 'registration' | 'checkout_approval' | 'checkout' | 'bed_inspect' | 'issue_qr';
 
 const VALID_TABS: readonly PortalTab[] = [
   'attendance',
   'registration',
   'bed_inspect',
+  'issue_qr',
   'checkout_approval',
   'checkout',
 ];
@@ -148,6 +150,7 @@ export default function QRPortalTabsWrapper() {
                 tone: pendingRegistrationCount > 0 ? 'warning' : 'default',
               },
               { id: 'bed_inspect', label: 'Kiểm Tra Giường', icon: ScanLine },
+              { id: 'issue_qr', label: 'QR Báo Hỏng', icon: Wrench },
               {
                 id: 'checkout_approval',
                 label: 'Duyệt Check-out',
@@ -176,6 +179,11 @@ export default function QRPortalTabsWrapper() {
         {visitedTabs.has('bed_inspect') && (
           <div className={activeTab === 'bed_inspect' ? 'block' : 'hidden'}>
             <BedInspectClient />
+          </div>
+        )}
+        {visitedTabs.has('issue_qr') && (
+          <div className={activeTab === 'issue_qr' ? 'block' : 'hidden'}>
+            <RoomIssueQrPortalTab />
           </div>
         )}
         {visitedTabs.has('checkout_approval') && (

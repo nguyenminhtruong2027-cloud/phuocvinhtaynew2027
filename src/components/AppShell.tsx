@@ -8,24 +8,32 @@ import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { PageReveal } from '@/components/ui/MotionPrimitives';
 import CommandPalette from '@/components/ui/CommandPalette';
 
-const PUBLIC_PATHS = ['/sign-up-login', '/login', '/register', '/checkout', '/attendance'];
+const PUBLIC_PATHS = ['/sign-up-login', '/login', '/register', '/checkout', '/attendance', '/report-issue'];
+const TECHNICIAN_ALLOWED_PATHS = ['/maintenance', '/ktx-3d', '/facilities', '/profile'];
 
 /**
  * AppShell — Khung điều hướng bền vững (mounted 1 lần ở RootLayout),
  * không hủy Sidebar / CommandPalette khi chuyển giữa các chức năng.
  */
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  const { currentUser, loading } = useAuth();
+  const { currentUser, isTechnician, loading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
   const isPublicPath = PUBLIC_PATHS.some(p => pathname?.startsWith(p));
+  const isTechnicianRestricted =
+    Boolean(currentUser) &&
+    isTechnician &&
+    !isPublicPath &&
+    !TECHNICIAN_ALLOWED_PATHS.some(p => pathname?.startsWith(p));
 
   useEffect(() => {
     if (!loading && !currentUser && !isPublicPath) {
       router.replace('/sign-up-login');
+    } else if (!loading && isTechnicianRestricted) {
+      router.replace('/maintenance');
     }
-  }, [loading, currentUser, isPublicPath, router]);
+  }, [loading, currentUser, isPublicPath, isTechnicianRestricted, router]);
 
   if (isPublicPath) {
     return (
@@ -52,12 +60,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!currentUser) {
+  if (!currentUser || isTechnicianRestricted) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-architectural" suppressHydrationWarning>
         <div className="flex flex-col items-center gap-4">
           <CraftIconBadge icon={Building2} tone="blue" size="lg" interactive={false} />
-          <p className="text-xs font-medium text-mu">Đang chuyển hướng...</p>
+          <p className="text-xs font-medium text-mu">
+            {isTechnicianRestricted ? 'Đang chuyển đến Trung tâm Kỹ thuật & Bảo trì...' : 'Đang chuyển hướng...'}
+          </p>
         </div>
       </div>
     );

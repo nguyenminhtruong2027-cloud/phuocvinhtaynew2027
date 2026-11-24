@@ -502,6 +502,358 @@ export function createCanteenAwningTexture(maxAnisotropy: number): THREE.CanvasT
   return tex;
 }
 
+export interface RoofInfoBoardSpec {
+  title: string;
+  subtitle: string;
+  occupied: number;
+  capacity: number;
+  vacant: number;
+  overflow: number;
+  activeRooms: number;
+  functionalRooms: number;
+  hiddenRooms: number;
+  maintenanceRooms: number;
+  unregisteredTamTru: number;
+  directionHint: string; // e.g. "◀ P.15  ···  P.1 ▶"
+  accentHex: string;
+  isPlaceholder?: boolean;
+  theme?: SceneTheme;
+}
+
+function drawRoundedRectPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  const radius = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + w - radius, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+  ctx.lineTo(x + w, y + h - radius);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+  ctx.lineTo(x + radius, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+}
+
+/**
+ * High-DPI (2048×240, 8.53:1) Architectural Rooftop Telemetry Board for Dormitory Rows.
+ * Renders crisp live occupancy, capacity progress bar, room breakdown, alerts, and room compass.
+ */
+export function createRoofInfoBoardTexture(
+  spec: RoofInfoBoardSpec,
+  maxAnisotropy: number,
+  dedupeCache?: Map<string, THREE.CanvasTexture>
+): THREE.CanvasTexture {
+  const cacheKey = `roof-board|${spec.title}|${spec.subtitle}|${spec.occupied}/${spec.capacity}|v${spec.vacant}|o${spec.overflow}|r${spec.activeRooms}|f${spec.functionalRooms}|h${spec.hiddenRooms}|m${spec.maintenanceRooms}|t${spec.unregisteredTamTru}|${spec.directionHint}|${spec.accentHex}|${spec.isPlaceholder ? 1 : 0}|${spec.theme ?? 'dark'}`;
+  if (dedupeCache) {
+    const existing = dedupeCache.get(cacheKey);
+    if (existing) return existing;
+  }
+
+  const W = 2048;
+  const H = 240;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d')!;
+  const isLight = spec.theme === 'light';
+  const fontStack = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Outer architectural dark-slate plate with subtle chamfered corners
+  drawRoundedRectPath(ctx, 6, 6, W - 12, H - 12, 22);
+  const bgGrad = ctx.createLinearGradient(0, 0, W, H);
+  if (isLight) {
+    bgGrad.addColorStop(0, 'rgba(15, 23, 42, 0.92)');
+    bgGrad.addColorStop(1, 'rgba(23, 35, 58, 0.90)');
+  } else {
+    bgGrad.addColorStop(0, 'rgba(9, 16, 31, 0.94)');
+    bgGrad.addColorStop(1, 'rgba(15, 25, 46, 0.92)');
+  }
+  ctx.fillStyle = bgGrad;
+  ctx.fill();
+
+  // Crisp perimeter border + subtle inner hairline
+  ctx.strokeStyle = 'rgba(226, 232, 240, 0.24)';
+  ctx.lineWidth = 4;
+  ctx.stroke();
+
+  // Left color-coded status accent bar
+  ctx.save();
+  drawRoundedRectPath(ctx, 6, 6, W - 12, H - 12, 22);
+  ctx.clip();
+  ctx.fillStyle = spec.accentHex;
+  ctx.fillRect(6, 6, 20, H - 12);
+  // Subtle accent wash behind Zone 1
+  const leftWash = ctx.createLinearGradient(26, 0, 220, 0);
+  leftWash.addColorStop(0, `${spec.accentHex}28`);
+  leftWash.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = leftWash;
+  ctx.fillRect(26, 6, 200, H - 12);
+  ctx.restore();
+
+  // Subtle CAD corner ticks (top-right & bottom-right)
+  ctx.strokeStyle = spec.accentHex;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(W - 44, 16);
+  ctx.lineTo(W - 18, 16);
+  ctx.lineTo(W - 18, 42);
+  ctx.moveTo(W - 44, H - 16);
+  ctx.lineTo(W - 18, H - 16);
+  ctx.lineTo(W - 18, H - 42);
+  ctx.stroke();
+
+  // Helper: Vertical divider
+  const drawDivider = (x: number) => {
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.26)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(x, 34);
+    ctx.lineTo(x, H - 34);
+    ctx.stroke();
+  };
+
+  // ── ZONE 1: Building Title & Classification (x: 52 → 500) ──
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#f8fafc';
+  ctx.font = `800 84px ${fontStack}`;
+  ctx.fillText(spec.title, 54, 96, 440);
+
+  ctx.fillStyle = '#cbd5e1';
+  ctx.font = `600 31px ${fontStack}`;
+  ctx.fillText(spec.subtitle, 56, 178, 440);
+
+  drawDivider(520);
+
+  // ── ZONE 2: Live Occupancy, Vacant & Progress Bar (x: 556 → 1185) ──
+  const pct =
+    spec.capacity > 0 ? Math.min(100, Math.round((spec.occupied / spec.capacity) * 100)) : 0;
+  const statusColor =
+    spec.overflow > 0
+      ? '#fb7185'
+      : spec.capacity > 0 && spec.occupied >= spec.capacity
+        ? '#fbbf24'
+        : spec.occupied > 0
+          ? '#34d399'
+          : '#38bdf8';
+
+  if (spec.isPlaceholder) {
+    ctx.fillStyle = '#e2e8f0';
+    ctx.font = `700 54px ${fontStack}`;
+    ctx.fillText('MẶT BẰNG CHUẨN · 15 PHÒNG', 556, 94, 620);
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = `600 32px ${fontStack}`;
+    ctx.fillText('Sức chứa thiết kế 300 chỗ · Sẵn sàng đồng bộ dữ liệu', 556, 166, 620);
+  } else {
+    // Top row: Occupied / Capacity + % + Vacant status
+    const occStr = `${spec.occupied.toLocaleString('vi-VN')} / ${spec.capacity.toLocaleString('vi-VN')}`;
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = `800 66px ${fontStack}`;
+    ctx.fillText(occStr, 556, 86, 320);
+
+    const occMeasured = Math.min(320, ctx.measureText(occStr).width);
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = `600 30px ${fontStack}`;
+    ctx.fillText('chỗ', 556 + occMeasured + 12, 96);
+
+    // Right-aligned status summary in Zone 2
+    ctx.textAlign = 'right';
+    const rightStatus =
+      spec.overflow > 0
+        ? `QUÁ TẢI +${spec.overflow}`
+        : spec.vacant > 0
+          ? `Trống ${spec.vacant.toLocaleString('vi-VN')}`
+          : spec.capacity > 0
+            ? 'ĐẦY 100%'
+            : '0 chỗ';
+    ctx.fillStyle = statusColor;
+    ctx.font = `800 40px ${fontStack}`;
+    ctx.fillText(`${rightStatus} · ${pct}%`, 1176, 88, 290);
+    ctx.textAlign = 'left';
+
+    // Horizontal Occupancy Progress Bar
+    const barX = 556;
+    const barY = 154;
+    const barW = 620;
+    const barH = 26;
+    drawRoundedRectPath(ctx, barX, barY, barW, barH, 13);
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.22)';
+    ctx.fill();
+
+    const fillW =
+      spec.capacity > 0
+        ? Math.max(spec.occupied > 0 ? 22 : 0, Math.round((Math.min(spec.occupied, spec.capacity) / spec.capacity) * barW))
+        : 0;
+    if (fillW > 0) {
+      drawRoundedRectPath(ctx, barX, barY, fillW, barH, 13);
+      ctx.fillStyle = statusColor;
+      ctx.fill();
+    }
+  }
+
+  drawDivider(1210);
+
+  // ── ZONE 3: Rooms & Operational Status Chips (x: 1244 → 1705) ──
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#f1f5f9';
+  ctx.font = `700 44px ${fontStack}`;
+  const roomSummary = spec.isPlaceholder
+    ? '15 phòng ở'
+    : `${spec.activeRooms} phòng ở${spec.functionalRooms > 0 ? ` · ${spec.functionalRooms} CN` : ''}`;
+  ctx.fillText(roomSummary, 1244, 86, 455);
+
+  // Status chips row
+  const chips: { label: string; bg: string; fg: string; border: string }[] = [];
+  if (spec.hiddenRooms > 0) {
+    chips.push({
+      label: `${spec.hiddenRooms} ẩn`,
+      bg: 'rgba(100, 116, 139, 0.35)',
+      fg: '#e2e8f0',
+      border: 'rgba(148, 163, 184, 0.6)',
+    });
+  }
+  if (spec.maintenanceRooms > 0) {
+    chips.push({
+      label: `${spec.maintenanceRooms} bảo trì`,
+      bg: 'rgba(234, 88, 12, 0.3)',
+      fg: '#fdba74',
+      border: 'rgba(249, 115, 22, 0.75)',
+    });
+  }
+  if (spec.unregisteredTamTru > 0) {
+    chips.push({
+      label: `${spec.unregisteredTamTru} chưa TT`,
+      bg: 'rgba(217, 119, 6, 0.28)',
+      fg: '#fde68a',
+      border: 'rgba(245, 158, 11, 0.72)',
+    });
+  }
+
+  if (chips.length === 0) {
+    ctx.fillStyle = spec.occupied > 0 ? '#6ee7b7' : '#7dd3fc';
+    ctx.font = `600 30px ${fontStack}`;
+    ctx.fillText(
+      spec.occupied > 0 ? 'Vận hành ổn định · Không sự cố' : 'Phòng trống · Sẵn sàng tiếp nhận',
+      1244,
+      166,
+      455
+    );
+  } else {
+    let chipX = 1244;
+    const chipY = 140;
+    const chipH = 52;
+    ctx.font = `700 28px ${fontStack}`;
+    for (const chip of chips) {
+      const tw = ctx.measureText(chip.label).width;
+      const cw = tw + 34;
+      if (chipX + cw > 1705) break;
+      drawRoundedRectPath(ctx, chipX, chipY, cw, chipH, 12);
+      ctx.fillStyle = chip.bg;
+      ctx.fill();
+      ctx.strokeStyle = chip.border;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.fillStyle = chip.fg;
+      ctx.fillText(chip.label, chipX + 17, chipY + chipH / 2 + 1);
+      chipX += cw + 14;
+    }
+  }
+
+  drawDivider(1728);
+
+  // ── ZONE 4: Room Sequence Compass (x: 1746 → 2022) ──
+  ctx.textAlign = 'center';
+  const z4Mid = 1882;
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = `700 24px ${fontStack}`;
+  ctx.fillText('CHIỀU ĐÁNH SỐ', z4Mid, 78);
+
+  ctx.fillStyle = '#38bdf8';
+  ctx.font = `800 40px ${fontStack}`;
+  ctx.fillText(spec.directionHint, z4Mid, 156, 268);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = Math.min(maxAnisotropy, 16);
+  tex.needsUpdate = true;
+
+  if (dedupeCache) {
+    dedupeCache.set(cacheKey, tex);
+  }
+  return tex;
+}
+
+/**
+ * Clean architectural rooftop identification banner for Dining Halls & central functional structures.
+ */
+export function createFacilityRoofSignTexture(
+  title: string,
+  subtitle: string,
+  accentHex: string,
+  maxAnisotropy: number,
+  dedupeCache?: Map<string, THREE.CanvasTexture>
+): THREE.CanvasTexture {
+  const cacheKey = `facility-roof|${title}|${subtitle}|${accentHex}`;
+  if (dedupeCache) {
+    const existing = dedupeCache.get(cacheKey);
+    if (existing) return existing;
+  }
+
+  const W = 1024;
+  const H = 144;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d')!;
+  const fontStack = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+
+  ctx.clearRect(0, 0, W, H);
+  drawRoundedRectPath(ctx, 6, 6, W - 12, H - 12, 18);
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.86)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(248, 250, 252, 0.28)';
+  ctx.lineWidth = 3.5;
+  ctx.stroke();
+
+  ctx.save();
+  drawRoundedRectPath(ctx, 6, 6, W - 12, H - 12, 18);
+  ctx.clip();
+  ctx.fillStyle = accentHex;
+  ctx.fillRect(6, 6, 16, H - 12);
+  ctx.fillRect(W - 22, 6, 16, H - 12);
+  ctx.restore();
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#f8fafc';
+  ctx.font = `800 48px ${fontStack}`;
+  ctx.fillText(title, W / 2, 56, W - 76);
+
+  ctx.fillStyle = '#fde68a';
+  ctx.font = `600 28px ${fontStack}`;
+  ctx.fillText(subtitle, W / 2, 108, W - 76);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = Math.min(maxAnisotropy, 16);
+  tex.needsUpdate = true;
+
+  if (dedupeCache) {
+    dedupeCache.set(cacheKey, tex);
+  }
+  return tex;
+}
+
 /** Recursively disposes geometries, materials, and textures under an Object3D */
 export function disposeObject3D(root: THREE.Object3D): void {
   const geometries = new Set<THREE.BufferGeometry>();

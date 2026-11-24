@@ -57,7 +57,7 @@ export default function MaintenanceTrackerModal({
   onClose,
   onResolved,
 }: Props) {
-  const { currentUser, isAdmin, canWriteBlock } = useAuth();
+  const { currentUser, isAdmin, isTechnician, canWriteBlock, canAccessMaintenanceBlock } = useAuth();
   const { addLog } = useAudit();
   const supabase = useMemo(() => createClient(), []);
 
@@ -126,7 +126,8 @@ export default function MaintenanceTrackerModal({
   const bedCount = allRows.filter(r => r.kind === 'bed').length;
 
   const handleMarkResolved = async (row: UnifiedMaintenanceRow) => {
-    if (!(isAdmin || canWriteBlock(row.day, row.ktx))) {
+    const hasPerm = isAdmin || (isTechnician ? canAccessMaintenanceBlock(row.day, row.ktx) : canWriteBlock(row.day, row.ktx));
+    if (!hasPerm) {
       toast.error('Bạn không có quyền cập nhật bảo trì cho Dãy này.');
       return;
     }

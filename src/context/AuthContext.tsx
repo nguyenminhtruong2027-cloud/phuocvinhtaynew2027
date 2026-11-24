@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
-export type UserRole = 'super_admin' | 'admin' | 'staff';
+export type UserRole = 'super_admin' | 'admin' | 'staff' | 'technician';
 
 export function isSuperAdminRole(role?: string | null): boolean {
   return role === 'super_admin';
@@ -12,15 +12,21 @@ export function isAdminRole(role?: string | null): boolean {
   return role === 'super_admin' || role === 'admin';
 }
 
+export function isTechnicianRole(role?: string | null): boolean {
+  return role === 'technician';
+}
+
 export function normalizeUserRole(role?: string | null): UserRole {
   if (role === 'super_admin') return 'super_admin';
   if (role === 'admin') return 'admin';
+  if (role === 'technician') return 'technician';
   return 'staff';
 }
 
 export function getRoleDisplayLabel(role?: string | null): string {
   if (role === 'super_admin') return 'Quản trị tối cao';
   if (role === 'admin') return 'Quản trị viên';
+  if (role === 'technician') return 'Kỹ thuật viên';
   return 'Chuyên viên';
 }
 
@@ -51,6 +57,14 @@ interface AuthContextValue {
   isAdmin: boolean;
   /** Tier 3: Block-scoped specialist */
   isStaff: boolean;
+  /** Tier 4: Facility & Maintenance Technician */
+  isTechnician: boolean;
+  /** Can accept, resolve, reopen maintenance tickets and resolve facility/bed maintenance */
+  canOperateMaintenance: boolean;
+  /** Can create internal maintenance tickets */
+  canCreateMaintenanceTicket: boolean;
+  /** Can delete resolved maintenance tickets (admin can delete any; technician only resolved) */
+  canDeleteResolvedTicket: boolean;
   /** Can delete a single worker (admin + staff within scope) */
   canDeleteSingle: boolean;
   /** Can bulk delete filtered/selected records (super_admin + admin) */
@@ -67,6 +81,8 @@ interface AuthContextValue {
   loading: boolean;
   /** Check if staff can write to a specific block */
   canWriteBlock: (blockName: string, ktxName?: string) => boolean;
+  /** Check if user can operate maintenance on a block (technician with empty assignedBlocks = full campus) */
+  canAccessMaintenanceBlock: (blockName: string, ktxName?: string) => boolean;
   /** Evaluate hierarchical permissions against a target account */
   getAccountPermissions: (targetRole: UserRole, targetId?: string) => AccountPermissionResult;
   /** Supabase sign in */
@@ -268,8 +284,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isSubAdmin = currentUser?.role === 'admin';
   const isAdmin = isSuperAdmin || isSubAdmin;
   const isStaff = currentUser?.role === 'staff';
+  const isTechnician = currentUser?.role === 'technician';
   const isManager = false;
 
+  const canOperateMaintenance = isAdmin || isTechnician;
+  const canCreateMaintenanceTicket = isAdmin || isTechnician || isStaff;
+  const canDeleteResolvedTicket = isAdmin || isTechnician;
   const canDeleteSingle = isAdmin || isStaff;
   const canBulkDelete = isAdmin;
   const canDeleteAll = isSuperAdmin;
@@ -301,11 +321,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (isSubAdmin) {
-        if (targetRole === 'staff') {
+        if (targetRole === 'staff' || targetRole === 'technician') {
           return {
             canEdit: true,
             canDelete: !isSelf,
-            canChangeRole: false,
+            canChangeRole: true,
           };
         }
         return {
@@ -323,11 +343,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   /**
    * Returns true if the current user can write (add/edit/delete) workers in the given KTX + block combination.
    * Super Admin & Admin can write to all blocks. Staff can only write to their assigned KTX+Block combinations.
-   * assignedBlocks stores entries like "KTX 1 - Dãy 1", "KTX 2 - Dãy 3", etc.
+   * Technicians NEVER write to workers.
    */
   const canWriteBlock = useCallback((blockName: string, ktxName?: string): boolean => {
     if (isAdmin) return true;
-    if (!currentUser) return false;
+    if (!currentUser || isTechnician) return false;
     const assigned = currentUser.assignedBlocks ?? [];
     if (assigned.length === 0) return false;
 
@@ -344,7 +364,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (parts.length === 2 && parts[1].trim().toLowerCase() === nameLower) return true;
       return false;
     });
-  }, [isAdmin, currentUser]);
+  }, [isAdmin, isTechnician, currentUser]);
+
+  /**
+   * Maintenance scope check:
+   * - Admin/Super Admin: full campus
+   * - Technician: empty assignedBlocks = full campus; non-empty = restricted to assigned blocks
+   * - Staff: restricted to assigned blocks
+   */
+  const canAccessMaintenanceBlock = useCallback((blockName: string, ktxName?: string): boolean => {
+    if (isAdmin) return true;
+    if (!currentUser) return false;
+    const assigned = currentUser.assignedBlocks ?? [];
+    if (isTechnician && assigned.length === 0) return true;
+    if (assigned.length === 0) return false;
+
+    const nameLower = (blockName || '').trim().toLowerCase();
+    const ktxLower = (ktxName || '').trim().toLowerCase();
+
+    return assigned.some(b => {
+      const bLower = b.trim().toLowerCase();
+      if (ktxLower && bLower === `${ktxLower} - ${nameLower}`) return true;
+      if (bLower === nameLower) return true;
+      const parts = b.split(' - ');
+      if (parts.length === 2 && parts[1].trim().toLowerCase() === nameLower) {
+        if (!ktxLower || parts[0].trim().toLowerCase() === ktxLower) return true;
+      }
+      return false;
+    });
+  }, [isAdmin, isTechnician, currentUser]);
 
   const addUser = useCallback((_user: Omit<AppUser, 'id'>) => {}, []);
   const updateUser = useCallback((_id: string, _updates: Partial<AppUser>) => {}, []);
@@ -387,7 +435,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isSubAdmin,
       isAdmin,
       isStaff,
+      isTechnician,
       isManager,
+      canOperateMaintenance,
+      canCreateMaintenanceTicket,
+      canDeleteResolvedTicket,
       canDeleteSingle,
       canBulkDelete,
       canDeleteAll,
@@ -398,6 +450,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       canConfigKTX,
       loading,
       canWriteBlock,
+      canAccessMaintenanceBlock,
       getAccountPermissions,
       signIn,
       signOut,

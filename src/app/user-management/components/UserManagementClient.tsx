@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth, UserRole } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
 import { createClient, getSupabaseConfig } from '@/lib/supabase/client';
-import { UserPlus, Pencil, Trash2, Shield, ShieldCheck, Crown, Lock, RefreshCw, AlertCircle, CheckCircle, Building2, Search, Database, Check, Copy, KeyRound, UserCog } from 'lucide-react';
+import { UserPlus, Pencil, Trash2, Shield, ShieldCheck, Crown, Lock, RefreshCw, AlertCircle, CheckCircle, Building2, Search, Database, Check, Copy, KeyRound, UserCog, Wrench } from 'lucide-react';
 import { useKtxStructure, KtxBlockGroup } from '@/lib/ktxStructure';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { SlidingTabs } from '@/components/ui/MotionPrimitives';
@@ -100,7 +100,7 @@ export default function UserManagementClient() {
   const [resetError, setResetError] = useState('');
   const [form, setForm] = useState<UserFormData>(emptyForm);
   const [formError, setFormError] = useState('');
-  const [activeTab, setActiveTab] = useState<'all' | 'super_admin' | 'admin' | 'staff'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'super_admin' | 'admin' | 'staff' | 'technician'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [checkingMigrations, setCheckingMigrations] = useState(false);
@@ -109,8 +109,9 @@ export default function UserManagementClient() {
     rlsLookup: 'unknown' | 'applied' | 'missing';
     superAdminRbac: 'unknown' | 'applied' | 'missing';
     packageASecurity: 'unknown' | 'applied' | 'missing';
+    technicianMaintenance: 'unknown' | 'applied' | 'missing';
     checkedAt?: string;
-  }>({ entryLog: 'unknown', rlsLookup: 'unknown', superAdminRbac: 'unknown', packageASecurity: 'unknown' });
+  }>({ entryLog: 'unknown', rlsLookup: 'unknown', superAdminRbac: 'unknown', packageASecurity: 'unknown', technicianMaintenance: 'unknown' });
   const [copiedMigrationPath, setCopiedMigrationPath] = useState<string | null>(null);
 
   const checkDatabaseMigrations = useCallback(async () => {
@@ -166,11 +167,28 @@ export default function UserManagementClient() {
       packageASecurity = 'missing';
     }
 
+    let technicianMaintenance: 'applied' | 'missing' = 'missing';
+    try {
+      const { error: maintErr } = await supabase.from('maintenance_tickets').select('id').limit(1);
+      if (!maintErr) {
+        technicianMaintenance = 'applied';
+      } else {
+        const msg = maintErr.message.toLowerCase();
+        technicianMaintenance =
+          msg.includes('does not exist') || msg.includes('schema cache') || msg.includes('not find')
+            ? 'missing'
+            : 'applied';
+      }
+    } catch {
+      technicianMaintenance = 'missing';
+    }
+
     setMigrationStatus({
       entryLog,
       rlsLookup,
       superAdminRbac,
       packageASecurity,
+      technicianMaintenance,
       checkedAt: new Date().toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
     });
     setCheckingMigrations(false);
@@ -358,9 +376,9 @@ export default function UserManagementClient() {
     // Client-side RBAC guard before hitting database
     const requestedRole: UserRole = editTarget
       ? (getAccountPermissions(editTarget.role, editTarget.id).canChangeRole ? form.role : editTarget.role)
-      : (canManageAdmins ? form.role : 'staff');
+      : (canManageAdmins ? form.role : (form.role === 'technician' ? 'technician' : 'staff'));
 
-    if (!canManageAdmins && requestedRole !== 'staff') {
+    if (!canManageAdmins && requestedRole !== 'staff' && requestedRole !== 'technician') {
       setFormError('Chỉ Quản trị tối cao (Super Admin) mới có quyền tạo hoặc gán tài khoản Admin.');
       return;
     }
@@ -376,7 +394,8 @@ export default function UserManagementClient() {
       return;
     }
 
-    const effectiveBlocks = requestedRole === 'staff' ? form.assigned_blocks : [];
+    const effectiveBlocks =
+      requestedRole === 'staff' || requestedRole === 'technician' ? form.assigned_blocks : [];
 
     setSubmitting(true);
     setFormError('');
@@ -393,7 +412,10 @@ export default function UserManagementClient() {
           .eq('id', editTarget.id);
 
         if (updateErr) {
-          setFormError(`Không thể cập nhật trên Supabase: ${updateErr.message}`);
+          const hint = updateErr.message.includes('profiles_role_check')
+            ? ' (Vui lòng chạy SQL khởi tạo quyền Kỹ thuật viên trong trang Kỹ Thuật & Bảo Trì trước)'
+            : '';
+          setFormError(`Không thể cập nhật trên Supabase: ${updateErr.message}${hint}`);
           return;
         }
 
@@ -808,13 +830,13 @@ export default function UserManagementClient() {
             </p>
             <p className="text-xs text-mu mt-0.5 leading-relaxed">
               {isSuperAdmin
-                ? 'Toàn quyền hệ thống: tạo/sửa/xóa tài khoản Admin và Staff, thực hiện thao tác xóa toàn bộ dữ liệu lớn, và được bảo vệ tuyệt đối trước các cấp thấp hơn.'
-                : 'Toàn quyền vận hành KTX và quản lý tài khoản Staff. Tài khoản Super Admin và các Admin khác được bảo vệ, không thể chỉnh sửa hoặc xóa từ cấp này.'}
+                ? 'Toàn quyền hệ thống: tạo/sửa/xóa tài khoản Admin, Chuyên viên (Staff) và Kỹ thuật viên, thực hiện thao tác xóa dữ liệu lớn và được bảo vệ tuyệt đối.'
+                : 'Toàn quyền vận hành KTX và quản lý tài khoản Chuyên viên (Staff) & Kỹ thuật viên. Tài khoản Super Admin và các Admin khác được bảo vệ.'}
             </p>
           </div>
         </div>
         <StatusTag tone={isSuperAdmin ? 'amber' : 'blue'} size="sm" icon={isSuperAdmin ? Crown : ShieldCheck} className="shrink-0 self-start sm:self-center">
-          {isSuperAdmin ? 'Quản lý Admin + Staff' : 'Chỉ quản lý Staff'}
+          {isSuperAdmin ? 'Quản lý Admin + Staff + Kỹ thuật' : 'Quản lý Staff + Kỹ thuật'}
         </StatusTag>
       </div>
 
@@ -822,7 +844,7 @@ export default function UserManagementClient() {
       <div className="surface-elevated rounded-2xl overflow-hidden">
         {/* Filter Tabs and Search Bar */}
         <div className="px-4 sm:px-6 pt-3.5 pb-3 border-b border-bdr flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <SlidingTabs<'all' | 'super_admin' | 'admin' | 'staff'>
+          <SlidingTabs<'all' | 'super_admin' | 'admin' | 'staff' | 'technician'>
             layoutId="user-mgmt-role-tabs"
             compact
             value={activeTab}
@@ -832,6 +854,7 @@ export default function UserManagementClient() {
               { id: 'super_admin', label: 'Chủ HT', count: profiles.filter(p => p.role === 'super_admin').length },
               { id: 'admin', label: 'Admin', count: profiles.filter(p => p.role === 'admin').length },
               { id: 'staff', label: 'Staff', count: profiles.filter(p => p.role === 'staff').length },
+              { id: 'technician', label: 'Kỹ thuật viên', count: profiles.filter(p => p.role === 'technician').length },
             ]}
           />
 
@@ -910,6 +933,10 @@ export default function UserManagementClient() {
                             <StatusTag tone="rose" icon={ShieldCheck}>
                               Admin
                             </StatusTag>
+                          ) : profile.role === 'technician' ? (
+                            <StatusTag tone="amber" icon={Wrench}>
+                              Kỹ thuật viên
+                            </StatusTag>
                           ) : (
                             <StatusTag tone="blue" icon={Shield}>
                               Staff
@@ -921,6 +948,8 @@ export default function UserManagementClient() {
                             <span className="text-xs text-wn font-medium">Toàn quyền hệ thống • Toàn bộ KTX</span>
                           ) : profile.role === 'admin' ? (
                             <span className="text-xs text-muted-foreground italic font-medium">Toàn bộ KTX (Vận hành)</span>
+                          ) : profile.role === 'technician' && (!profile.assigned_blocks || profile.assigned_blocks.length === 0) ? (
+                            <span className="text-xs text-ok font-medium">Toàn bộ KTX (Bảo trì & 3D)</span>
                           ) : (
                             renderAssignedBlocks(profile.assigned_blocks)
                           )}
@@ -1034,6 +1063,11 @@ export default function UserManagementClient() {
               file: 'supabase/migrations/20261118000000_package_a_security_hardening.sql',
               title: 'Bảo mật Gói A (RLS theo dãy, Audit Append-only & RPC)',
               status: migrationStatus.packageASecurity,
+            },
+            {
+              file: 'supabase/migrations/20261129000000_technician_rbac_and_maintenance_tickets.sql',
+              title: 'Phân quyền Kỹ thuật viên & Phiếu báo hỏng QR',
+              status: migrationStatus.technicianMaintenance,
             },
           ].map(item => (
             <div key={item.file} className="p-3.5 rounded-xl border border-border bg-muted/20 flex flex-col gap-2">
@@ -1155,9 +1189,14 @@ export default function UserManagementClient() {
                   </div>
                 ) : !canManageAdmins ? (
                   <div className="space-y-1">
-                    <div className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-muted/40 text-foreground font-medium">
-                      Staff (Bảo vệ / Chuyên viên phụ trách dãy)
-                    </div>
+                    <select
+                      className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer"
+                      value={form.role === 'technician' ? 'technician' : 'staff'}
+                      onChange={e => setForm(f => ({ ...f, role: e.target.value as UserRole }))}
+                    >
+                      <option value="staff">Staff (Chuyên viên / Quản lý công nhân theo dãy)</option>
+                      <option value="technician">Kỹ thuật viên (Xử lý báo hỏng QR, bảo trì & 3D KTX)</option>
+                    </select>
                     <p className="text-[11px] text-muted-foreground">
                       Chỉ Quản trị tối cao (Super Admin) mới có quyền tạo hoặc thay đổi vai trò Admin.
                     </p>
@@ -1168,22 +1207,29 @@ export default function UserManagementClient() {
                     value={form.role}
                     onChange={e => setForm(f => ({ ...f, role: e.target.value as UserRole }))}
                   >
-                    <option value="staff">Staff (Chuyên viên / Quản lý dãy)</option>
+                    <option value="staff">Staff (Chuyên viên / Quản lý công nhân theo dãy)</option>
+                    <option value="technician">Kỹ thuật viên (Xử lý báo hỏng QR, bảo trì & 3D KTX)</option>
                     <option value="admin">Admin (Quản lý vận hành toàn KTX — dưới quyền Super Admin)</option>
                   </select>
                 )}
               </div>
 
               {/* Dynamic Assigned Blocks Section — grouped by all dynamic KTXs */}
-              {form.role === 'staff' && (
+              {(form.role === 'staff' || form.role === 'technician') && (
                 <div className="pt-2 border-t border-border">
                   <div className="flex items-center justify-between mb-2 flex-wrap gap-1">
                     <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                       <Building2 size={14} className="text-primary" />
-                      <span>Phân quyền phụ trách KTX + Dãy</span>
+                      <span>
+                        {form.role === 'technician'
+                          ? 'Phạm vi dãy phụ trách bảo trì (Tùy chọn)'
+                          : 'Phân quyền phụ trách KTX + Dãy'}
+                      </span>
                     </label>
                     <span className="text-[11px] text-muted-foreground">
-                      (Staff chỉ Thêm/Sửa/Xóa công nhân ở tổ hợp được chọn)
+                      {form.role === 'technician'
+                        ? '(Để trống = phụ trách toàn bộ KTX; chọn dãy để giới hạn phạm vi)'
+                        : '(Staff chỉ Thêm/Sửa/Xóa công nhân ở tổ hợp được chọn)'}
                     </span>
                   </div>
 
@@ -1274,8 +1320,10 @@ export default function UserManagementClient() {
                   )}
 
                   {(form.assigned_blocks ?? []).length === 0 && (
-                    <p className="text-xs text-wn mt-2 font-medium">
-                      ⚠ Chưa gán dãy — Staff này sẽ không thể Thêm/Sửa/Xóa công nhân nào.
+                    <p className={`text-xs mt-2 font-medium ${form.role === 'technician' ? 'text-ok' : 'text-wn'}`}>
+                      {form.role === 'technician'
+                        ? '✓ Để trống — Kỹ thuật viên này sẽ tiếp nhận và xử lý bảo trì toàn bộ các dãy trong KTX.'
+                        : '⚠ Chưa gán dãy — Staff này sẽ không thể Thêm/Sửa/Xóa công nhân nào.'}
                     </p>
                   )}
                   {(form.assigned_blocks ?? []).length > 0 && (

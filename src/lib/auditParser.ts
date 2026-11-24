@@ -39,13 +39,25 @@ export const AUDIT_ACTION_META: Record<AuditAction, AuditActionMeta> = {
   ATTENDANCE_UPDATE: { action: 'ATTENDANCE_UPDATE', labelVi: 'Cập nhật điểm danh', shortVi: 'Sửa điểm danh', category: 'qr', severity: 'normal' },
   USER_PASSWORD_RESET: { action: 'USER_PASSWORD_RESET', labelVi: 'Đặt lại mật khẩu', shortVi: 'Đặt lại MK', category: 'account', severity: 'critical' },
   AUDIT_ARCHIVE_PURGE: { action: 'AUDIT_ARCHIVE_PURGE', labelVi: 'Lưu trữ & dọn nhật ký', shortVi: 'Dọn nhật ký', category: 'account', severity: 'warning' },
+  MAINTENANCE_TICKET_CREATE: { action: 'MAINTENANCE_TICKET_CREATE', labelVi: 'Tạo phiếu báo hỏng', shortVi: 'Báo hỏng', category: 'facility', severity: 'normal' },
+  MAINTENANCE_TICKET_UPDATE: { action: 'MAINTENANCE_TICKET_UPDATE', labelVi: 'Tiếp nhận / cập nhật phiếu bảo trì', shortVi: 'Cập nhật BT', category: 'facility', severity: 'normal' },
+  MAINTENANCE_TICKET_RESOLVE: { action: 'MAINTENANCE_TICKET_RESOLVE', labelVi: 'Hoàn thành sửa chữa', shortVi: 'Hoàn thành BT', category: 'facility', severity: 'normal' },
+  MAINTENANCE_TICKET_DELETE: { action: 'MAINTENANCE_TICKET_DELETE', labelVi: 'Xóa bản ghi phiếu bảo trì', shortVi: 'Xóa phiếu BT', category: 'facility', severity: 'warning' },
 };
 
 export const CATEGORY_ACTIONS: Record<Exclude<AuditCategory, 'all' | 'anomaly'>, AuditAction[]> = {
   sensitive: ['DELETE', 'Xóa', 'CHECKOUT_REQUEST', 'CHECKOUT_APPROVED', 'WORKER_HARD_DELETE'],
   qr: ['APPROVE_REGISTRATION', 'BED_INSPECT_CONFIRM', 'ATTENDANCE_SESSION', 'ATTENDANCE_UPDATE', 'CREATE', 'Thêm', 'IMPORT', 'Import'],
   bed: ['BED_REASSIGN', 'Chuyển phòng', 'UPDATE', 'Sửa', 'Đổi trạng thái tạm trú'],
-  facility: ['FACILITY_CREATE', 'FACILITY_UPDATE', 'FACILITY_DELETE'],
+  facility: [
+    'FACILITY_CREATE',
+    'FACILITY_UPDATE',
+    'FACILITY_DELETE',
+    'MAINTENANCE_TICKET_CREATE',
+    'MAINTENANCE_TICKET_UPDATE',
+    'MAINTENANCE_TICKET_RESOLVE',
+    'MAINTENANCE_TICKET_DELETE',
+  ],
   account: ['USER_PASSWORD_RESET', 'AUDIT_ARCHIVE_PURGE'],
 };
 

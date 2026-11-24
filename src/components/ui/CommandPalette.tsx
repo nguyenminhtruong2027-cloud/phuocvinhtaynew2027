@@ -21,6 +21,7 @@ import {
   UserCheck,
   Box,
   DoorOpen,
+  Wrench,
 } from 'lucide-react';
 import { useWorkers } from '@/context/WorkerContext';
 import { useAuth } from '@/context/AuthContext';
@@ -65,7 +66,7 @@ export default function CommandPalette() {
   const router = useRouter();
   const pathname = usePathname();
   const { workers, refreshWorkers, refreshing } = useWorkers();
-  const { isAdmin } = useAuth();
+  const { isAdmin, isTechnician } = useAuth();
   const [themeMode, setThemeMode] = useState<'midnight' | 'light'>('midnight');
   const [roomsCatalog, setRoomsCatalog] = useState<FacilityItem[]>([]);
 
@@ -138,6 +139,35 @@ export default function CommandPalette() {
   );
 
   const routeItems: CommandItem[] = useMemo(() => {
+    if (isTechnician) {
+      return [
+        {
+          id: 'route-maintenance',
+          group: 'route',
+          label: 'Kỹ Thuật & Bảo Trì',
+          sublabel: 'Tiếp nhận, xử lý phiếu báo hỏng QR & dọn phiếu đã xong',
+          icon: Wrench,
+          onSelect: () => navigate('/maintenance'),
+        },
+        {
+          id: 'route-ktx-3d',
+          group: 'route',
+          label: 'Bản Đồ 3D KTX',
+          sublabel: 'Xem bản đồ nhiệt bảo trì 3D & vị trí phòng hỏng',
+          icon: Box,
+          onSelect: () => navigate('/ktx-3d?mode=maintenance'),
+        },
+        {
+          id: 'route-facilities',
+          group: 'route',
+          label: 'Cơ Sở Vật Chất',
+          sublabel: 'Danh mục phòng, thiết bị & ghi chú bảo trì',
+          icon: Building2,
+          onSelect: () => navigate('/facilities'),
+        },
+      ];
+    }
+
     const list: CommandItem[] = [
       {
         id: 'route-dashboard',
@@ -188,10 +218,18 @@ export default function CommandPalette() {
         onSelect: () => navigate('/ktx-3d'),
       },
       {
+        id: 'route-maintenance',
+        group: 'route',
+        label: 'Kỹ Thuật & Bảo Trì',
+        sublabel: 'Phiếu báo hỏng QR, phân công xử lý & lịch sử sửa chữa',
+        icon: Wrench,
+        onSelect: () => navigate('/maintenance'),
+      },
+      {
         id: 'route-qr',
         group: 'route',
         label: 'QR Portal',
-        sublabel: 'Mã QR tự đăng ký, check-out & điểm danh',
+        sublabel: 'Mã QR tự đăng ký, báo hỏng phòng, check-out & điểm danh',
         icon: QrCode,
         onSelect: () => navigate('/qr-portal'),
       },
@@ -202,7 +240,7 @@ export default function CommandPalette() {
           id: 'route-users',
           group: 'route',
           label: 'Quản Lý Tài Khoản',
-          sublabel: 'Phân quyền Admin / Staff & KTX phụ trách',
+          sublabel: 'Phân quyền Admin / Chuyên viên / Kỹ thuật viên',
           icon: UserCog,
           onSelect: () => navigate('/user-management'),
         },
@@ -217,7 +255,7 @@ export default function CommandPalette() {
       );
     }
     return list;
-  }, [isAdmin, navigate, workers.length]);
+  }, [isAdmin, isTechnician, navigate, workers.length]);
 
   const actionItems: CommandItem[] = useMemo(
     () => [
@@ -248,6 +286,7 @@ export default function CommandPalette() {
   );
 
   const workerMatches: CommandItem[] = useMemo(() => {
+    if (isTechnician) return [];
     const q = stripVN(query.trim());
     if (!q) return [];
     const matched = workers
@@ -281,7 +320,7 @@ export default function CommandPalette() {
         onSelect: () => navigate(`/worker-management?view=${encodeURIComponent(w.id)}`),
       };
     });
-  }, [query, workers, navigate]);
+  }, [isTechnician, query, workers, navigate]);
 
   const roomMatches: CommandItem[] = useMemo(() => {
     const q = stripVN(query.trim());
@@ -442,7 +481,11 @@ export default function CommandPalette() {
                 value={query}
                 onChange={e => setQuery(e.target.value)}
                 onKeyDown={handleInputKeyDown}
-                placeholder="Tìm công nhân (tên, mã NV, CCCD, phòng), chuyển trang hoặc thao tác nhanh..."
+                placeholder={
+                  isTechnician
+                    ? 'Tìm phòng KTX (vd: Dãy 1 P.03), mở bản đồ 3D hoặc Trung tâm kỹ thuật...'
+                    : 'Tìm công nhân (tên, mã NV, CCCD, phòng), chuyển trang hoặc thao tác nhanh...'
+                }
                 className="flex-1 bg-transparent text-sm text-tx placeholder:text-mu focus:outline-none"
               />
               {query && (

@@ -20,9 +20,11 @@ import {
   createContainerWallTexture,
   createCorrugatedFenceTexture,
   createCorrugatedRoofTexture,
+  createFacilityRoofSignTexture,
   createGroundTileTexture,
   createPlaqueTexture,
   createRoadTexture,
+  createRoofInfoBoardTexture,
 } from './materials';
 import {
   resolveRoomColor,
@@ -420,6 +422,7 @@ export function buildVinconsCampusScene(
   functionalGroup.name = 'ktx-campus-functional';
   group.add(functionalGroup);
 
+  const roofLabelMeshes: THREE.Object3D[] = [];
   const hitTargets: THREE.Object3D[] = [];
   const functionalHitTargets: THREE.Object3D[] = [];
   const buildingHitTargets: THREE.Object3D[] = [];
@@ -1424,11 +1427,24 @@ export function buildVinconsCampusScene(
       if (northBld) registerVisual(northBld, -wingRoomD * 0.5);
     }
 
-    // Dual-end Clickable Building Signboards (East & West Gables)
+    // Dual-end Clickable Building Signboards (East & West Gables) + Dual-Slope Rooftop Telemetry Boards
     const activeBlds = [southBld, northBld].filter((b): b is CampusBuildingNode => Boolean(b));
     const occSum = activeBlds.reduce((s, b) => s + b.totalOccupied, 0);
     const capSum = activeBlds.reduce((s, b) => s + b.totalCapacity, 0);
     const vacSum = Math.max(0, capSum - occSum);
+    const accVisibleSum = activeBlds.reduce(
+      (s, b) => s + b.rooms.filter(r => r.isVisible && r.roomType === 'accommodation').length,
+      0
+    );
+    const overflowSum = activeBlds.reduce(
+      (s, b) =>
+        s +
+        b.rooms.reduce(
+          (rs, r) => rs + (r.isVisible && r.roomType === 'accommodation' ? r.overflow : 0),
+          0
+        ),
+      0
+    );
     const funcSum = activeBlds.reduce(
       (s, b) => s + b.rooms.filter(r => r.isVisible && r.roomType === 'functional').length,
       0
@@ -1437,6 +1453,18 @@ export function buildVinconsCampusScene(
       (s, b) => s + b.rooms.filter(r => !r.isVisible).length,
       0
     );
+    const maintRoomsSum = activeBlds.reduce((s, b) => s + b.maintenanceIssueRoomsCount, 0);
+    const unregTamTruSum = activeBlds.reduce((s, b) => s + b.unregisteredTamTruCount, 0);
+    let maleWorkers = 0;
+    let femaleWorkers = 0;
+    activeBlds.forEach(b => {
+      b.rooms.forEach(r => {
+        if (!r.isVisible || r.roomType !== 'accommodation') return;
+        maleWorkers += r.genderInfo.maleCount;
+        femaleWorkers += r.genderInfo.femaleCount;
+      });
+    });
+
     const primaryBld = southBld || northBld;
     const legendTag = slot.slotIndex === 0 ? '(1)(2)' : '(1)';
     const signTitle = primaryBld
@@ -1490,6 +1518,121 @@ export function buildVinconsCampusScene(
       buildingHitTargets.push(signE);
     }
     bldGroup.add(signE);
+
+    // ── Architectural Dual-Slope Rooftop Telemetry Boards (South & North Roof Slopes) ──
+    const roofTitle = (primaryBld
+      ? northBld
+        ? `DÃY ${slot.slotIndex + 1}`
+        : primaryBld.day
+      : `DÃY ${slot.slotIndex + 1}`
+    ).toUpperCase();
+    const genderSummary =
+      maleWorkers > 0 && femaleWorkers > 0
+        ? `Nam ${maleWorkers} · Nữ ${femaleWorkers} · ${legendTag}`
+        : femaleWorkers > 0
+          ? `Khu Nữ · ${femaleWorkers} Nữ · ${legendTag}`
+          : maleWorkers > 0
+            ? `Khu Nam · ${maleWorkers} Nam · ${legendTag}`
+            : slot.slotIndex === 0
+              ? 'Khu Nam (1) & Nữ (2) · 1 tầng'
+              : 'Nhà ở công nhân (1) · 1 tầng';
+    const roofAccent =
+      overflowSum > 0
+        ? '#f43f5e'
+        : capSum > 0 && occSum >= capSum
+          ? '#f59e0b'
+          : occSum > 0
+            ? '#10b981'
+            : slot.slotIndex === 0
+              ? '#ec4899'
+              : '#38bdf8';
+
+    const roofHalfZ = roofSpanZ / 2;
+    const roofPitch = Math.atan2(roofRidgeRise, roofHalfZ);
+    const zMin = 0.28;
+    const zMax = roofHalfZ - 0.16;
+    const zMid = (zMin + zMax) / 2;
+    const clearSlopeLen = Math.hypot(
+      zMax - zMin,
+      ((zMax - zMin) * roofRidgeRise) / roofHalfZ
+    );
+    const boardH = Math.min(clearSlopeLen * 0.86, 2.58);
+    const boardW = Math.min(bldW * 0.78, boardH * (2048 / 240));
+    const ySurf = 0.14 + roofRidgeRise * (1 - zMid / roofHalfZ);
+    const normalLift = 0.055;
+    const slopePosY = ySurf + Math.cos(roofPitch) * normalLift;
+    const slopePosZ = zMid + Math.sin(roofPitch) * normalLift;
+    const slopeTiltX = -(Math.PI / 2 - roofPitch);
+
+    const roofBoardGeo = new THREE.PlaneGeometry(boardW, boardH);
+
+    const makeSlopeMaterial = (directionHint: string) => {
+      const tex = createRoofInfoBoardTexture(
+        {
+          title: roofTitle,
+          subtitle: genderSummary,
+          occupied: occSum,
+          capacity: capSum,
+          vacant: vacSum,
+          overflow: overflowSum,
+          activeRooms: accVisibleSum,
+          functionalRooms: funcSum,
+          hiddenRooms: hiddenSum,
+          maintenanceRooms: maintRoomsSum,
+          unregisteredTamTru: unregTamTruSum,
+          directionHint,
+          accentHex: roofAccent,
+          isPlaceholder: isEmptyPlaceholder,
+          theme,
+        },
+        maxAnisotropy,
+        plaqueTexCache
+      );
+      return new THREE.MeshStandardMaterial({
+        map: tex,
+        emissiveMap: tex,
+        emissive: 0xffffff,
+        emissiveIntensity: isLight ? 0.18 : 0.44,
+        roughness: 0.4,
+        metalness: 0.12,
+        transparent: true,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+      });
+    };
+
+    const maxBayLabel = `P.${maxRoomsPerSide}`;
+    // South slope (visible in default 3/4 South overview: Left = West = P.15, Right = East = P.1)
+    const southRoofBoard = new THREE.Mesh(
+      roofBoardGeo,
+      makeSlopeMaterial(`◀ ${maxBayLabel} ··· P.1 ▶`)
+    );
+    southRoofBoard.position.set(0, slopePosY, slopePosZ);
+    southRoofBoard.rotation.x = slopeTiltX;
+    if (primaryBld) {
+      southRoofBoard.userData = { type: 'building', buildingKey: primaryBld.key };
+      buildingHitTargets.push(southRoofBoard);
+    }
+    bldRoofGroup.add(southRoofBoard);
+    roofLabelMeshes.push(southRoofBoard);
+
+    // North slope (upright when orbiting 180° to view from North: Left = East = P.1, Right = West = P.15)
+    const northSlopeAnchor = new THREE.Group();
+    northSlopeAnchor.rotation.y = Math.PI;
+    const northRoofBoard = new THREE.Mesh(
+      roofBoardGeo,
+      makeSlopeMaterial(`◀ P.1 ··· ${maxBayLabel} ▶`)
+    );
+    northRoofBoard.position.set(0, slopePosY, slopePosZ);
+    northRoofBoard.rotation.x = slopeTiltX;
+    if (primaryBld) {
+      northRoofBoard.userData = { type: 'building', buildingKey: primaryBld.key };
+      buildingHitTargets.push(northRoofBoard);
+    }
+    northSlopeAnchor.add(northRoofBoard);
+    bldRoofGroup.add(northSlopeAnchor);
+    roofLabelMeshes.push(northRoofBoard);
   });
 
   // ── 7. Two Central Dining Halls (3) + West & East Gian Soạn Đồ Ăn (4) ──
@@ -1694,6 +1837,54 @@ export function buildVinconsCampusScene(
     );
     ventCap.position.set(0, 0.16 + dRoofRise + 0.32, 0);
     dRoofGroup.add(ventCap);
+
+    // Matching Dual-Slope Rooftop Identification Banner on Blue Dining Hall Roofs
+    const dHalfZ = dRoofSpanZ / 2;
+    const dPitch = Math.atan2(dRoofRise, dHalfZ);
+    const dZMid = 2.34;
+    const dYSurf = 0.16 + dRoofRise * (1 - dZMid / dHalfZ);
+    const dLift = 0.055;
+    const dBoardH = 1.72;
+    const dBoardW = dBoardH * (1024 / 144);
+    const dRoofSignTex = createFacilityRoofSignTexture(
+      dbFunc ? dbFunc.name.toUpperCase() : `NHÀ ĂN ${idx + 1} · SHCĐ (3)`,
+      'Khu ăn ca & Sinh hoạt cộng đồng · 2 Gian soạn đồ ăn (4)',
+      '#f59e0b',
+      maxAnisotropy,
+      plaqueTexCache
+    );
+    const dRoofSignMat = new THREE.MeshStandardMaterial({
+      map: dRoofSignTex,
+      emissiveMap: dRoofSignTex,
+      emissive: 0xffffff,
+      emissiveIntensity: isLight ? 0.16 : 0.38,
+      roughness: 0.4,
+      metalness: 0.12,
+      transparent: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
+    const dRoofBoardGeo = new THREE.PlaneGeometry(dBoardW, dBoardH);
+
+    const dSouthSign = new THREE.Mesh(dRoofBoardGeo, dRoofSignMat);
+    dSouthSign.position.set(0, dYSurf + Math.cos(dPitch) * dLift, dZMid + Math.sin(dPitch) * dLift);
+    dSouthSign.rotation.x = -(Math.PI / 2 - dPitch);
+    dSouthSign.userData = { type: 'functional', functionalKey: funcKey };
+    dRoofGroup.add(dSouthSign);
+    roofLabelMeshes.push(dSouthSign);
+    functionalHitTargets.push(dSouthSign);
+
+    const dNorthAnchor = new THREE.Group();
+    dNorthAnchor.rotation.y = Math.PI;
+    const dNorthSign = new THREE.Mesh(dRoofBoardGeo, dRoofSignMat);
+    dNorthSign.position.set(0, dYSurf + Math.cos(dPitch) * dLift, dZMid + Math.sin(dPitch) * dLift);
+    dNorthSign.rotation.x = -(Math.PI / 2 - dPitch);
+    dNorthSign.userData = { type: 'functional', functionalKey: funcKey };
+    dNorthAnchor.add(dNorthSign);
+    dRoofGroup.add(dNorthAnchor);
+    roofLabelMeshes.push(dNorthSign);
+    functionalHitTargets.push(dNorthSign);
 
     roofsGroup.add(dRoofGroup);
   });
@@ -2642,6 +2833,7 @@ export function buildVinconsCampusScene(
     group,
     roofsGroup,
     functionalGroup,
+    roofLabelMeshes,
     hitTargets,
     functionalHitTargets,
     buildingHitTargets,

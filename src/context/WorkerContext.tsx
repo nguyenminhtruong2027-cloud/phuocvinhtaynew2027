@@ -20,7 +20,7 @@ import {
 } from '@/lib/bedSync';
 import { useAuth } from '@/context/AuthContext';
 
-const PUBLIC_PATHS = ['/sign-up-login', '/login', '/register', '/checkout', '/attendance'];
+const PUBLIC_PATHS = ['/sign-up-login', '/login', '/register', '/checkout', '/attendance', '/report-issue'];
 
 // ─── DB row ↔ Worker mapping ───────────────────────────────────────────────
 
@@ -140,10 +140,10 @@ const WORKER_LIST_COLUMNS =
   'id, stt, ho_va_ten, ma_nv, tieu_doan, ktx, don_vi, gioi_tinh, ngay_sinh, so_dien_thoai, day, phong_so, giuong, cccd, ho_khau_tinh, to_truong, sdt_to_truong, ngay_vao_ktx, ngay_ra_ktx, ghi_chu, khoa_tra_cuu, tam_tru_status, created_at';
 
 export function WorkerProvider({ children }: { children: React.ReactNode }) {
-  const { currentUser, isAdmin, canWriteBlock, loading: authLoading } = useAuth();
+  const { currentUser, isAdmin, isTechnician, canWriteBlock, loading: authLoading } = useAuth();
   const pathname = usePathname();
   const isPublicPath = PUBLIC_PATHS.some(p => pathname?.startsWith(p));
-  const shouldLoadWorkers = !authLoading && Boolean(currentUser) && !isPublicPath;
+  const shouldLoadWorkers = !authLoading && Boolean(currentUser) && !isTechnician && !isPublicPath;
 
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [loading, setLoading] = useState(true);

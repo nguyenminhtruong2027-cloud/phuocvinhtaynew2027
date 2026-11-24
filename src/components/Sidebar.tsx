@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Users, ChevronLeft, ChevronRight, LogOut, BarChart2,
-  ClipboardList, UserCog, RefreshCw, Building2, QrCode, Menu, X, BedDouble, ShieldCheck, Search, Box
+  ClipboardList, UserCog, RefreshCw, Building2, QrCode, Menu, X, BedDouble, ShieldCheck, Search, Box, Wrench
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useWorkers } from '@/context/WorkerContext';
@@ -30,10 +30,13 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'nav-facilities', label: 'Cơ Sở Vật Chất', href: '/facilities', icon: Building2, group: 'main' },
   { id: 'nav-beds', label: 'Quản Lý Giường', href: '/bed-management', icon: BedDouble, group: 'main' },
   { id: 'nav-ktx-3d', label: 'Bản Đồ 3D KTX', href: '/ktx-3d', icon: Box, group: 'main' },
+  { id: 'nav-maintenance', label: 'Kỹ Thuật & Bảo Trì', href: '/maintenance', icon: Wrench, group: 'main' },
   { id: 'nav-qr', label: 'QR Portal', href: '/qr-portal', icon: QrCode, group: 'main' },
   { id: 'nav-user-mgmt', label: 'Quản Lý Tài Khoản', href: '/user-management', icon: UserCog, adminOnly: true, group: 'admin' },
   { id: 'nav-audit', label: 'Nhật Ký Hệ Thống', href: '/audit-log', icon: ClipboardList, adminOnly: true, group: 'admin' },
 ];
+
+const TECHNICIAN_NAV_IDS = new Set(['nav-maintenance', 'nav-ktx-3d', 'nav-facilities']);
 
 const SidebarNavLink = React.memo(function SidebarNavLink({
   item,
@@ -41,6 +44,7 @@ const SidebarNavLink = React.memo(function SidebarNavLink({
   collapsed,
   workerCount,
   pendingQrCount = 0,
+  pendingMaintenanceCount = 0,
   isMobile = false,
   onMobileClose,
 }: {
@@ -49,13 +53,21 @@ const SidebarNavLink = React.memo(function SidebarNavLink({
   collapsed: boolean;
   workerCount: number;
   pendingQrCount?: number;
+  pendingMaintenanceCount?: number;
   isMobile?: boolean;
   onMobileClose?: () => void;
 }) {
   const IconComponent = item.icon;
   const isActive = pathname === item.href;
   const isQrPending = item.id === 'nav-qr' && pendingQrCount > 0;
-  const badge = item.dynamicBadge ? workerCount : isQrPending ? pendingQrCount : undefined;
+  const isMaintPending = item.id === 'nav-maintenance' && pendingMaintenanceCount > 0;
+  const badge = item.dynamicBadge
+    ? workerCount
+    : isQrPending
+    ? pendingQrCount
+    : isMaintPending
+    ? pendingMaintenanceCount
+    : undefined;
 
   if (isMobile) {
     return (
@@ -136,9 +148,17 @@ const SidebarNavLink = React.memo(function SidebarNavLink({
           className={`relative z-10 text-[11px] rounded-md px-1.5 py-0.5 font-mono font-tabular font-bold ${
             isQrPending
               ? 'tint-wn text-wn border border-wn/40'
+              : isMaintPending
+              ? 'tint-dg text-dgr border border-dgr/40'
               : 'bg-bdg text-lnk border border-bdr2'
           }`}
-          title={isQrPending ? `${badge} hồ sơ QR chờ duyệt` : undefined}
+          title={
+            isQrPending
+              ? `${badge} hồ sơ QR chờ duyệt`
+              : isMaintPending
+              ? `${badge} phiếu báo hỏng đang mở`
+              : undefined
+          }
         >
           {badge}
         </span>
@@ -146,7 +166,7 @@ const SidebarNavLink = React.memo(function SidebarNavLink({
       {collapsed && badge !== undefined && badge > 0 && (
         <span
           className={`relative z-10 absolute top-1.5 right-1.5 w-2 h-2 rounded-full ${
-            isQrPending ? 'bg-wn' : 'bg-pri2'
+            isQrPending ? 'bg-wn' : isMaintPending ? 'bg-dgr' : 'bg-pri2'
           }`}
         />
       )}
@@ -159,16 +179,20 @@ export default function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const { currentUser, isAdmin, canWriteBlock, signOut } = useAuth();
+  const { currentUser, isAdmin, isTechnician, canWriteBlock, canAccessMaintenanceBlock, signOut } = useAuth();
   const { workerCount, refreshWorkers, refreshing } = useWorkers();
   const [pendingQrCount, setPendingQrCount] = useState(0);
+  const [pendingMaintenanceCount, setPendingMaintenanceCount] = useState(0);
 
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || isTechnician) {
+      setPendingQrCount(0);
+      return;
+    }
     let active = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const supabase = createClient();
@@ -205,7 +229,50 @@ export default function Sidebar() {
       if (timer) clearTimeout(timer);
       supabase.removeChannel(channel);
     };
-  }, [currentUser, isAdmin, canWriteBlock]);
+  }, [currentUser, isAdmin, isTechnician, canWriteBlock]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setPendingMaintenanceCount(0);
+      return;
+    }
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const supabase = createClient();
+
+    const loadMaintenancePending = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('maintenance_tickets')
+          .select('id, ktx, day, status')
+          .in('status', ['open', 'in_progress']);
+        if (!active || error || !data) return;
+        const count = data.filter(t => isAdmin || canAccessMaintenanceBlock(t.day, t.ktx)).length;
+        setPendingMaintenanceCount(count);
+      } catch {
+        // Table may not be migrated yet; fail silently
+      }
+    };
+
+    const scheduleLoad = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (active) void loadMaintenancePending();
+      }, 450);
+    };
+
+    void loadMaintenancePending();
+    const channel = supabase
+      .channel('sidebar_pending_maintenance_count')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'maintenance_tickets' }, scheduleLoad)
+      .subscribe();
+
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser, isAdmin, canAccessMaintenanceBlock]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -225,7 +292,10 @@ export default function Sidebar() {
     };
   }, [mobileOpen]);
 
-  const visibleNavItems = NAV_ITEMS.filter(item => !item.adminOnly || isAdmin);
+  const visibleNavItems = NAV_ITEMS.filter(item => {
+    if (isTechnician) return TECHNICIAN_NAV_IDS.has(item.id);
+    return !item.adminOnly || isAdmin;
+  });
   const mainItems = visibleNavItems.filter(i => i.group === 'main');
   const adminItems = visibleNavItems.filter(i => i.group === 'admin');
 
@@ -243,12 +313,16 @@ export default function Sidebar() {
       ? 'Quản trị tối cao'
       : currentUser.role === 'admin'
       ? 'Quản trị viên'
+      : currentUser.role === 'technician'
+      ? 'Kỹ thuật viên'
       : 'Chuyên viên';
   const avatarColor =
     currentUser.role === 'super_admin'
       ? 'bg-gradient-to-tr from-amber-500 via-orange-500 to-rose-600'
       : currentUser.role === 'admin'
       ? 'bg-gradient-to-tr from-rose-600 to-red-500'
+      : currentUser.role === 'technician'
+      ? 'bg-gradient-to-tr from-amber-500 to-orange-600'
       : 'bg-gradient-to-tr from-blue-600 to-indigo-600';
   const avatarInitial = displayName.charAt(0).toUpperCase();
 
@@ -308,6 +382,7 @@ export default function Sidebar() {
               collapsed={collapsed}
               workerCount={workerCount}
               pendingQrCount={pendingQrCount}
+              pendingMaintenanceCount={pendingMaintenanceCount}
             />
           ))}
 
@@ -334,17 +409,19 @@ export default function Sidebar() {
           {/* Data Sync & Theme Tool */}
           <div className="mt-4 pt-3 border-t border-bdr space-y-1">
             {!collapsed && <p className="px-3 mb-1 text-[10px] font-bold text-ic uppercase tracking-widest">TIỆN ÍCH</p>}
-            <button
-              onClick={() => { void refreshWorkers(); }}
-              disabled={refreshing}
-              title="Đồng bộ lại toàn bộ dữ liệu"
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-nav hover:text-tx hover:bg-act/80 border border-transparent hover:border-bdr2 transition-colors duration-100 active:scale-[0.98] ${
-                refreshing ? 'opacity-60 cursor-not-allowed' : ''
-              }`}
-            >
-              <RefreshCw size={16} className={`text-ic flex-shrink-0 ${refreshing ? 'animate-spin text-pri2' : ''}`} />
-              {!collapsed && <span className="truncate">{refreshing ? 'Đang đồng bộ...' : 'Đồng bộ dữ liệu'}</span>}
-            </button>
+            {!isTechnician && (
+              <button
+                onClick={() => { void refreshWorkers(); }}
+                disabled={refreshing}
+                title="Đồng bộ lại toàn bộ dữ liệu"
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-nav hover:text-tx hover:bg-act/80 border border-transparent hover:border-bdr2 transition-colors duration-100 active:scale-[0.98] ${
+                  refreshing ? 'opacity-60 cursor-not-allowed' : ''
+                }`}
+              >
+                <RefreshCw size={16} className={`text-ic flex-shrink-0 ${refreshing ? 'animate-spin text-pri2' : ''}`} />
+                {!collapsed && <span className="truncate">{refreshing ? 'Đang đồng bộ...' : 'Đồng bộ dữ liệu'}</span>}
+              </button>
+            )}
             <ThemeSwitcher showLabel={!collapsed} />
           </div>
         </nav>
@@ -481,6 +558,7 @@ export default function Sidebar() {
                     collapsed={false}
                     workerCount={workerCount}
                     pendingQrCount={pendingQrCount}
+                    pendingMaintenanceCount={pendingMaintenanceCount}
                     isMobile
                     onMobileClose={() => setMobileOpen(false)}
                   />

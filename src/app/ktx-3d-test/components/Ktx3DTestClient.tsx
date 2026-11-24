@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertTriangle,
@@ -50,6 +51,11 @@ import { toast } from 'sonner';
 import { useWorkers } from '@/context/WorkerContext';
 import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
+import {
+  fetchMaintenanceTickets,
+  getTicketCategoryShortLabel,
+  type MaintenanceTicket,
+} from '@/lib/maintenanceTickets';
 import {
   compareKtxNames,
   DEFAULT_ROOM_CAPACITY,
@@ -193,7 +199,7 @@ export default function Ktx3DTestClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { workers, loading: workersLoading, refreshWorkers } = useWorkers();
-  const { currentUser, isAdmin, isStaff, canWriteBlock } = useAuth();
+  const { currentUser, isAdmin, isStaff, isTechnician, canWriteBlock, canAccessMaintenanceBlock } = useAuth();
   const { addLog } = useAudit();
 
   const [facilities, setFacilities] = useState<FacilityItem[]>([]);
@@ -208,13 +214,16 @@ export default function Ktx3DTestClient() {
   const [viewLevel, setViewLevel] = useState<ViewLevel>('campus');
   const [sceneTheme, setSceneTheme] = useState<SceneTheme>('dark');
   const [selectedKtxFilter, setSelectedKtxFilter] = useState<string>('all');
-  const [colorMode, setColorMode] = useState<CampusColorMode>('occupancy');
+  const [colorMode, setColorMode] = useState<CampusColorMode>(() =>
+    searchParams.get('mode') === 'maintenance' ? 'maintenance' : 'occupancy'
+  );
   const [unitXRayFilter, setUnitXRayFilter] = useState<UnitXRayFilter | null>(null);
   const [assignedOnlyFilter, setAssignedOnlyFilter] = useState(false);
   const [focusedRoomKey, setFocusedRoomKey] = useState<string | null>(null);
   const [focusedBuildingKey, setFocusedBuildingKey] = useState<string | null>(null);
   const [hiddenBuildingKeys, setHiddenBuildingKeys] = useState<string[]>([]);
   const [hideRoofs, setHideRoofs] = useState(false);
+  const [showRoofLabels, setShowRoofLabels] = useState(true);
   const [showFunctionalRooms, setShowFunctionalRooms] = useState(true);
   const [showHiddenRooms, setShowHiddenRooms] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -244,8 +253,9 @@ export default function Ktx3DTestClient() {
   const [blueprintEditorOpen, setBlueprintEditorOpen] = useState(false);
   const [savingBlueprint, setSavingBlueprint] = useState(false);
 
-  // Global maintenance bed counts per room (for Maintenance Heatmap & 3D warning beacons)
+  // Global maintenance bed counts & active QR tickets per room (powers Maintenance Heatmap, 3D beacons & rooftop telemetry)
   const [maintenanceBedsByRoom, setMaintenanceBedsByRoom] = useState<Record<string, number>>({});
+  const [activeTicketsByRoom, setActiveTicketsByRoom] = useState<Record<string, MaintenanceTicket[]>>({});
 
   // Interactive Vincons Site Infrastructure Landmarks (3 -> 20)
   const [availableLandmarks, setAvailableLandmarks] = useState<SiteLandmarkNode[]>([]);
@@ -286,6 +296,13 @@ export default function Ktx3DTestClient() {
       setAssignedOnlyFilter(true);
     }
   }, [hasStaffAssignedBlocks]);
+
+  // Default Technician accounts to Maintenance Heatmap so room issue beacons stand out immediately
+  useEffect(() => {
+    if (isTechnician) {
+      setColorMode('maintenance');
+    }
+  }, [isTechnician]);
 
   // Sync initial sceneTheme cleanly with app's active Light/Dark mode
   useEffect(() => {
@@ -451,36 +468,68 @@ export default function Ktx3DTestClient() {
     };
   }, []);
 
-  // Lightweight global fetch of maintenance beds per room (powers 3D Maintenance Heatmap & warning beacons)
+  // Lightweight global fetch of maintenance beds & active QR tickets per room (powers 3D Maintenance Heatmap, rooftop telemetry & warning beacons)
   useEffect(() => {
     let cancelled = false;
+    const supabase = createClient();
+
     const fetchMaintenanceCounts = async () => {
       try {
-        const supabase = createClient();
-        const { data, error } = await supabase
-          .from('beds')
-          .select('ktx, day, phong_so')
-          .eq('status', 'maintenance');
-        if (cancelled || error || !Array.isArray(data)) return;
-        const map: Record<string, number> = {};
-        (data as { ktx?: string | null; day?: string | null; phong_so?: string | null }[]).forEach(
-          row => {
-            const k = `${normalizeKtxCompact(row.ktx || '')}||${normalizeDayKey(
-              row.day || ''
-            )}||${normalizeRoomLabel(row.phong_so || '')}`;
-            if (k !== '||||') {
-              map[k] = (map[k] || 0) + 1;
+        const [{ data, error }, ticketRes] = await Promise.all([
+          supabase.from('beds').select('ktx, day, phong_so').eq('status', 'maintenance'),
+          fetchMaintenanceTickets({ activeOnly: true }).catch(() => ({ tickets: [] as MaintenanceTicket[], tableMissing: true })),
+        ]);
+
+        if (cancelled) return;
+
+        if (!error && Array.isArray(data)) {
+          const map: Record<string, number> = {};
+          (data as { ktx?: string | null; day?: string | null; phong_so?: string | null }[]).forEach(
+            row => {
+              const k = `${normalizeKtxCompact(row.ktx || '')}||${normalizeDayKey(
+                row.day || ''
+              )}||${normalizeRoomLabel(row.phong_so || '')}`;
+              if (k !== '||||') {
+                map[k] = (map[k] || 0) + 1;
+              }
             }
+          );
+          setMaintenanceBedsByRoom(map);
+        }
+
+        const tMap: Record<string, MaintenanceTicket[]> = {};
+        for (const t of ticketRes.tickets) {
+          const k = `${normalizeKtxCompact(t.ktx || '')}||${normalizeDayKey(
+            t.day || ''
+          )}||${normalizeRoomLabel(t.phong_so || '')}`;
+          if (k !== '||||') {
+            if (!tMap[k]) tMap[k] = [];
+            tMap[k].push(t);
           }
-        );
-        setMaintenanceBedsByRoom(map);
+        }
+        setActiveTicketsByRoom(tMap);
       } catch {
         // Non-fatal: rooms still evaluate facility issue notes
       }
     };
+
     void fetchMaintenanceCounts();
+
+    let rtTimer: ReturnType<typeof setTimeout> | null = null;
+    const channel = supabase
+      .channel('ktx_3d_maintenance_tickets_rt')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'maintenance_tickets' }, () => {
+        if (rtTimer) clearTimeout(rtTimer);
+        rtTimer = setTimeout(() => {
+          if (!cancelled) void fetchMaintenanceCounts();
+        }, 400);
+      })
+      .subscribe();
+
     return () => {
       cancelled = true;
+      if (rtTimer) clearTimeout(rtTimer);
+      supabase.removeChannel(channel);
     };
   }, [refreshSeq]);
 
@@ -665,12 +714,21 @@ export default function Ktx3DTestClient() {
             }
           });
 
-          const hasWriteAccess = isAdmin || canWriteBlock(day, ktx);
+          const hasWriteAccess = isAdmin || (isTechnician ? canAccessMaintenanceBlock(day, ktx) : canWriteBlock(day, ktx));
           const maintKey = `${normalizeKtxCompact(ktx)}||${normalizeDayKey(
             day
           )}||${normalizeRoomLabel(roomRaw)}`;
           const maintenanceBedCount = maintenanceBedsByRoom[maintKey] || 0;
-          const hasFacilityIssue = hasFacilityIssueNote(ghiChu);
+          const openRoomTickets = activeTicketsByRoom[maintKey] || [];
+          const ticketSummary =
+            openRoomTickets.length > 0
+              ? `${openRoomTickets.length} phiếu QR (${openRoomTickets
+                  .slice(0, 2)
+                  .map(t => `${getTicketCategoryShortLabel(t.category)}: ${t.description}`)
+                  .join('; ')})`
+              : '';
+          const combinedIssueText = [ghiChu.trim(), ticketSummary].filter(Boolean).join(' · ');
+          const hasFacilityIssue = hasFacilityIssueNote(ghiChu) || openRoomTickets.length > 0;
 
           const roomNode: CampusRoomNode = {
             key,
@@ -681,7 +739,7 @@ export default function Ktx3DTestClient() {
             roomLabel: formatRoomDisplay(roomRaw),
             roomType,
             isVisible,
-            ghiChu,
+            ghiChu: combinedIssueText,
             capacity: cap,
             occupied,
             vacant: roomType === 'accommodation' && isVisible ? Math.max(0, cap - occupied) : 0,
@@ -730,7 +788,7 @@ export default function Ktx3DTestClient() {
           totalOccupied: activeAccRooms.reduce((s, r) => s + r.occupied, 0),
           unregisteredTamTruCount: activeAccRooms.reduce((s, r) => s + r.unregisteredTamTruCount, 0),
           maintenanceIssueRoomsCount,
-          hasWriteAccess: isAdmin || canWriteBlock(day, ktx),
+          hasWriteAccess: isAdmin || (isTechnician ? canAccessMaintenanceBlock(day, ktx) : canWriteBlock(day, ktx)),
         };
       });
 
@@ -778,7 +836,7 @@ export default function Ktx3DTestClient() {
       roomByKeyMap: byKey,
       xrayOptions: { platoons: platoonOptions, units: unitOptions },
     };
-  }, [facilities, workers, capacities, roomGenderMap, maintenanceBedsByRoom, isAdmin, canWriteBlock]);
+  }, [facilities, workers, capacities, roomGenderMap, maintenanceBedsByRoom, activeTicketsByRoom, isAdmin, isTechnician, canWriteBlock, canAccessMaintenanceBlock]);
 
   const visibleKtxNodes = useMemo(() => {
     if (selectedKtxFilter === 'all') return allKtxNodes;
@@ -2265,6 +2323,7 @@ export default function Ktx3DTestClient() {
           focusedBuildingKey={focusedBuildingKey}
           hiddenBuildingKeys={hiddenBuildingKeys}
           hideRoofs={hideRoofs}
+          showRoofLabels={showRoofLabels}
           showFunctionalRooms={showFunctionalRooms}
           showHiddenRooms={showHiddenRooms}
           activeRoom={activeRoom}
@@ -2693,19 +2752,28 @@ export default function Ktx3DTestClient() {
                     {activeRoom.hasFacilityIssue ? activeRoom.ghiChu : ''}
                   </span>
                 </div>
-                {activeRoom.hasWriteAccess && activeRoom.facility?.id && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEquipmentEditDefault(true);
-                      setEquipmentPanelOpen(true);
-                      setResidentsPanelOpen(false);
-                    }}
-                    className="px-2 py-0.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-[11px] font-semibold shrink-0 transition-colors"
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Link
+                    href="/maintenance"
+                    className="px-2 py-0.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-semibold transition-colors inline-flex items-center gap-1"
                   >
-                    Xử lý / Cập nhật CSVC
-                  </button>
-                )}
+                    <Wrench size={11} />
+                    <span>Trung tâm Bảo trì</span>
+                  </Link>
+                  {activeRoom.hasWriteAccess && activeRoom.facility?.id && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEquipmentEditDefault(true);
+                        setEquipmentPanelOpen(true);
+                        setResidentsPanelOpen(false);
+                      }}
+                      className="px-2 py-0.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-[11px] font-semibold transition-colors cursor-pointer"
+                    >
+                      Cập nhật CSVC
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
@@ -4120,6 +4188,27 @@ export default function Ktx3DTestClient() {
                     >
                       <EyeOff size={11} />
                       <span>{hideRoofs ? 'Hiện mái' : 'Ẩn mái'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (hideRoofs) {
+                          setHideRoofs(false);
+                          setShowRoofLabels(true);
+                        } else {
+                          setShowRoofLabels(prev => !prev);
+                        }
+                      }}
+                      title="Bật/tắt bảng thông tin từng dãy & nhà ăn hiển thị trực tiếp trên mái"
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold transition-colors ${
+                        !hideRoofs && showRoofLabels
+                          ? 'bg-sky-600 border-sky-500 text-white'
+                          : hudSubtleBtn
+                      }`}
+                    >
+                      <Tag size={11} />
+                      <span>Nhãn mái</span>
                     </button>
 
                     <button

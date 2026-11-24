@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
 
-const PUBLIC_PATHS = ['/sign-up-login', '/login', '/register', '/checkout', '/attendance'];
+const PUBLIC_PATHS = ['/sign-up-login', '/login', '/register', '/checkout', '/attendance', '/report-issue'];
 
 export type AuditAction =
   | 'Thêm'
@@ -29,7 +29,11 @@ export type AuditAction =
   | 'ATTENDANCE_UPDATE'
   | 'USER_PASSWORD_RESET'
   | 'WORKER_HARD_DELETE'
-  | 'AUDIT_ARCHIVE_PURGE';
+  | 'AUDIT_ARCHIVE_PURGE'
+  | 'MAINTENANCE_TICKET_CREATE'
+  | 'MAINTENANCE_TICKET_UPDATE'
+  | 'MAINTENANCE_TICKET_RESOLVE'
+  | 'MAINTENANCE_TICKET_DELETE';
 
 export interface AuditEntry {
   id: string;

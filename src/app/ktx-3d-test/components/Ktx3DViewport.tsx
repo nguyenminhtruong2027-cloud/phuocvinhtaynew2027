@@ -62,6 +62,7 @@ interface Ktx3DViewportProps {
   focusedBuildingKey: string | null;
   hiddenBuildingKeys: string[];
   hideRoofs: boolean;
+  showRoofLabels?: boolean;
   showFunctionalRooms: boolean;
   showHiddenRooms: boolean;
   activeRoom: CampusRoomNode | null;
@@ -177,6 +178,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     focusedBuildingKey,
     hiddenBuildingKeys,
     hideRoofs,
+    showRoofLabels = true,
     showFunctionalRooms,
     showHiddenRooms,
     activeRoom,
@@ -240,6 +242,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     focusedRoomKey,
     focusedBuildingKey,
     hideRoofs,
+    showRoofLabels,
     showFunctionalRooms,
     showHiddenRooms,
     selectedBedId,
@@ -255,6 +258,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     focusedRoomKey,
     focusedBuildingKey,
     hideRoofs,
+    showRoofLabels,
     showFunctionalRooms,
     showHiddenRooms,
     selectedBedId,
@@ -272,6 +276,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     contentRoot: THREE.Group;
     roofsGroup: THREE.Group | null;
     functionalGroup: THREE.Group | null;
+    roofLabelMeshes: THREE.Object3D[];
     isSoftwareGl: boolean;
     maxAnisotropy: number;
     hitTargets: THREE.Object3D[];
@@ -693,7 +698,19 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
       _pointerNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(_pointerNdc, camera);
       const hits = raycaster.intersectObjects(targets, false);
-      return hits.length > 0 ? hits[0].object : null;
+      for (let i = 0; i < hits.length; i++) {
+        let cur: THREE.Object3D | null = hits[i].object;
+        let visibleInChain = true;
+        while (cur) {
+          if (!cur.visible) {
+            visibleInChain = false;
+            break;
+          }
+          cur = cur.parent;
+        }
+        if (visibleInChain) return hits[i].object;
+      }
+      return null;
     };
 
     const handlePointerDown = (e: PointerEvent) => {
@@ -1013,6 +1030,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
       contentRoot,
       roofsGroup: null,
       functionalGroup: null,
+      roofLabelMeshes: [],
       isSoftwareGl,
       maxAnisotropy,
       hitTargets: [],
@@ -1128,6 +1146,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     }
     eng.roofsGroup = null;
     eng.functionalGroup = null;
+    eng.roofLabelMeshes = [];
     eng.hitTargets = [];
     eng.functionalHitTargets = [];
     eng.buildingHitTargets = [];
@@ -1161,10 +1180,14 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
       );
       built.roofsGroup.visible = !stateRef.current.hideRoofs;
       built.functionalGroup.visible = showFunctionalRooms;
+      built.roofLabelMeshes.forEach(m => {
+        m.visible = stateRef.current.showRoofLabels;
+      });
 
       eng.contentRoot.add(built.group);
       eng.roofsGroup = built.roofsGroup;
       eng.functionalGroup = built.functionalGroup;
+      eng.roofLabelMeshes = built.roofLabelMeshes;
       eng.hitTargets = built.hitTargets;
       eng.functionalHitTargets = built.functionalHitTargets;
       eng.buildingHitTargets = built.buildingHitTargets;
@@ -1293,6 +1316,15 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     eng.roofsGroup.visible = !hideRoofs;
     eng.requestRender();
   }, [hideRoofs, viewLevel]);
+
+  useEffect(() => {
+    const eng = engineRef.current;
+    if (!eng || viewLevel !== 'campus') return;
+    eng.roofLabelMeshes.forEach(m => {
+      m.visible = showRoofLabels;
+    });
+    eng.requestRender();
+  }, [showRoofLabels, viewLevel]);
 
   useEffect(() => {
     const eng = engineRef.current;

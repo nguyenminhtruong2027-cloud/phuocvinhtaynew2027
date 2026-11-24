@@ -812,7 +812,7 @@ function AddRoomModal({ activeKtx, ktxOptions, existingRows, onSave, onClose, sa
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function FacilitiesClient() {
-  const { isAdmin, canDeleteAll, canWriteBlock, currentUser } = useAuth();
+  const { isAdmin, isTechnician, canDeleteAll, canWriteBlock, canAccessMaintenanceBlock, currentUser } = useAuth();
   const { addLog } = useAudit();
   const { workers } = useWorkers();
   const [rows, setRows] = useState<FacilityRow[]>([]);
@@ -873,8 +873,9 @@ export default function FacilitiesClient() {
   const supabase = createClient();
 
   const canWriteFacility = useCallback(
-    (ktx?: string, day?: string) => isAdmin || canWriteBlock(day || '', ktx || ''),
-    [isAdmin, canWriteBlock]
+    (ktx?: string, day?: string) =>
+      isAdmin || (isTechnician ? canAccessMaintenanceBlock(day || '', ktx || '') : canWriteBlock(day || '', ktx || '')),
+    [isAdmin, isTechnician, canWriteBlock, canAccessMaintenanceBlock]
   );
 
   const fetchFacilities = useCallback(async () => {
@@ -2063,7 +2064,7 @@ export default function FacilitiesClient() {
               <span>Đồng bộ chuẩn 3D</span>
             </button>
           )}
-          {(isAdmin || (currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && rows.length > 0 && (
+          {(isAdmin || (!isTechnician && currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && rows.length > 0 && (
             <button
               type="button"
               onClick={() => setShowBulkEquipmentModal(true)}
@@ -2104,7 +2105,7 @@ export default function FacilitiesClient() {
               <span>Xóa tất cả</span>
             </button>
           )}
-          {(isAdmin || (currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && (
+          {(isAdmin || (!isTechnician && currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && (
             <button
               onClick={() => { setAddModalInitialKtx(null); setShowAddModal(true); }}
               className="flex items-center justify-center gap-2 px-4 py-2 btn-glow-primary rounded-xl text-xs sm:text-sm font-semibold flex-1 sm:flex-initial cursor-pointer"
@@ -2120,14 +2121,23 @@ export default function FacilitiesClient() {
         <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-bdg border border-bdr2 text-xs text-lnk">
           <Lock size={14} className="shrink-0" />
           <span>
-            Chế độ phân quyền: bạn chỉ có thể thêm, sửa hoặc xóa phòng thuộc phạm vi phụ trách (
-            <strong>{currentUser?.assignedBlocks?.length ? currentUser.assignedBlocks.join(', ') : 'Chỉ xem'}</strong>).
+            {isTechnician ? (
+              <>
+                <strong>Chế độ Kỹ thuật viên:</strong> bạn có thể cập nhật số lượng thiết bị & ghi chú bảo trì cho phạm vi phụ trách (
+                <strong>{currentUser?.assignedBlocks?.length ? currentUser.assignedBlocks.join(', ') : 'Toàn bộ KTX'}</strong>).
+              </>
+            ) : (
+              <>
+                Chế độ phân quyền: bạn chỉ có thể thêm, sửa hoặc xóa phòng thuộc phạm vi phụ trách (
+                <strong>{currentUser?.assignedBlocks?.length ? currentUser.assignedBlocks.join(', ') : 'Chỉ xem'}</strong>).
+              </>
+            )}
           </span>
         </div>
       )}
 
       {/* Missing facility KTX prompt banner (e.g. KTX 3 / KTX 4 already has workers) */}
-      {!loading && missingFacilityKtxs.length > 0 && (
+      {!loading && !isTechnician && missingFacilityKtxs.length > 0 && (
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-xl border border-wn/35 tint-wn text-xs">
           <div className="flex items-center gap-2 text-wn font-medium">
             <AlertTriangle size={15} className="shrink-0" />
