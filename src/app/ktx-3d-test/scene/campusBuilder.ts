@@ -91,8 +91,32 @@ export function resolveRoomColor(
   const ghostColor = theme === 'light' ? PALETTE.ghostLight : PALETTE.ghostDark;
   const ghostOpacity = theme === 'light' ? 0.28 : 0.22;
 
+  // Hidden rooms render as architectural translucent slate bays so managers can observe & restore them without shifting layout
+  if (!room.isVisible) {
+    return {
+      color: theme === 'light' ? 0x94a3b8 : 0x334155,
+      emissive: 0x000000,
+      emissiveIntensity: 0,
+      opacity: theme === 'light' ? 0.34 : 0.28,
+    };
+  }
+
   if (assignedOnly && !room.hasWriteAccess) {
     return { color: ghostColor, emissive: 0x000000, emissiveIntensity: 0, opacity: ghostOpacity };
+  }
+
+  // Functional rooms positioned inside a dormitory row render in unmistakable royal violet
+  if (room.roomType === 'functional') {
+    const isDimmedFilterMode =
+      (mode === 'unit_xray' && Boolean(unitFilter)) ||
+      mode === 'vacant_only' ||
+      mode === 'overloaded_only';
+    return {
+      color: PALETTE.functional,
+      emissive: 0x6d28d9,
+      emissiveIntensity: isDimmedFilterMode ? 0.08 : 0.24,
+      opacity: isDimmedFilterMode ? 0.45 : 1,
+    };
   }
 
   if (mode === 'unit_xray' && unitFilter) {
@@ -275,7 +299,9 @@ export function buildCampusScene(
   maxAnisotropy: number,
   castShadows: boolean,
   blueprint: CampusBlueprintConfig = CAMPUS_BLUEPRINT_CONFIG,
-  assignedOnly = false
+  assignedOnly = false,
+  showFunctionalRooms = true,
+  showHiddenRooms = true
 ): CampusBuildResult {
   if (blueprint.mode === 'vincons') {
     return buildVinconsCampusScene(
@@ -286,7 +312,9 @@ export function buildCampusScene(
       maxAnisotropy,
       castShadows,
       blueprint,
-      assignedOnly
+      assignedOnly,
+      showFunctionalRooms,
+      showHiddenRooms
     );
   }
 
@@ -746,6 +774,9 @@ export function buildCampusScene(
 
       // Build Interactive Room Units across floor(s)
       building.rooms.forEach((room, rIdx) => {
+        if (!room.isVisible && !showHiddenRooms) return;
+        if (room.roomType === 'functional' && room.isVisible && !showFunctionalRooms) return;
+
         const floorIdx = Math.min(floors - 1, Math.floor(rIdx / Math.max(1, accPerFloor)));
         const colIdx = rIdx % Math.max(1, accPerFloor);
         const rx = startRoomX + colIdx * (ROOM_W + ROOM_GAP);
@@ -766,7 +797,7 @@ export function buildCampusScene(
 
         const bodyMesh = new THREE.Mesh(roomBodyGeo, bodyMat);
         bodyMesh.position.set(rx, floorBaseY + ROOM_H / 2, roomZLocal);
-        bodyMesh.castShadow = castShadows;
+        bodyMesh.castShadow = castShadows && room.isVisible;
         bodyMesh.receiveShadow = true;
         bodyMesh.userData = { type: 'room', roomKey: room.key };
         bldGroup.add(bodyMesh);
@@ -781,9 +812,11 @@ export function buildCampusScene(
           _localMat.multiplyMatrices(_bldMatWorld, _tmpObj.matrix);
           list.push(_localMat.clone());
         };
-        pushLocal(doorMatrices, rx - 0.56, floorBaseY + 0.78, roomZLocal + ROOM_D / 2 + 0.02);
-        pushLocal(windowMatrices, rx + 0.48, floorBaseY + 1.32, roomZLocal + ROOM_D / 2 + 0.02);
-        pushLocal(windowMatrices, rx, floorBaseY + 1.32, roomZLocal - ROOM_D / 2 - 0.02);
+        if (room.isVisible) {
+          pushLocal(doorMatrices, rx - 0.56, floorBaseY + 0.78, roomZLocal + ROOM_D / 2 + 0.02);
+          pushLocal(windowMatrices, rx + 0.48, floorBaseY + 1.32, roomZLocal + ROOM_D / 2 + 0.02);
+          pushLocal(windowMatrices, rx, floorBaseY + 1.32, roomZLocal - ROOM_D / 2 - 0.02);
+        }
 
         // Status indicator bar
         const stripMat = new THREE.MeshStandardMaterial({
@@ -797,17 +830,34 @@ export function buildCampusScene(
         strip.position.set(rx, floorBaseY + ROOM_H - 0.16, roomZLocal + ROOM_D / 2 + 0.06);
         bldGroup.add(strip);
 
-        // Deduplicated 2-line room plaque: Room label + direct occupancy ratio (e.g. P.5 / 6/8)
-        const ratioText = `${room.occupied}/${room.capacity}`;
-        const plaqueCacheKey = `${room.roomLabel}|${ratioText}`;
+        // Deduplicated 2-line room plaque: Room label + direct occupancy / functional / hidden status
+        const isHiddenRoom = !room.isVisible;
+        const isFuncRoom = room.roomType === 'functional';
+        const shortNote = room.ghiChu ? room.ghiChu.slice(0, 12) : '';
+        const ratioText = isHiddenRoom
+          ? 'Đang ẩn'
+          : isFuncRoom
+            ? shortNote || 'Chức năng'
+            : `${room.occupied}/${room.capacity}`;
+        const plaqueBorder = isHiddenRoom
+          ? '#64748b'
+          : isFuncRoom
+            ? '#a78bfa'
+            : room.overflow > 0
+              ? '#f43f5e'
+              : room.vacant > 0
+                ? '#10b981'
+                : '#f59e0b';
+        const plaqueBg = isHiddenRoom ? '#1e293b' : isFuncRoom ? '#1e1038' : '#0b1220';
+        const plaqueCacheKey = `${room.roomLabel}|${ratioText}|${plaqueBorder}|${plaqueBg}`;
         let plaqueMat = roomPlaqueMatCache.get(plaqueCacheKey);
         if (!plaqueMat) {
           const rPlaqueTex = createPlaqueTexture(
             room.roomLabel,
             {
               subtext: ratioText,
-              bg: '#0b1220',
-              border: room.overflow > 0 ? '#f43f5e' : room.vacant > 0 ? '#10b981' : '#f59e0b',
+              bg: plaqueBg,
+              border: plaqueBorder,
               width: 192,
               height: 88,
               fontSize: 30,
@@ -819,6 +869,8 @@ export function buildCampusScene(
             map: rPlaqueTex,
             roughness: 0.4,
             metalness: 0.1,
+            transparent: isHiddenRoom,
+            opacity: isHiddenRoom ? 0.72 : 1,
           });
           roomPlaqueMatCache.set(plaqueCacheKey, plaqueMat);
         }

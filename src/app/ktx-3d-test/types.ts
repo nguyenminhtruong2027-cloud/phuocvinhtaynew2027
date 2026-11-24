@@ -48,6 +48,9 @@ export interface CampusRoomNode {
   roomRaw: string;
   roomNorm: string;
   roomLabel: string; // P.1
+  roomType: 'accommodation' | 'functional';
+  isVisible: boolean;
+  ghiChu: string;
   capacity: number;
   occupied: number;
   vacant: number;

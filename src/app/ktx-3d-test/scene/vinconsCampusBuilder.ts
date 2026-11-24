@@ -354,6 +354,46 @@ function assignBuildingsToSixVinconsSlots(ktxNodes: CampusKtxNode[]): MappedDorm
   return slots;
 }
 
+function parseRoomBayNumber(room: CampusRoomNode): number | null {
+  const raw = (room.roomNorm || room.roomRaw || '').trim();
+  const m = raw.match(/(\d+)/);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) && n >= 1 ? n : null;
+}
+
+function assignFixedRoomBays(
+  wingRooms: CampusRoomNode[],
+  minSlots: number
+): { assigned: { room: CampusRoomNode; slotIdx: number }[]; slotCount: number } {
+  const used = new Set<number>();
+  const assigned: { room: CampusRoomNode; slotIdx: number }[] = [];
+  let maxSlot = minSlots - 1;
+  const unplaced: CampusRoomNode[] = [];
+
+  wingRooms.forEach(room => {
+    const bayNum = parseRoomBayNumber(room);
+    if (bayNum !== null && bayNum <= 30 && !used.has(bayNum - 1)) {
+      const idx = bayNum - 1;
+      used.add(idx);
+      if (idx > maxSlot) maxSlot = idx;
+      assigned.push({ room, slotIdx: idx });
+    } else {
+      unplaced.push(room);
+    }
+  });
+
+  let cursor = 0;
+  unplaced.forEach(room => {
+    while (used.has(cursor)) cursor++;
+    used.add(cursor);
+    if (cursor > maxSlot) maxSlot = cursor;
+    assigned.push({ room, slotIdx: cursor });
+  });
+
+  return { assigned, slotCount: Math.max(minSlots, maxSlot + 1) };
+}
+
 export function buildVinconsCampusScene(
   ktxNodes: CampusKtxNode[],
   colorMode: CampusColorMode,
@@ -362,7 +402,9 @@ export function buildVinconsCampusScene(
   maxAnisotropy: number,
   castShadows: boolean,
   blueprint: CampusBlueprintConfig,
-  assignedOnly = false
+  assignedOnly = false,
+  showFunctionalRooms = true,
+  showHiddenRooms = true
 ): CampusBuildResult {
   const group = new THREE.Group();
   group.name = 'vincons-ktx-campus-root';
@@ -1011,9 +1053,14 @@ export function buildVinconsCampusScene(
       southRooms = southBld.rooms;
     }
 
+    const southPlan = assignFixedRoomBays(southRooms, 15);
+    const northPlan = isDoubleSided
+      ? assignFixedRoomBays(northRooms, 15)
+      : { assigned: [], slotCount: 0 };
+
     const maxRoomsPerSide = isEmptyPlaceholder
       ? 15
-      : Math.max(10, southRooms.length, northRooms.length);
+      : Math.max(15, southPlan.slotCount, northPlan.slotCount);
 
     const roomPitch = Math.min(3.15, DORM_MAX_SPAN_W / Math.max(1, maxRoomsPerSide));
     const roomW = Math.max(1.75, roomPitch - 0.16);
@@ -1124,15 +1171,22 @@ export function buildVinconsCampusScene(
 
     const renderRoomMesh = (
       room: CampusRoomNode,
-      colIdx: number,
-      rowCount: number,
+      slotIdx: number,
+      totalSlots: number,
       facing: 'south' | 'north'
     ) => {
-      const startX = -((rowCount - 1) * roomPitch) / 2;
-      const rx = startX + colIdx * roomPitch;
+      // Respect layer toggles while preserving fixed physical bay coordinates of neighboring rooms
+      if (!room.isVisible && !showHiddenRooms) return;
+      if (room.roomType === 'functional' && room.isVisible && !showFunctionalRooms) return;
+
+      // Official Vincons direction: P.1 starts at East (+X, nearest Main Gate & Spine Road) -> P.15 at West (-X)
+      const eastStartX = ((totalSlots - 1) * roomPitch) / 2;
+      const rx = eastStartX - slotIdx * roomPitch;
       const rz = facing === 'south' ? southRoomZ : northRoomZ;
       const dir = facing === 'south' ? 1 : -1;
       const spec = resolveRoomColor(room, colorMode, unitFilter, theme, assignedOnly);
+      const isHiddenRoom = !room.isVisible;
+      const isFuncRoom = room.roomType === 'functional';
 
       const bodyMat = new THREE.MeshStandardMaterial({
         color: spec.color,
@@ -1147,19 +1201,21 @@ export function buildVinconsCampusScene(
 
       const bodyMesh = new THREE.Mesh(roomBodyGeo, bodyMat);
       bodyMesh.position.set(rx, FLOOR_SLAB_H + ROOM_H / 2, rz);
-      bodyMesh.castShadow = castShadows;
+      bodyMesh.castShadow = castShadows && !isHiddenRoom;
       bodyMesh.receiveShadow = true;
       bodyMesh.userData = { type: 'room', roomKey: room.key };
       bldGroup.add(bodyMesh);
       hitTargets.push(bodyMesh);
 
-      const frontFaceZ = rz + dir * (wingRoomD / 2 + 0.02);
-      pushLocalInst(doorMatrices, rx - dir * roomW * 0.22, FLOOR_SLAB_H + 0.8, frontFaceZ);
-      pushLocalInst(windowMatrices, rx + dir * roomW * 0.2, FLOOR_SLAB_H + 1.38, frontFaceZ);
-      // Wall-mounted AC outdoor condenser unit per room (cục nóng điều hòa)
-      pushLocalInst(acUnitMatrices, rx + dir * roomW * 0.26, FLOOR_SLAB_H + 0.42, frontFaceZ + dir * 0.15);
-      if (!isDoubleSided) {
-        pushLocalInst(windowMatrices, rx, FLOOR_SLAB_H + 1.38, rz - wingRoomD / 2 - 0.02);
+      if (!isHiddenRoom) {
+        const frontFaceZ = rz + dir * (wingRoomD / 2 + 0.02);
+        pushLocalInst(doorMatrices, rx - dir * roomW * 0.22, FLOOR_SLAB_H + 0.8, frontFaceZ);
+        pushLocalInst(windowMatrices, rx + dir * roomW * 0.2, FLOOR_SLAB_H + 1.38, frontFaceZ);
+        // Wall-mounted AC outdoor condenser unit per room (cục nóng điều hòa)
+        pushLocalInst(acUnitMatrices, rx + dir * roomW * 0.26, FLOOR_SLAB_H + 0.42, frontFaceZ + dir * 0.15);
+        if (!isDoubleSided) {
+          pushLocalInst(windowMatrices, rx, FLOOR_SLAB_H + 1.38, rz - wingRoomD / 2 - 0.02);
+        }
       }
 
       const stripMat = new THREE.MeshStandardMaterial({
@@ -1173,16 +1229,31 @@ export function buildVinconsCampusScene(
       strip.position.set(rx, FLOOR_SLAB_H + ROOM_H - 0.14, rz + dir * (wingRoomD / 2 + 0.06));
       bldGroup.add(strip);
 
-      const ratioText = `${room.occupied}/${room.capacity}`;
-      const pKey = `${room.roomLabel}|${ratioText}`;
+      const shortNote = room.ghiChu ? room.ghiChu.slice(0, 12) : '';
+      const ratioText = isHiddenRoom
+        ? 'Đang ẩn'
+        : isFuncRoom
+          ? shortNote || 'Chức năng'
+          : `${room.occupied}/${room.capacity}`;
+      const plaqueBorder = isHiddenRoom
+        ? '#64748b'
+        : isFuncRoom
+          ? '#a78bfa'
+          : room.overflow > 0
+            ? '#f43f5e'
+            : room.vacant > 0
+              ? '#10b981'
+              : '#f59e0b';
+      const plaqueBg = isHiddenRoom ? '#1e293b' : isFuncRoom ? '#1e1038' : '#0b1220';
+      const pKey = `${room.roomLabel}|${ratioText}|${plaqueBorder}|${plaqueBg}`;
       let pMat = roomPlaqueMatCache.get(pKey);
       if (!pMat) {
         const tex = createPlaqueTexture(
           room.roomLabel,
           {
             subtext: ratioText,
-            bg: '#0b1220',
-            border: room.overflow > 0 ? '#f43f5e' : room.vacant > 0 ? '#10b981' : '#f59e0b',
+            bg: plaqueBg,
+            border: plaqueBorder,
             width: 192,
             height: 88,
             fontSize: 30,
@@ -1190,7 +1261,13 @@ export function buildVinconsCampusScene(
           },
           plaqueTexCache
         );
-        pMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.4, metalness: 0.1 });
+        pMat = new THREE.MeshStandardMaterial({
+          map: tex,
+          roughness: 0.4,
+          metalness: 0.1,
+          transparent: isHiddenRoom,
+          opacity: isHiddenRoom ? 0.72 : 1,
+        });
         roomPlaqueMatCache.set(pKey, pMat);
       }
       const rPlaque = new THREE.Mesh(roomPlaqueGeo, pMat);
@@ -1218,10 +1295,10 @@ export function buildVinconsCampusScene(
     if (isEmptyPlaceholder) {
       // Architectural 1-story full-depth blueprint rows (15 rooms/dãy × 6 dãy = 90 rooms · 1.800 chỗ)
       const placeholderCount = 15;
-      const startX = -((placeholderCount - 1) * roomPitch) / 2;
+      const eastStartX = ((placeholderCount - 1) * roomPitch) / 2;
       const rz = southRoomZ;
       for (let i = 0; i < placeholderCount; i++) {
-        const rx = startX + i * roomPitch;
+        const rx = eastStartX - i * roomPitch;
         const body = new THREE.Mesh(roomBodyGeo, emptyShellMat);
         body.position.set(rx, FLOOR_SLAB_H + ROOM_H / 2, rz);
         body.castShadow = castShadows;
@@ -1234,11 +1311,11 @@ export function buildVinconsCampusScene(
         pushLocalInst(windowMatrices, rx, FLOOR_SLAB_H + 1.38, rz - wingRoomD / 2 - 0.02);
       }
     } else {
-      southRooms.forEach((room, rIdx) => {
-        renderRoomMesh(room, rIdx, southRooms.length, 'south');
+      southPlan.assigned.forEach(({ room, slotIdx }) => {
+        renderRoomMesh(room, slotIdx, maxRoomsPerSide, 'south');
       });
-      northRooms.forEach((room, rIdx) => {
-        renderRoomMesh(room, rIdx, northRooms.length, 'north');
+      northPlan.assigned.forEach(({ room, slotIdx }) => {
+        renderRoomMesh(room, slotIdx, maxRoomsPerSide, 'north');
       });
 
       const registerVisual = (b: CampusBuildingNode, zOffset: number) => {
@@ -1260,6 +1337,14 @@ export function buildVinconsCampusScene(
     const occSum = activeBlds.reduce((s, b) => s + b.totalOccupied, 0);
     const capSum = activeBlds.reduce((s, b) => s + b.totalCapacity, 0);
     const vacSum = Math.max(0, capSum - occSum);
+    const funcSum = activeBlds.reduce(
+      (s, b) => s + b.rooms.filter(r => r.isVisible && r.roomType === 'functional').length,
+      0
+    );
+    const hiddenSum = activeBlds.reduce(
+      (s, b) => s + b.rooms.filter(r => !r.isVisible).length,
+      0
+    );
     const primaryBld = southBld || northBld;
     const legendTag = slot.slotIndex === 0 ? '(1)(2)' : '(1)';
     const signTitle = primaryBld
@@ -1267,8 +1352,14 @@ export function buildVinconsCampusScene(
         ? `Dãy ${slot.slotIndex + 1} · ${legendTag}`
         : `${primaryBld.day} · ${legendTag}`
       : slot.labelOverride;
+    const extraTags = [
+      funcSum > 0 ? `${funcSum} CN` : null,
+      hiddenSum > 0 ? `${hiddenSum} ẩn` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
     const signSub = primaryBld
-      ? `${occSum}/${capSum} chỗ · Trống ${vacSum}`
+      ? `${occSum}/${capSum} chỗ · ${extraTags || `Trống ${vacSum}`}`
       : slot.slotIndex === 0
         ? 'Khu Nam (1) & Nữ (2) · 15 phòng'
         : 'Nhà ở công nhân (1) · 15 phòng';

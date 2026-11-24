@@ -58,6 +58,7 @@ interface Ktx3DViewportProps {
   focusedRoomKey: string | null;
   hideRoofs: boolean;
   showFunctionalRooms: boolean;
+  showHiddenRooms: boolean;
   activeRoom: CampusRoomNode | null;
   activeRoomBeds: RoomBedSlot[];
   selectedBedId: string | null;
@@ -166,6 +167,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     focusedRoomKey,
     hideRoofs,
     showFunctionalRooms,
+    showHiddenRooms,
     activeRoom,
     activeRoomBeds,
     selectedBedId,
@@ -217,6 +219,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     focusedRoomKey,
     hideRoofs,
     showFunctionalRooms,
+    showHiddenRooms,
     selectedBedId,
     bedTierFilter,
   });
@@ -230,6 +233,7 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     focusedRoomKey,
     hideRoofs,
     showFunctionalRooms,
+    showHiddenRooms,
     selectedBedId,
     bedTierFilter,
   };
@@ -1073,10 +1077,12 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
         eng.maxAnisotropy,
         !eng.isSoftwareGl,
         blueprintConfig,
-        stateRef.current.assignedOnlyFilter
+        stateRef.current.assignedOnlyFilter,
+        showFunctionalRooms,
+        showHiddenRooms
       );
       built.roofsGroup.visible = !stateRef.current.hideRoofs;
-      built.functionalGroup.visible = stateRef.current.showFunctionalRooms;
+      built.functionalGroup.visible = showFunctionalRooms;
 
       eng.contentRoot.add(built.group);
       eng.roofsGroup = built.roofsGroup;
@@ -1189,6 +1195,8 @@ const Ktx3DViewport = forwardRef<Ktx3DViewportHandle, Ktx3DViewportProps>(functi
     activeRoomBeds,
     sceneTheme,
     showBedNames,
+    showFunctionalRooms,
+    showHiddenRooms,
     restoreSeq,
   ]);
 

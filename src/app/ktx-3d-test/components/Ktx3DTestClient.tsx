@@ -62,10 +62,12 @@ import {
   fetchFacilitiesList,
   formatRoomDisplay,
   getRoomCapacity,
+  invalidateFacilitiesCache,
   normalizeRoomLabel,
   type FacilityItem,
   type RoomCapacityMap,
 } from '@/lib/facilityCapacity';
+import { invalidateKtxStructureCache } from '@/lib/ktxStructure';
 import {
   fetchRoomLabelsAuthoritative,
   getRoomGenderInfo,
@@ -78,6 +80,7 @@ import {
   normalizeDayKey,
   normalizeKtxCompact,
   releaseBedsForWorkers,
+  syncBedsForFacilityRoom,
 } from '@/lib/bedSync';
 import { createClient } from '@/lib/supabase/client';
 import Ktx3DViewport, { type Ktx3DViewportHandle } from './Ktx3DViewport';
@@ -167,6 +170,7 @@ export default function Ktx3DTestClient() {
   const [focusedRoomKey, setFocusedRoomKey] = useState<string | null>(null);
   const [hideRoofs, setHideRoofs] = useState(false);
   const [showFunctionalRooms, setShowFunctionalRooms] = useState(true);
+  const [showHiddenRooms, setShowHiddenRooms] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Operational Alert Bar cycling state
@@ -187,6 +191,7 @@ export default function Ktx3DTestClient() {
   // Safe Operational Mode (Default LOCKED Read-only) + Admin Blueprint Editor
   const [editModeUnlocked, setEditModeUnlocked] = useState(false);
   const [bedOpBusy, setBedOpBusy] = useState(false);
+  const [roomStatusBusy, setRoomStatusBusy] = useState(false);
   const [blueprintEditorOpen, setBlueprintEditorOpen] = useState(false);
   const [savingBlueprint, setSavingBlueprint] = useState(false);
 
@@ -408,29 +413,21 @@ export default function Ktx3DTestClient() {
 
   // Build hierarchical KTX -> Building -> Room model + Functional Areas + Unit/Platoon catalogs from real data
   const { allKtxNodes, allRoomsFlat, roomByKeyMap, xrayOptions } = useMemo(() => {
-    const accFacilities = (facilities || []).filter(
-      f => (f.room_type || 'accommodation') === 'accommodation' && f.is_visible !== false
-    );
-    const funcFacilities = (facilities || []).filter(
-      f => f.room_type === 'functional' && f.is_visible !== false
-    );
     const facilityByKey = new Map<string, FacilityItem>();
     const functionalAreasByKtx = new Map<string, FunctionalAreaNode[]>();
-
-    const hiddenKeys = new Set<string>();
-    (facilities || []).forEach(f => {
-      if ((f.room_type || 'accommodation') !== 'accommodation' || f.is_visible === false) {
-        const k = (f.ktx || '').trim();
-        const b = (f.day || '').trim();
-        const r = normalizeRoomLabel(f.phong_khu_vuc || '');
-        if (k && b && r) hiddenKeys.add(`${k}||${b}||${r}`);
-      }
-    });
 
     const ktxBuildingsMap = new Map<string, Map<string, Map<string, string>>>();
     const roomWorkersMap = new Map<string, Worker[]>();
     const globalPlatoonCounts = new Map<string, number>();
     const globalUnitCounts = new Map<string, number>();
+
+    const isStandaloneFunctionalFacility = (f: FacilityItem) => {
+      if ((f.room_type || 'accommodation') !== 'functional') return false;
+      const d = (f.day || '').trim();
+      const name = (f.phong_khu_vuc || '').trim();
+      if (!d) return true;
+      return /nha\s*an|nhà\s*ăn|bep|bếp|can\s*tin|căn\s*tin|căng\s*teen|cang\s*teen/i.test(name);
+    };
 
     const ensureRoomSlot = (ktx: string, day: string, rawRoom: string) => {
       const k = ktx.trim();
@@ -438,7 +435,6 @@ export default function Ktx3DTestClient() {
       const norm = normalizeRoomLabel(rawRoom);
       if (!k || !d || !norm) return null;
       const fullKey = `${k}||${d}||${norm}`;
-      if (hiddenKeys.has(fullKey)) return null;
 
       let bMap = ktxBuildingsMap.get(k);
       if (!bMap) {
@@ -454,31 +450,34 @@ export default function Ktx3DTestClient() {
       return fullKey;
     };
 
-    accFacilities.forEach(f => {
+    (facilities || []).forEach((f, idx) => {
+      if (isStandaloneFunctionalFacility(f)) {
+        if (f.is_visible === false) return;
+        const k = (f.ktx || '').trim();
+        const d = (f.day || '').trim();
+        const name = (f.phong_khu_vuc || '').trim() || `Khu chức năng ${idx + 1}`;
+        if (!k) return;
+        if (!ktxBuildingsMap.has(k)) {
+          ktxBuildingsMap.set(k, new Map());
+        }
+        const list = functionalAreasByKtx.get(k) || [];
+        list.push({
+          key: `${k}||${d}||func||${f.id ?? idx}`,
+          ktx: k,
+          day: d,
+          name,
+          ghiChu: (f.ghi_chu || '').trim(),
+          facility: f,
+        });
+        functionalAreasByKtx.set(k, list);
+        return;
+      }
+
+      // Keep ALL in-block rooms (accommodation, in-block functional, AND hidden rooms) anchored to their physical Dãy & bay!
       const fullKey = ensureRoomSlot(f.ktx || '', f.day || '', f.phong_khu_vuc || '');
       if (fullKey && !facilityByKey.has(fullKey)) {
         facilityByKey.set(fullKey, f);
       }
-    });
-
-    funcFacilities.forEach((f, idx) => {
-      const k = (f.ktx || '').trim();
-      const d = (f.day || '').trim();
-      const name = (f.phong_khu_vuc || '').trim() || `Khu chức năng ${idx + 1}`;
-      if (!k) return;
-      if (!ktxBuildingsMap.has(k)) {
-        ktxBuildingsMap.set(k, new Map());
-      }
-      const list = functionalAreasByKtx.get(k) || [];
-      list.push({
-        key: `${k}||${d}||func||${f.id ?? idx}`,
-        ktx: k,
-        day: d,
-        name,
-        ghiChu: (f.ghi_chu || '').trim(),
-        facility: f,
-      });
-      functionalAreasByKtx.set(k, list);
     });
 
     (workers || []).forEach(w => {
@@ -518,8 +517,17 @@ export default function Ktx3DTestClient() {
 
         const rooms: CampusRoomNode[] = roomEntries.map(([roomNorm, roomRaw]) => {
           const key = `${ktx}||${day}||${roomNorm}`;
+          const fac = facilityByKey.get(key) || null;
+          const roomType: 'accommodation' | 'functional' =
+            fac?.room_type === 'functional' ? 'functional' : 'accommodation';
+          const isVisible = fac ? fac.is_visible !== false : true;
+          const ghiChu = (fac?.ghi_chu || '').trim();
+
           const rWorkers = roomWorkersMap.get(key) || [];
-          const cap = getRoomCapacity(capacities, ktx, day, roomRaw) || DEFAULT_ROOM_CAPACITY;
+          const cap =
+            roomType === 'functional'
+              ? 0
+              : getRoomCapacity(capacities, ktx, day, roomRaw) || DEFAULT_ROOM_CAPACITY;
           const occupied = rWorkers.length;
           const adminG =
             roomGenderMap[`${ktx}||${day}||${roomRaw}`] ||
@@ -566,10 +574,13 @@ export default function Ktx3DTestClient() {
             roomRaw,
             roomNorm,
             roomLabel: formatRoomDisplay(roomRaw),
+            roomType,
+            isVisible,
+            ghiChu,
             capacity: cap,
             occupied,
-            vacant: Math.max(0, cap - occupied),
-            overflow: Math.max(0, occupied - cap),
+            vacant: roomType === 'accommodation' && isVisible ? Math.max(0, cap - occupied) : 0,
+            overflow: roomType === 'accommodation' && isVisible ? Math.max(0, occupied - cap) : 0,
             fillRate: cap > 0 ? occupied / cap : 0,
             genderInfo,
             workers: rWorkers,
@@ -579,14 +590,14 @@ export default function Ktx3DTestClient() {
             unregisteredTamTruCount,
             unassignedBedCount,
             hasWriteAccess,
-            facility: facilityByKey.get(key) || null,
+            facility: fac,
           };
           flatRooms.push(roomNode);
           byKey.set(key, roomNode);
           return roomNode;
         });
 
-        // Attach functional rooms (e.g. Nhà ăn 1 in Dãy 1 KTX 1) directly to their parent building!
+        // Attach standalone functional areas (e.g. Nhà ăn 1 in Dãy 1) directly to their parent building
         const normBldDay = normalizeDayKey(day);
         const bldFuncs = ktxAllFuncs.filter(f => {
           if (!f.day) return false;
@@ -597,15 +608,17 @@ export default function Ktx3DTestClient() {
           return false;
         });
 
+        const activeAccRooms = rooms.filter(r => r.roomType === 'accommodation' && r.isVisible);
+
         return {
           key: `${ktx}||${day}`,
           ktx,
           day,
           rooms,
           functionalAreas: bldFuncs,
-          totalCapacity: rooms.reduce((s, r) => s + r.capacity, 0),
-          totalOccupied: rooms.reduce((s, r) => s + r.occupied, 0),
-          unregisteredTamTruCount: rooms.reduce((s, r) => s + r.unregisteredTamTruCount, 0),
+          totalCapacity: activeAccRooms.reduce((s, r) => s + r.capacity, 0),
+          totalOccupied: activeAccRooms.reduce((s, r) => s + r.occupied, 0),
+          unregisteredTamTruCount: activeAccRooms.reduce((s, r) => s + r.unregisteredTamTruCount, 0),
           hasWriteAccess: isAdmin || canWriteBlock(day, ktx),
         };
       });
@@ -617,7 +630,10 @@ export default function Ktx3DTestClient() {
         ktx,
         buildings,
         functionalAreas: standaloneFunctionalAreas,
-        totalRooms: buildings.reduce((s, b) => s + b.rooms.length, 0),
+        totalRooms: buildings.reduce(
+          (s, b) => s + b.rooms.filter(r => r.roomType === 'accommodation' && r.isVisible).length,
+          0
+        ),
         totalCapacity: buildings.reduce((s, b) => s + b.totalCapacity, 0),
         totalOccupied: buildings.reduce((s, b) => s + b.totalOccupied, 0),
       };
@@ -912,6 +928,151 @@ export default function Ktx3DTestClient() {
     setViewLevel('room');
   }, []);
 
+  const handleSelectRoomOnCampus = useCallback(
+    (room: CampusRoomNode) => {
+      if (room.roomType === 'accommodation' && room.isVisible) {
+        handleEnterRoom(room);
+        return;
+      }
+      // Functional rooms & hidden rooms open the quick inspector bar & focus camera smoothly
+      setFocusedRoomKey(room.key);
+      setHoverInfo(null);
+      window.setTimeout(() => {
+        setFocusRoomReq(prev => ({ roomKey: room.key, seq: (prev?.seq || 0) + 1 }));
+      }, 30);
+    },
+    [handleEnterRoom]
+  );
+
+  const actorLabel = currentUser?.name || currentUser?.email || 'Quản trị viên';
+
+  const handleToggleRoomVisibilityIn3D = useCallback(
+    async (room: CampusRoomNode) => {
+      if (!room.hasWriteAccess || !room.facility?.id) {
+        toast.error('Bạn không có quyền thay đổi trạng thái ẩn/hiện phòng này.');
+        return;
+      }
+      const nextVisible = !room.isVisible;
+      if (!nextVisible && room.occupied > 0) {
+        toast.warning(
+          `${room.day} · ${room.roomLabel} đang có ${room.occupied} công nhân lưu trú. Vui lòng chuyển công nhân trước hoặc ẩn tại trang Cơ sở vật chất.`
+        );
+        return;
+      }
+      setRoomStatusBusy(true);
+      try {
+        const supabase = createClient();
+        const { error } = await supabase
+          .from('facilities')
+          .update({ is_visible: nextVisible })
+          .eq('id', room.facility.id);
+        if (error) {
+          toast.error(`Không thể cập nhật hiển thị phòng: ${error.message}`);
+          return;
+        }
+        await syncBedsForFacilityRoom(supabase, {
+          ...room.facility,
+          is_visible: nextVisible,
+        });
+        try {
+          addLog(
+            actorLabel,
+            'FACILITY_UPDATE',
+            `${nextVisible ? 'Hiện' : 'Ẩn'} phòng từ bản đồ 3D: ${room.ktx} · ${room.day} · ${room.roomRaw}`
+          );
+        } catch {}
+        invalidateFacilitiesCache();
+        invalidateKtxStructureCache();
+        const freshFacs = await fetchFacilitiesList(true);
+        setFacilities(freshFacs);
+        setCapacities(buildRoomCapacityMapFromFacilities(freshFacs));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('ktx_facilities_updated'));
+        }
+        if (!nextVisible && viewLevel === 'room' && activeRoomKey === room.key) {
+          setViewLevel('campus');
+          setActiveRoomKey(null);
+          setFocusedRoomKey(room.key);
+        }
+        toast.success(
+          nextVisible
+            ? `Đã hiện lại ${room.day} · ${room.roomLabel} trên sơ đồ`
+            : `Đã ẩn ${room.day} · ${room.roomLabel} khỏi sơ đồ hoạt động`
+        );
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Lỗi cập nhật trạng thái hiển thị phòng');
+      } finally {
+        setRoomStatusBusy(false);
+      }
+    },
+    [actorLabel, addLog, viewLevel, activeRoomKey]
+  );
+
+  const handleToggleRoomTypeIn3D = useCallback(
+    async (room: CampusRoomNode) => {
+      if (!room.hasWriteAccess || !room.facility?.id) {
+        toast.error('Bạn không có quyền thay đổi loại phòng này.');
+        return;
+      }
+      const nextType: 'accommodation' | 'functional' =
+        room.roomType === 'functional' ? 'accommodation' : 'functional';
+      if (nextType === 'functional' && room.occupied > 0) {
+        toast.error(
+          `Không thể đổi ${room.day} · ${room.roomLabel} sang Phòng chức năng vì đang có ${room.occupied} công nhân lưu trú.`
+        );
+        return;
+      }
+      setRoomStatusBusy(true);
+      try {
+        const supabase = createClient();
+        const { error } = await supabase
+          .from('facilities')
+          .update({ room_type: nextType })
+          .eq('id', room.facility.id);
+        if (error) {
+          toast.error(`Không thể đổi loại phòng: ${error.message}`);
+          return;
+        }
+        await syncBedsForFacilityRoom(supabase, {
+          ...room.facility,
+          room_type: nextType,
+        });
+        try {
+          addLog(
+            actorLabel,
+            'FACILITY_UPDATE',
+            `Đổi loại phòng từ bản đồ 3D: ${room.ktx} · ${room.day} · ${room.roomRaw} -> ${
+              nextType === 'functional' ? 'Phòng chức năng' : 'Phòng ở'
+            }`
+          );
+        } catch {}
+        invalidateFacilitiesCache();
+        invalidateKtxStructureCache();
+        const freshFacs = await fetchFacilitiesList(true);
+        setFacilities(freshFacs);
+        setCapacities(buildRoomCapacityMapFromFacilities(freshFacs));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('ktx_facilities_updated'));
+        }
+        if (nextType === 'functional' && viewLevel === 'room' && activeRoomKey === room.key) {
+          setViewLevel('campus');
+          setActiveRoomKey(null);
+          setFocusedRoomKey(room.key);
+        }
+        toast.success(
+          nextType === 'functional'
+            ? `Đã chuyển ${room.day} · ${room.roomLabel} thành Phòng chức năng`
+            : `Đã chuyển ${room.day} · ${room.roomLabel} về Phòng ở`
+        );
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Lỗi cập nhật loại phòng');
+      } finally {
+        setRoomStatusBusy(false);
+      }
+    },
+    [actorLabel, addLog, viewLevel, activeRoomKey]
+  );
+
   const handleBackToCampus = useCallback(() => {
     setViewLevel('campus');
     setActiveRoomKey(null);
@@ -1072,7 +1233,6 @@ export default function Ktx3DTestClient() {
     toast.success('Đã khôi phục bố cục sa bàn 3D theo bản vẽ Vincons');
   }, [isAdmin, blueprintConfig]);
 
-  const actorLabel = currentUser?.name || currentUser?.email || 'Quản trị viên';
 
   const ensureBedDbRow = useCallback(
     async (slot: RoomBedSlot, room: CampusRoomNode): Promise<string | null> => {
@@ -1474,42 +1634,59 @@ export default function Ktx3DTestClient() {
     setZoomReq(prev => ({ factor, seq: (prev?.seq || 0) + 1 }));
   }, []);
 
-  // Adjacent room navigation inside Room 3D view
+  // Adjacent room navigation inside Room 3D view (only active accommodation rooms)
+  const visibleAccommodationRooms = useMemo(
+    () => visibleRoomsFlat.filter(r => r.roomType === 'accommodation' && r.isVisible),
+    [visibleRoomsFlat]
+  );
+
   const activeRoomIndex = useMemo(() => {
     if (!activeRoomKey) return -1;
-    return visibleRoomsFlat.findIndex(r => r.key === activeRoomKey);
-  }, [activeRoomKey, visibleRoomsFlat]);
+    return visibleAccommodationRooms.findIndex(r => r.key === activeRoomKey);
+  }, [activeRoomKey, visibleAccommodationRooms]);
 
   const handleStepRoom = useCallback(
     (dir: -1 | 1) => {
-      if (visibleRoomsFlat.length === 0 || activeRoomIndex < 0) return;
-      const nextIdx = (activeRoomIndex + dir + visibleRoomsFlat.length) % visibleRoomsFlat.length;
-      handleEnterRoom(visibleRoomsFlat[nextIdx]);
+      if (visibleAccommodationRooms.length === 0 || activeRoomIndex < 0) return;
+      const nextIdx =
+        (activeRoomIndex + dir + visibleAccommodationRooms.length) %
+        visibleAccommodationRooms.length;
+      handleEnterRoom(visibleAccommodationRooms[nextIdx]);
     },
-    [visibleRoomsFlat, activeRoomIndex, handleEnterRoom]
+    [visibleAccommodationRooms, activeRoomIndex, handleEnterRoom]
   );
 
   // Aggregate summary stats + Operational Alert lists
   const campusTotals = useMemo(() => {
     const rooms = visibleKtxNodes.reduce((s, n) => s + n.totalRooms, 0);
-    const functionalCount = visibleKtxNodes.reduce(
+    const inBlockFunctionalCount = visibleRoomsFlat.filter(
+      r => r.isVisible && r.roomType === 'functional'
+    ).length;
+    const standaloneFunctionalCount = visibleKtxNodes.reduce(
       (s, n) =>
         s +
         n.functionalAreas.length +
         n.buildings.reduce((bs, b) => bs + b.functionalAreas.length, 0),
       0
     );
+    const functionalCount = inBlockFunctionalCount + standaloneFunctionalCount;
+    const hiddenCount = visibleRoomsFlat.filter(r => !r.isVisible).length;
+    const activeAccRooms = visibleRoomsFlat.filter(
+      r => r.roomType === 'accommodation' && r.isVisible
+    );
     const occupied = visibleKtxNodes.reduce((s, n) => s + n.totalOccupied, 0);
     const capacity = visibleKtxNodes.reduce((s, n) => s + n.totalCapacity, 0);
     const vacant = Math.max(0, capacity - occupied);
-    const overloaded = visibleRoomsFlat.filter(r => r.occupied > r.capacity).length;
-    const unregisteredTamTru = visibleRoomsFlat.reduce((s, r) => s + r.unregisteredTamTruCount, 0);
+    const overloaded = activeAccRooms.filter(r => r.occupied > r.capacity).length;
+    const unregisteredTamTru = activeAccRooms.reduce((s, r) => s + r.unregisteredTamTruCount, 0);
     const xrayMatchedRooms = unitXRayFilter
-      ? visibleRoomsFlat.filter(r => getRoomUnitMatchCount(r, unitXRayFilter) > 0).length
+      ? activeAccRooms.filter(r => getRoomUnitMatchCount(r, unitXRayFilter) > 0).length
       : 0;
     return {
       rooms,
       functionalCount,
+      inBlockFunctionalCount,
+      hiddenCount,
       occupied,
       capacity,
       vacant,
@@ -1520,9 +1697,8 @@ export default function Ktx3DTestClient() {
   }, [visibleKtxNodes, visibleRoomsFlat, unitXRayFilter]);
 
   const alertLists = useMemo(() => {
-    const scopeRooms = assignedOnlyFilter
-      ? visibleRoomsFlat.filter(r => r.hasWriteAccess)
-      : visibleRoomsFlat;
+    const activeAcc = visibleRoomsFlat.filter(r => r.roomType === 'accommodation' && r.isVisible);
+    const scopeRooms = assignedOnlyFilter ? activeAcc.filter(r => r.hasWriteAccess) : activeAcc;
     return {
       overloaded: scopeRooms.filter(r => r.occupied > r.capacity),
       mixed_gender: scopeRooms.filter(r => r.genderInfo.gender === 'mixed'),
@@ -1664,6 +1840,7 @@ export default function Ktx3DTestClient() {
           focusedRoomKey={focusedRoomKey}
           hideRoofs={hideRoofs}
           showFunctionalRooms={showFunctionalRooms}
+          showHiddenRooms={showHiddenRooms}
           activeRoom={activeRoom}
           activeRoomBeds={activeRoomBeds}
           selectedBedId={selectedBed?.id || null}
@@ -1674,7 +1851,7 @@ export default function Ktx3DTestClient() {
           focusBuildingRequest={focusBuildingReq}
           focusBedRequest={focusBedReq}
           zoomRequest={zoomReq}
-          onSelectRoom={handleEnterRoom}
+          onSelectRoom={handleSelectRoomOnCampus}
           onSelectBuilding={handleSelectBuildingSignboard}
           onSelectBed={setSelectedBed}
           onHoverChange={setHoverInfo}
@@ -1752,7 +1929,11 @@ export default function Ktx3DTestClient() {
               <p className={`text-[11px] font-tabular mt-0.5 ${hudMuted}`}>
                 {viewLevel === 'campus' ? (
                   <>
-                    {campusTotals.rooms} phòng ·{' '}
+                    {campusTotals.rooms} phòng ở
+                    {campusTotals.functionalCount > 0
+                      ? ` · ${campusTotals.functionalCount} chức năng`
+                      : ''}
+                    {campusTotals.hiddenCount > 0 ? ` · ${campusTotals.hiddenCount} đang ẩn` : ''} ·{' '}
                     <strong className={isLight ? 'text-slate-900' : 'text-slate-200'}>
                       {campusTotals.occupied.toLocaleString('vi-VN')}/
                       {campusTotals.capacity.toLocaleString('vi-VN')}
@@ -1858,6 +2039,32 @@ export default function Ktx3DTestClient() {
                     <Wrench size={13} />
                     <span className="hidden sm:inline">Thiết bị</span>
                   </button>
+
+                  {activeRoom?.hasWriteAccess && activeRoom.facility?.id && (
+                    <>
+                      <button
+                        type="button"
+                        disabled={roomStatusBusy}
+                        onClick={() => handleToggleRoomTypeIn3D(activeRoom)}
+                        title="Chuyển phòng này thành Phòng chức năng (không tính giường công nhân)"
+                        className={`inline-flex items-center gap-1 px-2 py-1.5 rounded-xl border text-xs font-semibold transition-colors disabled:opacity-50 ${hudSubtleBtn}`}
+                      >
+                        <Building2 size={13} className="text-violet-400" />
+                        <span className="hidden md:inline">Chức năng</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={roomStatusBusy}
+                        onClick={() => handleToggleRoomVisibilityIn3D(activeRoom)}
+                        title="Ẩn phòng này khỏi sơ đồ hoạt động & báo cáo sức chứa"
+                        className={`inline-flex items-center gap-1 px-2 py-1.5 rounded-xl border text-xs font-semibold transition-colors disabled:opacity-50 ${hudSubtleBtn}`}
+                      >
+                        <EyeOff size={13} />
+                        <span className="hidden md:inline">Ẩn phòng</span>
+                      </button>
+                    </>
+                  )}
                 </>
               )}
 
@@ -2047,11 +2254,27 @@ export default function Ktx3DTestClient() {
                                 onClick={() => handleLocateRoomOnCampus(room)}
                                 className="flex-1 text-left min-w-0"
                               >
-                                <p className="text-xs font-bold truncate">
-                                  {room.ktx} · {room.day} · {room.roomLabel}
+                                <p className="text-xs font-bold truncate flex items-center gap-1.5">
+                                  <span>
+                                    {room.ktx} · {room.day} · {room.roomLabel}
+                                  </span>
+                                  {room.roomType === 'functional' && (
+                                    <span className="px-1 py-0.2 rounded bg-violet-500/20 text-violet-400 text-[10px] font-semibold">
+                                      CN
+                                    </span>
+                                  )}
+                                  {!room.isVisible && (
+                                    <span className="px-1 py-0.2 rounded bg-slate-500/25 text-slate-400 text-[10px] font-semibold">
+                                      Ẩn
+                                    </span>
+                                  )}
                                 </p>
                                 <p className={`text-[11px] font-tabular truncate ${hudMuted}`}>
-                                  {room.occupied}/{room.capacity} người · {room.genderInfo.label}
+                                  {!room.isVisible
+                                    ? 'Đang ẩn khỏi sơ đồ hoạt động'
+                                    : room.roomType === 'functional'
+                                      ? room.ghiChu || 'Phòng chức năng'
+                                      : `${room.occupied}/${room.capacity} người · ${room.genderInfo.label}`}
                                 </p>
                               </button>
                               <button
@@ -2059,11 +2282,13 @@ export default function Ktx3DTestClient() {
                                 onClick={() => {
                                   setSearchOpen(false);
                                   setSearchQuery('');
-                                  handleEnterRoom(room);
+                                  handleSelectRoomOnCampus(room);
                                 }}
                                 className="px-2 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold shrink-0"
                               >
-                                Vào 3D
+                                {room.roomType === 'accommodation' && room.isVisible
+                                  ? 'Vào 3D'
+                                  : 'Xem'}
                               </button>
                             </div>
                           ))}
@@ -2124,34 +2349,126 @@ export default function Ktx3DTestClient() {
             </div>
           )}
 
-          {/* ── Focused Room Quick Bar (when located via Search on Campus) ── */}
+          {/* ── Focused Room Quick Inspector & Visibility/Type Bar (Campus View) ── */}
           {viewLevel === 'campus' && focusedRoom && (
-            <div className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-xs ${hudCard}`}>
-              <div className="flex items-center gap-2 min-w-0">
-                <MapPin size={14} className="text-sky-500 shrink-0" />
-                <span className="font-bold truncate">
-                  {focusedRoom.ktx} · {focusedRoom.day} · {focusedRoom.roomLabel}
-                </span>
-                <span className={`font-tabular shrink-0 ${hudMuted}`}>
-                  ({focusedRoom.occupied}/{focusedRoom.capacity})
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => handleEnterRoom(focusedRoom)}
-                  className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold"
-                >
-                  Vào phòng 3D →
-                </button>
+            <div className={`flex flex-col gap-2 rounded-xl border px-3 py-2.5 text-xs ${hudCard}`}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                  <MapPin
+                    size={14}
+                    className={
+                      !focusedRoom.isVisible
+                        ? 'text-slate-400 shrink-0'
+                        : focusedRoom.roomType === 'functional'
+                          ? 'text-violet-400 shrink-0'
+                          : 'text-sky-500 shrink-0'
+                    }
+                  />
+                  <span className="font-bold truncate">
+                    {focusedRoom.ktx} · {focusedRoom.day} · {focusedRoom.roomLabel}
+                  </span>
+                  {focusedRoom.roomType === 'functional' ? (
+                    <span className="px-1.5 py-0.5 rounded bg-violet-500/20 border border-violet-500/40 text-[10px] font-bold text-violet-400">
+                      Phòng chức năng
+                    </span>
+                  ) : (
+                    <span className={`font-tabular shrink-0 ${hudMuted}`}>
+                      ({focusedRoom.occupied}/{focusedRoom.capacity} chỗ)
+                    </span>
+                  )}
+                  {!focusedRoom.isVisible && (
+                    <span className="px-1.5 py-0.5 rounded bg-slate-500/20 border border-slate-500/40 text-[10px] font-bold text-slate-400">
+                      Đang ẩn
+                    </span>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => setFocusedRoomKey(null)}
-                  className={`p-1 rounded-lg ${hudMuted} hover:text-blue-500`}
-                  aria-label="Bỏ chọn phòng đang định vị"
+                  className={`p-1 rounded-lg ${hudMuted} hover:text-blue-500 shrink-0`}
+                  aria-label="Đóng thẻ phòng đang chọn"
                 >
                   <X size={13} />
                 </button>
+              </div>
+
+              {(focusedRoom.ghiChu || focusedRoom.facility) && (
+                <div className={`text-[11px] flex flex-wrap items-center gap-x-3 gap-y-1 ${hudMuted}`}>
+                  {focusedRoom.ghiChu && (
+                    <span className="italic">Ghi chú: {focusedRoom.ghiChu}</span>
+                  )}
+                  {focusedRoom.facility && (
+                    <span className="font-tabular">
+                      {[
+                        Number(focusedRoom.facility.giuong) > 0
+                          ? `${focusedRoom.facility.giuong} giường`
+                          : null,
+                        Number(focusedRoom.facility.dieu_hoa) > 0
+                          ? `${focusedRoom.facility.dieu_hoa} ĐH`
+                          : null,
+                        Number(focusedRoom.facility.tu) > 0
+                          ? `${focusedRoom.facility.tu} tủ`
+                          : null,
+                        Number(focusedRoom.facility.quat) > 0
+                          ? `${focusedRoom.facility.quat} quạt`
+                          : null,
+                        Number(focusedRoom.facility.ban_an) > 0
+                          ? `${focusedRoom.facility.ban_an} bàn`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ') || 'Chưa khai báo thiết bị'}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                {focusedRoom.roomType === 'accommodation' && focusedRoom.isVisible && (
+                  <button
+                    type="button"
+                    onClick={() => handleEnterRoom(focusedRoom)}
+                    className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold transition-colors"
+                  >
+                    Vào phòng 3D →
+                  </button>
+                )}
+
+                {focusedRoom.hasWriteAccess && focusedRoom.facility?.id && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={roomStatusBusy}
+                      onClick={() => handleToggleRoomVisibilityIn3D(focusedRoom)}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border font-semibold transition-colors disabled:opacity-50 ${
+                        focusedRoom.isVisible
+                          ? hudSubtleBtn
+                          : 'bg-emerald-600 hover:bg-emerald-500 border-emerald-500 text-white'
+                      }`}
+                    >
+                      {focusedRoom.isVisible ? <EyeOff size={12} /> : <Eye size={12} />}
+                      <span>{focusedRoom.isVisible ? 'Ẩn phòng' : 'Hiện lại phòng'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={roomStatusBusy}
+                      onClick={() => handleToggleRoomTypeIn3D(focusedRoom)}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border font-semibold transition-colors disabled:opacity-50 ${
+                        focusedRoom.roomType === 'functional'
+                          ? 'bg-blue-600/20 border-blue-500/45 text-blue-400 hover:bg-blue-600/30'
+                          : 'bg-violet-600/20 border-violet-500/45 text-violet-400 hover:bg-violet-600/30'
+                      }`}
+                    >
+                      <Building2 size={12} />
+                      <span>
+                        {focusedRoom.roomType === 'functional'
+                          ? 'Đổi về Phòng ở'
+                          : 'Đặt Phòng chức năng'}
+                      </span>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -2460,39 +2777,78 @@ export default function Ktx3DTestClient() {
                 <span className="font-bold">
                   {hoverInfo.room.ktx} · {hoverInfo.room.day} · {hoverInfo.room.roomLabel}
                 </span>
-                <span className="font-tabular font-bold text-sky-500">
-                  {hoverInfo.room.occupied}/{hoverInfo.room.capacity}
-                </span>
+                {!hoverInfo.room.isVisible ? (
+                  <span className="px-1.5 py-0.5 rounded bg-slate-500/20 border border-slate-500/40 text-[10px] font-bold text-slate-400">
+                    Đang ẩn
+                  </span>
+                ) : hoverInfo.room.roomType === 'functional' ? (
+                  <span className="px-1.5 py-0.5 rounded bg-violet-500/20 border border-violet-500/40 text-[10px] font-bold text-violet-400">
+                    Chức năng
+                  </span>
+                ) : (
+                  <span className="font-tabular font-bold text-sky-500">
+                    {hoverInfo.room.occupied}/{hoverInfo.room.capacity}
+                  </span>
+                )}
               </div>
-              <p className={`text-[11px] ${hudMuted}`}>
-                {hoverInfo.room.genderInfo.label}
-                {hoverInfo.room.dominantUnit ? ` · ${hoverInfo.room.dominantUnit}` : ''}
-                {hoverInfo.room.vacant > 0
-                  ? ` · Còn ${hoverInfo.room.vacant} chỗ`
-                  : hoverInfo.room.overflow > 0
-                    ? ` · Quá tải +${hoverInfo.room.overflow}`
-                    : ' · Đầy 100%'}
-              </p>
-              {colorMode === 'tam_tru' && hoverInfo.room.occupied > 0 && (
-                <p
-                  className={`text-[11px] font-semibold font-tabular ${
-                    hoverInfo.room.unregisteredTamTruCount > 0 ? 'text-orange-500' : 'text-emerald-500'
-                  }`}
-                >
-                  {hoverInfo.room.unregisteredTamTruCount > 0
-                    ? `Chưa đăng ký tạm trú: ${hoverInfo.room.unregisteredTamTruCount}/${hoverInfo.room.occupied} người`
-                    : 'Đã đăng ký tạm trú 100%'}
-                </p>
+
+              {!hoverInfo.room.isVisible ? (
+                <>
+                  <p className={`text-[11px] ${hudMuted}`}>
+                    {hoverInfo.room.roomType === 'functional' ? 'Phòng chức năng' : 'Phòng ở'} đang ẩn khỏi báo cáo sức chứa
+                  </p>
+                  {hoverInfo.room.ghiChu && (
+                    <p className={`text-[11px] italic ${hudMuted}`}>{hoverInfo.room.ghiChu}</p>
+                  )}
+                  <p className="text-[10px] text-emerald-500 font-semibold">
+                    Bấm để xem chi tiết &amp; hiện lại phòng →
+                  </p>
+                </>
+              ) : hoverInfo.room.roomType === 'functional' ? (
+                <>
+                  <p className={`text-[11px] ${hudMuted}`}>
+                    Phòng chức năng (không tính giường công nhân)
+                  </p>
+                  {hoverInfo.room.ghiChu && (
+                    <p className={`text-[11px] italic ${hudMuted}`}>{hoverInfo.room.ghiChu}</p>
+                  )}
+                  <p className="text-[10px] text-violet-400 font-semibold">
+                    Bấm để xem thiết bị &amp; chỉnh trạng thái phòng →
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className={`text-[11px] ${hudMuted}`}>
+                    {hoverInfo.room.genderInfo.label}
+                    {hoverInfo.room.dominantUnit ? ` · ${hoverInfo.room.dominantUnit}` : ''}
+                    {hoverInfo.room.vacant > 0
+                      ? ` · Còn ${hoverInfo.room.vacant} chỗ`
+                      : hoverInfo.room.overflow > 0
+                        ? ` · Quá tải +${hoverInfo.room.overflow}`
+                        : ' · Đầy 100%'}
+                  </p>
+                  {colorMode === 'tam_tru' && hoverInfo.room.occupied > 0 && (
+                    <p
+                      className={`text-[11px] font-semibold font-tabular ${
+                        hoverInfo.room.unregisteredTamTruCount > 0 ? 'text-orange-500' : 'text-emerald-500'
+                      }`}
+                    >
+                      {hoverInfo.room.unregisteredTamTruCount > 0
+                        ? `Chưa đăng ký tạm trú: ${hoverInfo.room.unregisteredTamTruCount}/${hoverInfo.room.occupied} người`
+                        : 'Đã đăng ký tạm trú 100%'}
+                    </p>
+                  )}
+                  {colorMode === 'unit_xray' && unitXRayFilter && (
+                    <p className="text-[11px] font-semibold text-sky-500 font-tabular">
+                      {unitXRayFilter.label}: {getRoomUnitMatchCount(hoverInfo.room, unitXRayFilter)}/
+                      {hoverInfo.room.occupied} người
+                    </p>
+                  )}
+                  <p className="text-[10px] text-blue-500 font-semibold">
+                    Bấm để xem mô hình giường tầng bên trong →
+                  </p>
+                </>
               )}
-              {colorMode === 'unit_xray' && unitXRayFilter && (
-                <p className="text-[11px] font-semibold text-sky-500 font-tabular">
-                  {unitXRayFilter.label}: {getRoomUnitMatchCount(hoverInfo.room, unitXRayFilter)}/
-                  {hoverInfo.room.occupied} người
-                </p>
-              )}
-              <p className="text-[10px] text-blue-500 font-semibold">
-                Bấm để xem mô hình giường tầng bên trong →
-              </p>
             </div>
           )}
 
@@ -2884,6 +3240,12 @@ export default function Ktx3DTestClient() {
                         Chức năng ({campusTotals.functionalCount})
                       </span>
                     )}
+                    {showHiddenRooms && campusTotals.hiddenCount > 0 && (
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-sm bg-slate-500/40 border border-dashed border-slate-400" />
+                        Đang ẩn ({campusTotals.hiddenCount})
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -2915,21 +3277,41 @@ export default function Ktx3DTestClient() {
                       <span>{hideRoofs ? 'Hiện mái' : 'Ẩn mái'}</span>
                     </button>
 
-                    {campusTotals.functionalCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setShowFunctionalRooms(prev => !prev)}
-                        title="Bật/tắt lớp Khu chức năng (Văn phòng, Nhà ăn, WC...)"
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold transition-colors ${
-                          showFunctionalRooms
-                            ? 'bg-violet-600 border-violet-500 text-white'
-                            : hudSubtleBtn
-                        }`}
-                      >
-                        <Building2 size={11} />
-                        <span>Khu CN</span>
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowFunctionalRooms(prev => !prev)}
+                      title="Bật/tắt hiển thị các Phòng chức năng & Khu chức năng trên bản đồ 3D"
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold transition-colors ${
+                        showFunctionalRooms
+                          ? 'bg-violet-600 border-violet-500 text-white'
+                          : hudSubtleBtn
+                      }`}
+                    >
+                      <Building2 size={11} />
+                      <span>
+                        Khu CN
+                        {campusTotals.functionalCount > 0 ? ` (${campusTotals.functionalCount})` : ''}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowHiddenRooms(prev => !prev)}
+                      title="Bật/tắt hiển thị mờ các phòng đang bị ẩn để dễ quan sát & khôi phục"
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold transition-colors ${
+                        showHiddenRooms && campusTotals.hiddenCount > 0
+                          ? 'bg-slate-600 border-slate-500 text-white'
+                          : showHiddenRooms
+                            ? hudSubtleBtn
+                            : 'bg-amber-500/15 border-amber-500/40 text-amber-500'
+                      }`}
+                    >
+                      {showHiddenRooms ? <Eye size={11} /> : <EyeOff size={11} />}
+                      <span>
+                        Phòng ẩn
+                        {campusTotals.hiddenCount > 0 ? ` (${campusTotals.hiddenCount})` : ''}
+                      </span>
+                    </button>
 
                     <div className="flex items-center gap-1">
                       <DoorOpen size={12} className="shrink-0" />
@@ -2937,14 +3319,19 @@ export default function Ktx3DTestClient() {
                         value=""
                         onChange={e => {
                           const room = roomByKeyMap.get(e.target.value);
-                          if (room) handleEnterRoom(room);
+                          if (room) handleSelectRoomOnCampus(room);
                         }}
-                        className={`rounded-md border px-2 py-0.5 text-[11px] font-medium focus:outline-none max-w-[165px] ${hudSelect}`}
+                        className={`rounded-md border px-2 py-0.5 text-[11px] font-medium focus:outline-none max-w-[175px] ${hudSelect}`}
                       >
                         <option value="">Mở nhanh phòng...</option>
                         {visibleRoomsFlat.map(r => (
                           <option key={r.key} value={r.key}>
-                            {r.ktx} · {r.day} · {r.roomLabel} ({r.occupied}/{r.capacity})
+                            {r.ktx} · {r.day} · {r.roomLabel}{' '}
+                            {!r.isVisible
+                              ? '[Đang ẩn]'
+                              : r.roomType === 'functional'
+                                ? '[Chức năng]'
+                                : `(${r.occupied}/${r.capacity})`}
                           </option>
                         ))}
                       </select>
@@ -2989,7 +3376,7 @@ export default function Ktx3DTestClient() {
                       }}
                       className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold focus:outline-none focus:border-blue-500 max-w-[230px] ${hudSelect}`}
                     >
-                      {visibleRoomsFlat.map(r => (
+                      {visibleAccommodationRooms.map(r => (
                         <option key={r.key} value={r.key}>
                           {r.ktx} · {r.day} · {r.roomLabel} ({r.occupied}/{r.capacity})
                         </option>

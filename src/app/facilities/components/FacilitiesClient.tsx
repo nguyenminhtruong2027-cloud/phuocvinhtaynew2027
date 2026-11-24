@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import {
   Search, Edit2, Check, X, Plus, Loader2, BedDouble, Wind, Package, Fan,
   Zap, Tv, Lightbulb, UtensilsCrossed, ChevronDown, ChevronUp, Upload,
-  AlertCircle, CheckCircle2, Download, Trash2, Filter, Snowflake, AlertTriangle, CheckSquare, Square, Lock, Building2, Box,
+  AlertCircle, CheckCircle2, Download, Trash2, Filter, Snowflake, AlertTriangle, CheckSquare, Square, Lock, Building2, Box, Eye, EyeOff,
 } from 'lucide-react';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { SlidingTabs } from '@/components/ui/MotionPrimitives';
@@ -24,7 +24,7 @@ import {
 import { compareKtxNames, naturalSortCompare } from '@/data/workers';
 import { getVNDateString } from '@/lib/vnDate';
 import { syncBedsForFacilityRoom } from '@/lib/bedSync';
-import { normalizeRoomLabel } from '@/lib/facilityCapacity';
+import { invalidateFacilitiesCache, normalizeRoomLabel } from '@/lib/facilityCapacity';
 
 interface FacilityRow {
   id: string;
@@ -819,6 +819,8 @@ export default function FacilitiesClient() {
 
   // Filters
   const [filterDay, setFilterDay] = useState<string>('');
+  const [filterRoomType, setFilterRoomType] = useState<'all' | 'accommodation' | 'functional'>('all');
+  const [filterVisibility, setFilterVisibility] = useState<'all' | 'visible' | 'hidden'>('all');
   const [searchPhong, setSearchPhong] = useState('');
   const [onlyIssues, setOnlyIssues] = useState(false);
 
@@ -843,7 +845,7 @@ export default function FacilitiesClient() {
   const [checkingDeleteId, setCheckingDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Multi-select & Bulk Delete state
+  // Multi-select & Bulk Actions state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteModal, setBulkDeleteModal] = useState<{
     mode: 'selected' | 'all';
@@ -853,6 +855,7 @@ export default function FacilitiesClient() {
     safeToDelete: FacilityRow[];
   } | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkUpdating, setBulkUpdating] = useState(false);
   const [bulkActionSuccess, setBulkActionSuccess] = useState<string | null>(null);
 
   const [sortField, setSortField] = useState<keyof FacilityRow>('day');
@@ -905,7 +908,12 @@ export default function FacilitiesClient() {
           is_visible: r.is_visible !== false,
         });
       });
-      const fetched: FacilityRow[] = Array.from(byId.values());
+      const fetched: FacilityRow[] = Array.from(byId.values()).sort(
+        (a, b) =>
+          compareKtxNames(a.ktx || '', b.ktx || '') ||
+          naturalSortCompare(a.day || '', b.day || '') ||
+          naturalSortCompare(a.phong_khu_vuc || '', b.phong_khu_vuc || '')
+      );
       setRows(fetched);
       if (fetched.length > 0 && !activeKtxRef.current) {
         const firstKtx = Array.from(new Set(fetched.map((r: FacilityRow) => r.ktx).filter(Boolean))).sort(compareKtxNames)[0];
@@ -956,16 +964,24 @@ export default function FacilitiesClient() {
   }, [allKtxTabs, activeKtx]);
 
   // ─── Derived filter options scoped to active KTX tab ─────────────────────
+  const ktxScopedRows = rows.filter(r => r.ktx === activeKtx);
   const allDayOptions = Array.from(new Set(
-    rows.filter(r => r.ktx === activeKtx).map(r => r.day).filter(Boolean)
+    ktxScopedRows.map(r => r.day).filter(Boolean)
   )).sort(naturalSortCompare);
 
-  const issueCountInKtx = rows.filter(r => r.ktx === activeKtx && hasFacilityIssue(r.ghi_chu)).length;
+  const issueCountInKtx = ktxScopedRows.filter(r => hasFacilityIssue(r.ghi_chu)).length;
+  const functionalCountInKtx = ktxScopedRows.filter(r => r.room_type === 'functional').length;
+  const accommodationCountInKtx = ktxScopedRows.length - functionalCountInKtx;
+  const hiddenCountInKtx = ktxScopedRows.filter(r => r.is_visible === false).length;
+  const visibleCountInKtx = ktxScopedRows.length - hiddenCountInKtx;
 
   // ─── Filtered rows — always scoped to activeKtx tab ──────────────────────
-  const filteredRows = rows.filter(r => {
-    if (r.ktx !== activeKtx) return false;
+  const filteredRows = ktxScopedRows.filter(r => {
     if (filterDay && r.day !== filterDay) return false;
+    if (filterRoomType === 'functional' && r.room_type !== 'functional') return false;
+    if (filterRoomType === 'accommodation' && r.room_type === 'functional') return false;
+    if (filterVisibility === 'hidden' && r.is_visible !== false) return false;
+    if (filterVisibility === 'visible' && r.is_visible === false) return false;
     if (onlyIssues && !hasFacilityIssue(r.ghi_chu)) return false;
     if (searchPhong.trim()) {
       const q = searchPhong.toLowerCase();
@@ -983,11 +999,23 @@ export default function FacilitiesClient() {
   const sortedRows = [...filteredRows].sort((a, b) => {
     const av = a[sortField];
     const bv = b[sortField];
-    if (typeof av === 'number' && typeof bv === 'number') return sortAsc ? av - bv : bv - av;
-    if (typeof av === 'boolean' && typeof bv === 'boolean') return sortAsc ? (av === bv ? 0 : av ? -1 : 1) : (av === bv ? 0 : av ? 1 : -1);
-    return sortAsc
-      ? naturalSortCompare(String(av ?? ''), String(bv ?? ''))
-      : naturalSortCompare(String(bv ?? ''), String(av ?? ''));
+    let diff = 0;
+    if (typeof av === 'number' && typeof bv === 'number') {
+      diff = sortAsc ? av - bv : bv - av;
+    } else if (typeof av === 'boolean' && typeof bv === 'boolean') {
+      diff = sortAsc
+        ? (av === bv ? 0 : av ? -1 : 1)
+        : (av === bv ? 0 : av ? 1 : -1);
+    } else {
+      diff = sortAsc
+        ? naturalSortCompare(String(av ?? ''), String(bv ?? ''))
+        : naturalSortCompare(String(bv ?? ''), String(av ?? ''));
+    }
+    if (diff !== 0) return diff;
+    return (
+      naturalSortCompare(a.day || '', b.day || '') ||
+      naturalSortCompare(a.phong_khu_vuc || '', b.phong_khu_vuc || '')
+    );
   });
 
   // Metrics calculated from filtered rows
@@ -1335,6 +1363,7 @@ export default function FacilitiesClient() {
           );
         } catch {}
         toast.success(nextVisible ? `Đã hiện ${row.phong_khu_vuc} trên sơ đồ` : `Đã ẩn ${row.phong_khu_vuc} khỏi sơ đồ`);
+        invalidateFacilitiesCache();
         invalidateKtxStructureCache();
         reloadKtxStructure(true);
         if (typeof window !== 'undefined') {
@@ -1360,6 +1389,60 @@ export default function FacilitiesClient() {
       }
     }
     await executeToggleVisibility(row, nextVisible);
+  };
+
+  // ─── 1-Click Toggle room_type directly (Phòng ở <-> Chức năng) ────────────
+  const toggleRoomType = async (row: FacilityRow) => {
+    if (!canWriteFacility(row.ktx, row.day)) {
+      toast.error(`Bạn không có quyền thay đổi loại phòng tại ${row.ktx} - ${row.day}.`);
+      return;
+    }
+    const nextType: 'accommodation' | 'functional' =
+      row.room_type === 'functional' ? 'accommodation' : 'functional';
+    if (nextType === 'functional') {
+      const occ = getRoomOccupantCount(row.ktx, row.day, row.phong_khu_vuc);
+      if (occ > 0) {
+        toast.error(
+          `Không thể chuyển ${row.day} · ${row.phong_khu_vuc} sang Phòng chức năng vì đang có ${occ} công nhân lưu trú.`
+        );
+        return;
+      }
+    }
+    setRows(prev => prev.map(r => r.id === row.id ? { ...r, room_type: nextType } : r));
+    try {
+      const { error } = await supabase
+        .from('facilities')
+        .update({ room_type: nextType })
+        .eq('id', row.id);
+      if (error) {
+        setRows(prev => prev.map(r => r.id === row.id ? { ...r, room_type: row.room_type } : r));
+        toast.error(`Không thể cập nhật loại phòng: ${error.message}`);
+      } else {
+        await syncBedsForFacilityRoom(supabase, { ...row, room_type: nextType });
+        try {
+          addLog(
+            currentUser?.email || 'system',
+            'FACILITY_UPDATE',
+            `Đổi loại phòng: ${row.ktx} · ${row.day} · ${row.phong_khu_vuc} -> ${
+              nextType === 'functional' ? 'Phòng chức năng' : 'Phòng ở'
+            }`
+          );
+        } catch {}
+        toast.success(
+          nextType === 'functional'
+            ? `Đã chuyển ${row.day} · ${row.phong_khu_vuc} thành Phòng chức năng`
+            : `Đã chuyển ${row.day} · ${row.phong_khu_vuc} về Phòng ở`
+        );
+        invalidateFacilitiesCache();
+        invalidateKtxStructureCache();
+        reloadKtxStructure(true);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('ktx_facilities_updated'));
+        }
+      }
+    } catch {
+      setRows(prev => prev.map(r => r.id === row.id ? { ...r, room_type: row.room_type } : r));
+    }
   };
 
   // ─── Delete guard & check ─────────────────────────────────────────────────
@@ -1514,6 +1597,133 @@ export default function FacilitiesClient() {
     });
   }, [sortedRows, selectedIds, canWriteFacility, checkRoomsOccupancy]);
 
+  // Batch Hide / Show selected rooms (safely skips occupied rooms when hiding)
+  const handleBulkUpdateVisibility = useCallback(async (nextVisible: boolean) => {
+    const targets = sortedRows.filter(r => selectedIds.has(r.id) && canWriteFacility(r.ktx, r.day));
+    if (targets.length === 0) {
+      toast.error('Bạn không có quyền thay đổi hiển thị các phòng đã chọn.');
+      return;
+    }
+    setBulkUpdating(true);
+    try {
+      let eligible = targets;
+      let skippedCount = 0;
+      if (!nextVisible) {
+        const occResult = await checkRoomsOccupancy(targets);
+        eligible = occResult.safeToDelete;
+        skippedCount = occResult.occupiedCount;
+      }
+      if (eligible.length === 0) {
+        toast.warning(
+          `Không thể ẩn vì cả ${skippedCount} phòng đã chọn đều đang có công nhân lưu trú.`
+        );
+        return;
+      }
+      const ids = eligible.map(r => r.id);
+      const { error } = await supabase
+        .from('facilities')
+        .update({ is_visible: nextVisible })
+        .in('id', ids);
+      if (error) {
+        toast.error(`Lỗi cập nhật hiển thị hàng loạt: ${error.message}`);
+        return;
+      }
+      const idSet = new Set(ids);
+      setRows(prev => prev.map(r => idSet.has(r.id) ? { ...r, is_visible: nextVisible } : r));
+      for (const room of eligible) {
+        await syncBedsForFacilityRoom(supabase, { ...room, is_visible: nextVisible });
+      }
+      try {
+        addLog(
+          currentUser?.email || 'system',
+          'FACILITY_UPDATE',
+          `${nextVisible ? 'Hiện' : 'Ẩn'} hàng loạt ${eligible.length} phòng tại ${activeKtx}`
+        );
+      } catch {}
+      invalidateFacilitiesCache();
+      invalidateKtxStructureCache();
+      reloadKtxStructure(true);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('ktx_facilities_updated'));
+      }
+      setSelectedIds(new Set());
+      const msg = skippedCount > 0
+        ? `Đã ${nextVisible ? 'hiện' : 'ẩn'} ${eligible.length} phòng (bỏ qua ${skippedCount} phòng đang có công nhân).`
+        : `Đã ${nextVisible ? 'hiện' : 'ẩn'} thành công ${eligible.length} phòng.`;
+      setBulkActionSuccess(msg);
+      toast.success(msg);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Lỗi cập nhật hàng loạt');
+    } finally {
+      setBulkUpdating(false);
+    }
+  }, [sortedRows, selectedIds, canWriteFacility, checkRoomsOccupancy, supabase, addLog, currentUser, activeKtx, reloadKtxStructure]);
+
+  // Batch switch room_type (Phòng ở <-> Chức năng) for selected rooms
+  const handleBulkUpdateRoomType = useCallback(async (nextType: 'accommodation' | 'functional') => {
+    const targets = sortedRows.filter(r => selectedIds.has(r.id) && canWriteFacility(r.ktx, r.day));
+    if (targets.length === 0) {
+      toast.error('Bạn không có quyền đổi loại các phòng đã chọn.');
+      return;
+    }
+    setBulkUpdating(true);
+    try {
+      let eligible = targets;
+      let skippedCount = 0;
+      if (nextType === 'functional') {
+        const occResult = await checkRoomsOccupancy(targets);
+        eligible = occResult.safeToDelete;
+        skippedCount = occResult.occupiedCount;
+      }
+      if (eligible.length === 0) {
+        toast.warning(
+          `Không thể chuyển sang Phòng chức năng vì cả ${skippedCount} phòng đã chọn đang có công nhân lưu trú.`
+        );
+        return;
+      }
+      const ids = eligible.map(r => r.id);
+      const { error } = await supabase
+        .from('facilities')
+        .update({ room_type: nextType })
+        .in('id', ids);
+      if (error) {
+        toast.error(`Lỗi đổi loại phòng hàng loạt: ${error.message}`);
+        return;
+      }
+      const idSet = new Set(ids);
+      setRows(prev => prev.map(r => idSet.has(r.id) ? { ...r, room_type: nextType } : r));
+      for (const room of eligible) {
+        await syncBedsForFacilityRoom(supabase, { ...room, room_type: nextType });
+      }
+      try {
+        addLog(
+          currentUser?.email || 'system',
+          'FACILITY_UPDATE',
+          `Đổi loại hàng loạt ${eligible.length} phòng tại ${activeKtx} -> ${
+            nextType === 'functional' ? 'Phòng chức năng' : 'Phòng ở'
+          }`
+        );
+      } catch {}
+      invalidateFacilitiesCache();
+      invalidateKtxStructureCache();
+      reloadKtxStructure(true);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('ktx_facilities_updated'));
+      }
+      setSelectedIds(new Set());
+      const label = nextType === 'functional' ? 'Phòng chức năng' : 'Phòng ở';
+      const msg = skippedCount > 0
+        ? `Đã chuyển ${eligible.length} phòng thành ${label} (bỏ qua ${skippedCount} phòng đang có công nhân).`
+        : `Đã chuyển ${eligible.length} phòng thành ${label}.`;
+      setBulkActionSuccess(msg);
+      toast.success(msg);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Lỗi đổi loại phòng hàng loạt');
+    } finally {
+      setBulkUpdating(false);
+    }
+  }, [sortedRows, selectedIds, canWriteFacility, checkRoomsOccupancy, supabase, addLog, currentUser, activeKtx, reloadKtxStructure]);
+
   // Request deletion of all rooms in active view/tab (Super Admin only)
   const handleRequestDeleteAll = useCallback(async () => {
     if (!canDeleteAll) {
@@ -1625,7 +1835,9 @@ export default function FacilitiesClient() {
   const tdClass = "px-3 py-2 text-sm text-foreground whitespace-nowrap";
   const inputClass = "w-16 px-1.5 py-0.5 text-sm border border-border rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary text-center";
 
-  const hasActiveFilters = Boolean(filterDay || searchPhong.trim() || onlyIssues);
+  const hasActiveFilters = Boolean(
+    filterDay || filterRoomType !== 'all' || filterVisibility !== 'all' || searchPhong.trim() || onlyIssues
+  );
 
   return (
     <div className="p-4 md:p-6 space-y-5">
@@ -1874,7 +2086,7 @@ export default function FacilitiesClient() {
       ) : null}
 
       {/* Filters scoped to active KTX tab */}
-      <div className="flex flex-wrap gap-3 items-center">
+      <div className="flex flex-wrap gap-2.5 items-center">
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <Filter size={13} />
           <span className="font-medium">Bộ lọc:</span>
@@ -1886,6 +2098,24 @@ export default function FacilitiesClient() {
         >
           <option value="">Tất cả Dãy</option>
           {allDayOptions.map(d => <option key={d} value={d}>{d}</option>)}
+        </select>
+        <select
+          value={filterRoomType}
+          onChange={e => setFilterRoomType(e.target.value as 'all' | 'accommodation' | 'functional')}
+          className="px-3 py-1.5 text-sm border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+        >
+          <option value="all">Tất cả loại ({ktxScopedRows.length})</option>
+          <option value="accommodation">Phòng ở ({accommodationCountInKtx})</option>
+          <option value="functional">Chức năng ({functionalCountInKtx})</option>
+        </select>
+        <select
+          value={filterVisibility}
+          onChange={e => setFilterVisibility(e.target.value as 'all' | 'visible' | 'hidden')}
+          className="px-3 py-1.5 text-sm border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+        >
+          <option value="all">Tất cả hiển thị</option>
+          <option value="visible">Đang hiện ({visibleCountInKtx})</option>
+          <option value="hidden">Đang ẩn ({hiddenCountInKtx})</option>
         </select>
         <div className="relative">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -1917,7 +2147,13 @@ export default function FacilitiesClient() {
         </button>
         {hasActiveFilters && (
           <button
-            onClick={() => { setFilterDay(''); setSearchPhong(''); setOnlyIssues(false); }}
+            onClick={() => {
+              setFilterDay('');
+              setFilterRoomType('all');
+              setFilterVisibility('all');
+              setSearchPhong('');
+              setOnlyIssues(false);
+            }}
             className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg hover:bg-muted transition-colors"
           >
             <X size={12} /> Xóa lọc
@@ -1974,14 +2210,51 @@ export default function FacilitiesClient() {
               Bỏ chọn
             </button>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
-              onClick={handleRequestBulkDelete}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold shadow-sm transition-colors"
+              disabled={bulkUpdating}
+              onClick={() => handleBulkUpdateVisibility(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-sm transition-colors disabled:opacity-50"
             >
-              <Trash2 size={14} />
-              <span>Xóa {selectedIds.size} phòng đã chọn</span>
+              <Eye size={13} />
+              <span>Hiện ({selectedIds.size})</span>
+            </button>
+            <button
+              type="button"
+              disabled={bulkUpdating}
+              onClick={() => handleBulkUpdateVisibility(false)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-600 hover:bg-slate-700 text-white text-xs font-semibold shadow-sm transition-colors disabled:opacity-50"
+            >
+              <EyeOff size={13} />
+              <span>Ẩn ({selectedIds.size})</span>
+            </button>
+            <button
+              type="button"
+              disabled={bulkUpdating}
+              onClick={() => handleBulkUpdateRoomType('functional')}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold shadow-sm transition-colors disabled:opacity-50"
+            >
+              <Building2 size={13} />
+              <span>Đặt Chức năng</span>
+            </button>
+            <button
+              type="button"
+              disabled={bulkUpdating}
+              onClick={() => handleBulkUpdateRoomType('accommodation')}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition-colors disabled:opacity-50"
+            >
+              <BedDouble size={13} />
+              <span>Đặt Phòng ở</span>
+            </button>
+            <button
+              type="button"
+              disabled={bulkUpdating || deleting}
+              onClick={handleRequestBulkDelete}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold shadow-sm transition-colors disabled:opacity-50"
+            >
+              <Trash2 size={13} />
+              <span>Xóa ({selectedIds.size})</span>
             </button>
           </div>
         </div>
@@ -2087,8 +2360,20 @@ export default function FacilitiesClient() {
                 {sortedRows.map(row => {
                   const isEditing = editingId === row.id;
                   const isSelected = selectedIds.has(row.id);
+                  const isHiddenRow = row.is_visible === false;
                   return (
-                    <tr key={row.id} className={`transition-colors ${isEditing ? 'bg-primary/5' : isSelected ? 'bg-primary/10' : 'hover:bg-muted/30'}`}>
+                    <tr
+                      key={row.id}
+                      className={`transition-colors ${
+                        isEditing
+                          ? 'bg-primary/5'
+                          : isSelected
+                            ? 'bg-primary/10'
+                            : isHiddenRow
+                              ? 'bg-muted/25 opacity-70 hover:opacity-100'
+                              : 'hover:bg-muted/30'
+                      }`}
+                    >
                       <td className="px-3 py-2 w-10 text-center" onClick={e => e.stopPropagation()}>
                         <input
                           type="checkbox"
@@ -2102,7 +2387,7 @@ export default function FacilitiesClient() {
                       <td className={tdClass}><span className="font-medium">{row.day}</span></td>
                       <td className={tdClass}>{row.phong_khu_vuc}</td>
 
-                      {/* Loại phòng */}
+                      {/* Loại phòng — 1-click toggle */}
                       <td className={tdClass}>
                         {isEditing && editingRow ? (
                           <select
@@ -2113,14 +2398,23 @@ export default function FacilitiesClient() {
                             <option value="accommodation">Phòng ở</option>
                             <option value="functional">Chức năng</option>
                           </select>
-                        ) : row.room_type === 'functional' ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold tint-pink text-pink-tone border border-pink-tint">
-                            Chức năng
-                          </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-bdg text-lnk border border-bdr2">
-                            Phòng ở
-                          </span>
+                          <button
+                            type="button"
+                            onClick={() => toggleRoomType(row)}
+                            title={
+                              row.room_type === 'functional'
+                                ? 'Bấm để chuyển về Phòng ở'
+                                : 'Bấm để chuyển thành Phòng chức năng'
+                            }
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold transition-opacity hover:opacity-80 ${
+                              row.room_type === 'functional'
+                                ? 'tint-pink text-pink-tone border border-pink-tint'
+                                : 'bg-bdg text-lnk border border-bdr2'
+                            }`}
+                          >
+                            {row.room_type === 'functional' ? 'Chức năng' : 'Phòng ở'}
+                          </button>
                         )}
                       </td>
 
