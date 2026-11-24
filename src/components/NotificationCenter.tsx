@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import {
   Bell,
@@ -65,7 +66,9 @@ export default function NotificationCenter({
   const [pendingCheckoutCount, setPendingCheckoutCount] = useState(0);
   const initialLoadedRef = useRef(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
   const loadAlertsRef = useRef<() => Promise<void>>(async () => {});
+  const [popoverPos, setPopoverPos] = useState<{ top: number; left?: number; right?: number } | null>(null);
 
   useEffect(() => {
     try {
@@ -188,24 +191,53 @@ export default function NotificationCenter({
     };
   }, [currentUser, isTechnician, compact, supabase]);
 
-  // Close on Escape or outside click
+  // Compute floating portal position so sidebar overflow never clips the popover
+  const updatePopoverPosition = useCallback(() => {
+    if (!containerRef.current || typeof window === 'undefined') return;
+    const rect = containerRef.current.getBoundingClientRect();
+    if (compact) {
+      setPopoverPos({
+        top: Math.max(56, rect.bottom + 8),
+        right: 12,
+      });
+    } else {
+      const popoverWidth = 380;
+      const preferredLeft = rect.right + 12;
+      const maxLeft = Math.max(12, window.innerWidth - popoverWidth - 12);
+      const clampedTop = Math.max(12, Math.min(rect.top, window.innerHeight - 340));
+      setPopoverPos({
+        top: clampedTop,
+        left: Math.min(preferredLeft, maxLeft),
+      });
+    }
+  }, [compact]);
+
+  // Close on Escape or outside click & keep portal position synced
   useEffect(() => {
     if (!open) return;
+    updatePopoverPosition();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
     const onClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const insideTrigger = containerRef.current?.contains(target);
+      const insidePopover = popoverRef.current?.contains(target);
+      if (!insideTrigger && !insidePopover) {
         setOpen(false);
       }
     };
     window.addEventListener('keydown', onKey);
+    window.addEventListener('resize', updatePopoverPosition);
+    window.addEventListener('scroll', updatePopoverPosition, true);
     document.addEventListener('mousedown', onClickOutside);
     return () => {
       window.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', updatePopoverPosition);
+      window.removeEventListener('scroll', updatePopoverPosition, true);
       document.removeEventListener('mousedown', onClickOutside);
     };
-  }, [open]);
+  }, [open, updatePopoverPosition]);
 
   // Overdue temporary residence (> 7 days) for Admin & Staff
   const overdueTamTruCount = useMemo(() => {
@@ -390,96 +422,100 @@ export default function NotificationCenter({
         </button>
       )}
 
-      {open && (
-        <div
-          className={`fixed lg:absolute z-[75] w-[min(360px,calc(100vw-24px))] rounded-2xl bg-surf border border-bdr2 shadow-2xl overflow-hidden ${
-            compact
-              ? 'right-3 top-14'
-              : collapsed
-              ? 'left-[76px] top-16'
-              : 'left-0 top-full mt-2'
-          }`}
-        >
-          {/* Popover Header */}
-          <div className="px-4 py-3 border-b border-bdr bg-side flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <Bell size={15} className="text-lnk shrink-0" />
-              <span className="text-xs sm:text-sm font-bold text-tx truncate">
-                Việc cần xử lý ngay
-              </span>
-            </div>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={toggleSound}
-                title={soundEnabled ? 'Đang bật chuông báo phiếu Khẩn cấp' : 'Đang tắt chuông báo'}
-                className="p-1.5 rounded-lg text-mu hover:text-tx hover:bg-act transition-colors cursor-pointer"
-              >
-                {soundEnabled ? <Volume2 size={14} className="text-ok" /> : <VolumeX size={14} />}
-              </button>
-              <button
-                type="button"
-                onClick={() => void loadAlerts()}
-                disabled={loading}
-                title="Làm mới thông báo"
-                className="p-1.5 rounded-lg text-mu hover:text-tx hover:bg-act transition-colors cursor-pointer disabled:opacity-50"
-              >
-                <RefreshCw size={14} className={loading ? 'animate-spin text-pri2' : ''} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                title="Đóng"
-                className="p-1.5 rounded-lg text-mu hover:text-tx hover:bg-act transition-colors cursor-pointer"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          </div>
-
-          {/* Items List */}
-          <div className="max-h-[60vh] overflow-y-auto divide-y divide-bdr">
-            {items.length === 0 ? (
-              <div className="py-10 px-4 text-center space-y-2">
-                <CheckCircle2 size={30} className="mx-auto text-ok" />
-                <p className="text-sm font-bold text-tx">Mọi thứ đều ổn định</p>
-                <p className="text-xs text-mu">
-                  Không có phiếu báo hỏng, hồ sơ QR hay cảnh báo tồn đọng cần xử lý ngay.
-                </p>
+      {open &&
+        popoverPos &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            style={{
+              top: popoverPos.top,
+              left: popoverPos.left,
+              right: popoverPos.right,
+            }}
+            className="fixed z-[90] w-[min(380px,calc(100vw-24px))] rounded-2xl bg-surf border border-bdr2 shadow-2xl overflow-hidden"
+          >
+            {/* Popover Header */}
+            <div className="px-4 py-3 border-b border-bdr bg-side flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Bell size={15} className="text-lnk shrink-0" />
+                <span className="text-xs sm:text-sm font-bold text-tx truncate">
+                  Việc cần xử lý ngay
+                </span>
               </div>
-            ) : (
-              items.map(item => {
-                const Icon = item.icon;
-                const badgeTone =
-                  item.tone === 'danger'
-                    ? 'bg-dgrbg text-dgr border-dgr/35'
-                    : item.tone === 'warning'
-                    ? 'tint-wn text-wn border-wn/35'
-                    : 'bg-bdg text-lnk border-bdr2';
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => navigateTo(item.href)}
-                    className="w-full px-4 py-3 text-left hover:bg-act/70 transition-colors flex items-start gap-3 cursor-pointer"
-                  >
-                    <span
-                      className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-0.5 ${badgeTone}`}
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={toggleSound}
+                  title={soundEnabled ? 'Đang bật chuông báo phiếu Khẩn cấp' : 'Đang tắt chuông báo'}
+                  className="p-1.5 rounded-lg text-mu hover:text-tx hover:bg-act transition-colors cursor-pointer"
+                >
+                  {soundEnabled ? <Volume2 size={14} className="text-ok" /> : <VolumeX size={14} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void loadAlerts()}
+                  disabled={loading}
+                  title="Làm mới thông báo"
+                  className="p-1.5 rounded-lg text-mu hover:text-tx hover:bg-act transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw size={14} className={loading ? 'animate-spin text-pri2' : ''} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  title="Đóng"
+                  className="p-1.5 rounded-lg text-mu hover:text-tx hover:bg-act transition-colors cursor-pointer"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+
+            {/* Items List */}
+            <div className="max-h-[65vh] overflow-y-auto divide-y divide-bdr">
+              {items.length === 0 ? (
+                <div className="py-10 px-5 text-center space-y-2">
+                  <CheckCircle2 size={32} className="mx-auto text-ok" />
+                  <p className="text-sm font-bold text-tx">Mọi thứ đều ổn định</p>
+                  <p className="text-xs text-mu leading-relaxed">
+                    Không có phiếu báo hỏng, hồ sơ QR hay cảnh báo tồn đọng cần xử lý ngay.
+                  </p>
+                </div>
+              ) : (
+                items.map(item => {
+                  const Icon = item.icon;
+                  const badgeTone =
+                    item.tone === 'danger'
+                      ? 'bg-dgrbg text-dgr border-dgr/35'
+                      : item.tone === 'warning'
+                      ? 'tint-wn text-wn border-wn/35'
+                      : 'bg-bdg text-lnk border-bdr2';
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => navigateTo(item.href)}
+                      className="w-full px-4 py-3 text-left hover:bg-act/70 transition-colors flex items-start gap-3 cursor-pointer"
                     >
-                      <Icon size={15} />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs sm:text-sm font-bold text-tx leading-snug">{item.title}</p>
-                      <p className="text-[11px] text-mu mt-0.5 line-clamp-2">{item.subtitle}</p>
-                    </div>
-                    <ArrowRight size={14} className="text-ic shrink-0 mt-1" />
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </div>
-      )}
+                      <span
+                        className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-0.5 ${badgeTone}`}
+                      >
+                        <Icon size={15} />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs sm:text-sm font-bold text-tx leading-snug">{item.title}</p>
+                        <p className="text-[11px] text-mu mt-0.5 line-clamp-2">{item.subtitle}</p>
+                      </div>
+                      <ArrowRight size={14} className="text-ic shrink-0 mt-1" />
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
