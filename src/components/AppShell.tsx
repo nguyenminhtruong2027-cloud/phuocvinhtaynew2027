@@ -7,6 +7,7 @@ import { useAuth } from '@/context/AuthContext';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { PageReveal } from '@/components/ui/MotionPrimitives';
 import CommandPalette from '@/components/ui/CommandPalette';
+import OfflineIndicator from '@/components/OfflineIndicator';
 
 const PUBLIC_PATHS = ['/sign-up-login', '/login', '/register', '/checkout', '/attendance', '/report-issue'];
 const TECHNICIAN_ALLOWED_PATHS = ['/maintenance', '/ktx-3d', '/facilities', '/profile'];
@@ -39,6 +40,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return (
       <div className="bg-architectural min-h-screen" suppressHydrationWarning>
         {children}
+        <OfflineIndicator />
       </div>
     );
   }
@@ -82,6 +84,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </main>
       </div>
       <CommandPalette />
+      <OfflineIndicator />
     </div>
   );
 }

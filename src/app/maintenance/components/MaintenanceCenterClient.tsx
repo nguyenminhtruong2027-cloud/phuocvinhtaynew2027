@@ -29,6 +29,9 @@ import {
   Square,
   Phone,
   User,
+  BarChart3,
+  Layers,
+  Timer,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
@@ -44,11 +47,14 @@ import {
   acceptMaintenanceTicket,
   buildRoomIssueQrUrl,
   bulkDeleteResolvedTickets,
+  computeMaintenanceAnalytics,
   createInternalMaintenanceTicket,
   deleteMaintenanceTicket,
   fetchMaintenanceTickets,
+  formatDurationVi,
   getTicketCategoryLabel,
   getTicketCategoryShortLabel,
+  getTicketSlaStatus,
   reopenMaintenanceTicket,
   resolveMaintenanceTicket,
 } from '@/lib/maintenanceTickets';
@@ -63,7 +69,12 @@ import { hasFacilityIssueNote } from '@/lib/smartRoomAssign';
 import { useKtxStructure } from '@/lib/ktxStructure';
 import { naturalSortCompare } from '@/data/workers';
 import { QrCodeImage, downloadQrPng } from '@/components/QrCodeImage';
-import { PosterPaperSize, printQrBulletinPoster } from '@/lib/qrPosterPrint';
+import {
+  BatchRoomQrItem,
+  PosterPaperSize,
+  printBatchRoomIssueQrStickers,
+  printQrBulletinPoster,
+} from '@/lib/qrPosterPrint';
 import { exportToExcel } from '@/lib/exportExcel';
 
 interface MaintenanceBedRow {
@@ -74,7 +85,7 @@ interface MaintenanceBedRow {
   giuong: string;
 }
 
-type StatusFilter = 'active' | 'open' | 'in_progress' | 'resolved' | 'all';
+type StatusFilter = 'active' | 'overdue' | 'open' | 'in_progress' | 'resolved' | 'all';
 
 function formatVnDateTime(iso?: string | null): string {
   if (!iso) return '—';
@@ -153,6 +164,16 @@ export default function MaintenanceCenterClient() {
   const [qrRoom, setQrRoom] = useState('');
   const [posterPaperSize, setPosterPaperSize] = useState<PosterPaperSize>('A5');
   const [printingPoster, setPrintingPoster] = useState(false);
+  const [printingBatch, setPrintingBatch] = useState(false);
+
+  // Analytics & live SLA clock
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 60000);
+    return () => clearInterval(id);
+  }, []);
 
   const actorLabel = currentUser?.name || currentUser?.email || 'Kỹ thuật viên';
 
@@ -218,6 +239,12 @@ export default function MaintenanceCenterClient() {
     });
   }, [tickets, isAdmin, isTechnician, canAccessMaintenanceBlock]);
 
+  // Analytics & SLA metrics
+  const analytics = useMemo(
+    () => computeMaintenanceAnalytics(scopedTickets, nowTick),
+    [scopedTickets, nowTick]
+  );
+
   // KPI metrics
   const kpis = useMemo(() => {
     let open = 0;
@@ -230,8 +257,15 @@ export default function MaintenanceCenterClient() {
       else if (t.status === 'resolved') resolved += 1;
       if (t.priority === 'urgent' && t.status !== 'resolved') urgentActive += 1;
     }
-    return { open, inProgress, urgentActive, resolved, active: open + inProgress };
-  }, [scopedTickets]);
+    return {
+      open,
+      inProgress,
+      urgentActive,
+      resolved,
+      active: open + inProgress,
+      slaOverdue: analytics.slaOverdueCount,
+    };
+  }, [scopedTickets, analytics.slaOverdueCount]);
 
   // Available KTX / Day / Room options from facilities + ktxGroups
   const ktxOptions = useMemo(() => {
@@ -314,7 +348,12 @@ export default function MaintenanceCenterClient() {
     return scopedTickets
       .filter(t => {
         if (statusFilter === 'active' && t.status === 'resolved') return false;
-        if (statusFilter !== 'all' && statusFilter !== 'active' && t.status !== statusFilter) return false;
+        if (statusFilter === 'overdue') {
+          if (t.status === 'resolved') return false;
+          if (getTicketSlaStatus(t, nowTick).state !== 'overdue') return false;
+        } else if (statusFilter !== 'all' && statusFilter !== 'active' && t.status !== statusFilter) {
+          return false;
+        }
         if (categoryFilter !== 'all' && t.category !== categoryFilter) return false;
         if (dayFilter !== 'all' && t.day !== dayFilter) return false;
         if (q) {
@@ -324,14 +363,19 @@ export default function MaintenanceCenterClient() {
         return true;
       })
       .sort((a, b) => {
-        // Active urgent tickets first, then open/in_progress before resolved, then newest
-        const prioScore = (t: MaintenanceTicket) =>
-          t.status === 'resolved' ? 3 : t.priority === 'urgent' ? 0 : t.status === 'open' ? 1 : 2;
+        // Active SLA overdue & urgent tickets first, then open/in_progress before resolved, then newest
+        const prioScore = (t: MaintenanceTicket) => {
+          if (t.status === 'resolved') return 4;
+          const sla = getTicketSlaStatus(t, nowTick);
+          if (sla.state === 'overdue') return 0;
+          if (t.priority === 'urgent') return 1;
+          return t.status === 'open' ? 2 : 3;
+        };
         const diff = prioScore(a) - prioScore(b);
         if (diff !== 0) return diff;
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
       });
-  }, [scopedTickets, statusFilter, categoryFilter, dayFilter, search]);
+  }, [scopedTickets, statusFilter, categoryFilter, dayFilter, search, nowTick]);
 
   // Deletable resolved tickets among currently visible list
   const deletableResolvedVisible = useMemo(() => {
@@ -680,6 +724,61 @@ export default function MaintenanceCenterClient() {
     }
   };
 
+  const allRoomsInQrKtx = useMemo<BatchRoomQrItem[]>(() => {
+    if (!qrKtx) return [];
+    const seen = new Set<string>();
+    const list: BatchRoomQrItem[] = [];
+    const days = getDaysForKtx(qrKtx);
+    for (const d of days) {
+      const rooms = getRoomsForKtxDay(qrKtx, d);
+      for (const r of rooms) {
+        const key = `${qrKtx}||${d}||${r}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        list.push({
+          ktx: qrKtx,
+          day: d,
+          roomLabel: formatRoomDisplay(r),
+          url: buildRoomIssueQrUrl(qrOrigin, qrKtx, d, r),
+        });
+      }
+    }
+    return list;
+  }, [qrKtx, qrOrigin, getDaysForKtx, getRoomsForKtxDay]);
+
+  const handlePrintBatchQr = async (scope: 'day' | 'ktx') => {
+    const items: BatchRoomQrItem[] =
+      scope === 'day'
+        ? qrRooms.map(r => ({
+            ktx: qrKtx,
+            day: qrDay,
+            roomLabel: formatRoomDisplay(r),
+            url: buildRoomIssueQrUrl(qrOrigin, qrKtx, qrDay, r),
+          }))
+        : allRoomsInQrKtx;
+
+    if (items.length === 0) {
+      toast.error('Không có danh sách phòng để in tem QR hàng loạt.');
+      return;
+    }
+
+    setPrintingBatch(true);
+    try {
+      const title =
+        scope === 'day'
+          ? `TEM QR BÁO HỎNG CỬA PHÒNG — ${qrKtx} · ${qrDay} (${items.length} phòng)`
+          : `TEM QR BÁO HỎNG CỬA PHÒNG — TOÀN BỘ ${qrKtx} (${items.length} phòng)`;
+      const ok = await printBatchRoomIssueQrStickers(items, title);
+      if (ok) {
+        toast.success(`Đã mở bản in A4 gồm ${items.length} tem QR (${Math.ceil(items.length / 6)} trang).`);
+      } else {
+        toast.error('Không thể tạo bản in tem QR hàng loạt.');
+      }
+    } finally {
+      setPrintingBatch(false);
+    }
+  };
+
   const toggleSelectResolved = (id: string) => {
     setSelectedResolvedIds(prev => {
       const next = new Set(prev);
@@ -741,6 +840,18 @@ export default function MaintenanceCenterClient() {
               <span>Tạo phiếu mới</span>
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setShowAnalytics(v => !v)}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs sm:text-sm font-bold transition-colors cursor-pointer ${
+              showAnalytics
+                ? 'bg-bdg text-lnk border-pri2/50'
+                : 'bg-surf hover:bg-act text-tx border-bdr2'
+            }`}
+          >
+            <BarChart3 size={16} className="text-lnk" />
+            <span>Thống kê SLA</span>
+          </button>
           <button
             type="button"
             onClick={() => setShowQrModal(true)}
@@ -838,7 +949,7 @@ export default function MaintenanceCenterClient() {
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
         <button
           type="button"
           onClick={() => {
@@ -890,17 +1001,149 @@ export default function MaintenanceCenterClient() {
           type="button"
           onClick={() => {
             setActiveTab('tickets');
+            setStatusFilter('overdue');
+          }}
+          className={`rounded-2xl bg-surf border p-4 text-left transition-colors cursor-pointer ${
+            kpis.slaOverdue > 0
+              ? 'border-dgr/50 hover:border-dgr'
+              : 'border-bdr2 hover:border-bdr'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-mu">Quá hạn SLA</span>
+            <Timer size={16} className={kpis.slaOverdue > 0 ? 'text-dgr' : 'text-mu'} />
+          </div>
+          <p className={`text-2xl font-extrabold font-tabular mt-1.5 ${kpis.slaOverdue > 0 ? 'text-dgr' : 'text-tx'}`}>
+            {kpis.slaOverdue}
+          </p>
+          <p className="text-[10.5px] text-mu mt-0.5">Khẩn &gt; 2g · Thường &gt; 24g</p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('tickets');
             setStatusFilter('resolved');
           }}
-          className="rounded-2xl bg-surf border border-bdr2 hover:border-ok2/50 p-4 text-left transition-colors cursor-pointer"
+          className="rounded-2xl bg-surf border border-bdr2 hover:border-ok2/50 p-4 text-left transition-colors cursor-pointer col-span-2 md:col-span-1"
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-mu">Đã hoàn thành</span>
             <CheckCircle2 size={16} className="text-ok" />
           </div>
           <p className="text-2xl font-extrabold text-ok font-tabular mt-1.5">{kpis.resolved}</p>
+          {analytics.avgResolveMinutes !== null && (
+            <p className="text-[10.5px] text-mu mt-0.5 font-tabular">
+              TB xử lý: {formatDurationVi(analytics.avgResolveMinutes)}
+            </p>
+          )}
         </button>
       </div>
+
+      {/* Collapsible Maintenance & SLA Analytics Panel */}
+      {showAnalytics && !tableMissing && (
+        <section className="rounded-2xl bg-surf border border-bdr2 p-4 sm:p-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-bdr pb-3">
+            <div className="flex items-center gap-2">
+              <BarChart3 size={17} className="text-lnk" />
+              <div>
+                <h2 className="text-sm font-bold text-tx">Thống kê Thiết bị hay hỏng & Hiệu suất SLA</h2>
+                <p className="text-[11px] text-mu">
+                  Định mức SLA chuẩn: Khẩn cấp ≤ 2 giờ · Bình thường ≤ 24 giờ · Tổng hợp từ {analytics.totalTickets} phiếu trong phạm vi
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="px-2.5 py-1 rounded-lg bg-page border border-bdr font-tabular">
+                TB xử lý:{' '}
+                <strong className="text-tx">
+                  {analytics.avgResolveMinutes !== null ? formatDurationVi(analytics.avgResolveMinutes) : 'Chưa có dữ liệu'}
+                </strong>
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-page border border-bdr font-tabular">
+                Đạt chuẩn SLA:{' '}
+                <strong className={analytics.slaCompliancePct !== null && analytics.slaCompliancePct >= 85 ? 'text-ok' : 'text-wn'}>
+                  {analytics.slaCompliancePct !== null ? `${analytics.slaCompliancePct}%` : '—'}
+                </strong>
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Top Categories */}
+            <div className="rounded-xl bg-page border border-bdr p-3.5 space-y-2.5">
+              <p className="text-xs font-bold text-tx">Hạng mục phát sinh nhiều nhất</p>
+              {analytics.topCategories.length === 0 ? (
+                <p className="text-xs text-mu">Chưa có dữ liệu phiếu bảo trì.</p>
+              ) : (
+                <div className="space-y-2">
+                  {analytics.topCategories.slice(0, 5).map(cat => (
+                    <div key={cat.category} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-medium text-tx">{cat.label}</span>
+                        <span className="text-mu font-tabular">
+                          {cat.count} phiếu ({cat.pct}%)
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 rounded-full bg-act overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-pri2"
+                          style={{ width: `${Math.max(6, cat.pct)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Top Rooms */}
+            <div className="rounded-xl bg-page border border-bdr p-3.5 space-y-2.5">
+              <p className="text-xs font-bold text-tx">Top phòng báo hỏng nhiều nhất</p>
+              {analytics.topRooms.length === 0 ? (
+                <p className="text-xs text-mu">Chưa có dữ liệu.</p>
+              ) : (
+                <div className="divide-y divide-bdr">
+                  {analytics.topRooms.map((r, idx) => (
+                    <div
+                      key={`${r.ktx}-${r.day}-${r.phong_so}`}
+                      className="py-1.5 flex items-center justify-between gap-2 text-xs"
+                    >
+                      <span className="text-tx font-semibold truncate">
+                        {idx + 1}. {r.day} · {formatRoomDisplay(r.phong_so)}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-act border border-bdr font-bold text-lnk font-tabular shrink-0">
+                        {r.count} lượt
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Top Days */}
+            <div className="rounded-xl bg-page border border-bdr p-3.5 space-y-2.5">
+              <p className="text-xs font-bold text-tx">Phân bổ sự cố theo Dãy nhà</p>
+              {analytics.topDays.length === 0 ? (
+                <p className="text-xs text-mu">Chưa có dữ liệu.</p>
+              ) : (
+                <div className="divide-y divide-bdr">
+                  {analytics.topDays.map((d, idx) => (
+                    <div key={d.day} className="py-1.5 flex items-center justify-between gap-2 text-xs">
+                      <span className="text-tx font-semibold truncate">
+                        {idx + 1}. {d.day}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-act border border-bdr font-bold text-tx font-tabular shrink-0">
+                        {d.count} phiếu
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Main Tab Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-bdr pb-2">
@@ -963,10 +1206,11 @@ export default function MaintenanceCenterClient() {
         <div className="space-y-4">
           {/* Filter Bar */}
           <div className="rounded-2xl bg-surf border border-bdr2 p-3.5 flex flex-wrap items-center gap-2.5">
-            <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-page border border-bdr">
+            <div className="inline-flex flex-wrap items-center gap-1 p-1 rounded-xl bg-page border border-bdr">
               {(
                 [
                   { id: 'active', label: `Chưa xong (${kpis.active})` },
+                  { id: 'overdue', label: `Quá hạn SLA (${kpis.slaOverdue})` },
                   { id: 'open', label: `Mới báo (${kpis.open})` },
                   { id: 'in_progress', label: `Đang sửa (${kpis.inProgress})` },
                   { id: 'resolved', label: `Đã xong (${kpis.resolved})` },
@@ -978,7 +1222,13 @@ export default function MaintenanceCenterClient() {
                   type="button"
                   onClick={() => setStatusFilter(f.id)}
                   className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                    statusFilter === f.id ? 'bg-act text-tx shadow-sm border border-bdr2' : 'text-mu hover:text-tx'
+                    statusFilter === f.id
+                      ? f.id === 'overdue' && kpis.slaOverdue > 0
+                        ? 'bg-dgrbg text-dgr border border-dgr/40 shadow-sm'
+                        : 'bg-act text-tx shadow-sm border border-bdr2'
+                      : f.id === 'overdue' && kpis.slaOverdue > 0
+                      ? 'text-dgr hover:bg-dgrbg/50'
+                      : 'text-mu hover:text-tx'
                   }`}
                 >
                   {f.label}
@@ -1047,14 +1297,15 @@ export default function MaintenanceCenterClient() {
                 const canOp = canOperateTicket(ticket);
                 const canDel = canDeleteSingleTicket(ticket);
                 const isSelectedResolved = selectedResolvedIds.has(ticket.id);
+                const sla = getTicketSlaStatus(ticket, nowTick);
                 const href3D = `/ktx-3d?mode=maintenance&ktx=${encodeURIComponent(ticket.ktx)}&day=${encodeURIComponent(ticket.day)}&room=${encodeURIComponent(normalizeRoomLabel(ticket.phong_so))}`;
 
                 return (
                   <div
                     key={ticket.id}
                     className={`rounded-2xl bg-surf border p-4 transition-colors ${
-                      ticket.priority === 'urgent' && ticket.status !== 'resolved'
-                        ? 'border-dgr/45'
+                      sla.state === 'overdue' || (ticket.priority === 'urgent' && ticket.status !== 'resolved')
+                        ? 'border-dgr/50'
                         : isSelectedResolved
                         ? 'border-pri2 bg-act/40'
                         : 'border-bdr2'
@@ -1114,6 +1365,21 @@ export default function MaintenanceCenterClient() {
                                 Đã hoàn thành
                               </span>
                             )}
+
+                            <span
+                              className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md font-tabular border ${
+                                sla.state === 'overdue'
+                                  ? 'bg-dgrbg text-dgr border-dgr/40'
+                                  : sla.state === 'warning'
+                                  ? 'tint-wn text-wn border-wn/40'
+                                  : sla.state === 'resolved'
+                                  ? 'bg-page text-mu border-bdr'
+                                  : 'bg-page text-mu border-bdr'
+                              }`}
+                            >
+                              <Timer size={11} />
+                              {sla.label}
+                            </span>
 
                             <span className="text-[11px] text-mu ml-auto sm:ml-0">
                               {ticket.source === 'qr' ? 'Quét QR cửa phòng' : 'Tạo nội bộ'} · {formatVnDateTime(ticket.created_at)}
@@ -1760,6 +2026,34 @@ export default function MaintenanceCenterClient() {
                   >
                     {printingPoster ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}
                     <span>In poster dán cửa</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Batch 6-up A4 Room QR Printing */}
+              <div className="rounded-xl bg-act/60 border border-bdr2 p-3.5 space-y-2.5">
+                <div className="flex items-center gap-2 text-xs font-bold text-tx">
+                  <Layers size={14} className="text-amber-500 shrink-0" />
+                  <span>In hàng loạt tem QR dán cửa (Khổ A4 · 6 tem/trang có nét cắt)</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={printingBatch || qrRooms.length === 0}
+                    onClick={() => void handlePrintBatchQr('day')}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surf hover:bg-bdg border border-bdr2 text-xs font-bold text-tx cursor-pointer disabled:opacity-50"
+                  >
+                    {printingBatch ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} className="text-amber-500" />}
+                    <span>In cả {qrDay || 'Dãy'} ({qrRooms.length} phòng)</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={printingBatch || allRoomsInQrKtx.length === 0}
+                    onClick={() => void handlePrintBatchQr('ktx')}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surf hover:bg-bdg border border-bdr2 text-xs font-bold text-tx cursor-pointer disabled:opacity-50"
+                  >
+                    {printingBatch ? <Loader2 size={13} className="animate-spin" /> : <Layers size={13} className="text-lnk" />}
+                    <span>In toàn bộ {qrKtx || 'KTX'} ({allRoomsInQrKtx.length} phòng)</span>
                   </button>
                 </div>
               </div>

@@ -12,6 +12,7 @@ import {
   Loader2,
   Building2,
   CheckCircle2,
+  Layers,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useKtxStructure } from '@/lib/ktxStructure';
@@ -24,7 +25,12 @@ import {
 import { buildRoomIssueQrUrl } from '@/lib/maintenanceTickets';
 import { naturalSortCompare } from '@/data/workers';
 import { QrCodeImage, downloadQrPng } from '@/components/QrCodeImage';
-import { PosterPaperSize, printQrBulletinPoster } from '@/lib/qrPosterPrint';
+import {
+  BatchRoomQrItem,
+  PosterPaperSize,
+  printBatchRoomIssueQrStickers,
+  printQrBulletinPoster,
+} from '@/lib/qrPosterPrint';
 
 export default function RoomIssueQrPortalTab() {
   const { ktxGroups } = useKtxStructure();
@@ -34,6 +40,7 @@ export default function RoomIssueQrPortalTab() {
   const [selectedRoom, setSelectedRoom] = useState('');
   const [paperSize, setPaperSize] = useState<PosterPaperSize>('A5');
   const [printing, setPrinting] = useState(false);
+  const [printingBatch, setPrintingBatch] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -125,6 +132,67 @@ export default function RoomIssueQrPortalTab() {
       if (!ok) toast.error('Không thể tạo bản in poster QR.');
     } finally {
       setPrinting(false);
+    }
+  };
+
+  const allRoomsInKtx = useMemo<BatchRoomQrItem[]>(() => {
+    if (!selectedKtx) return [];
+    const seen = new Set<string>();
+    const list: BatchRoomQrItem[] = [];
+    for (const d of dayOptions) {
+      const rSet = new Set<string>();
+      facilities
+        .filter(f => f.ktx === selectedKtx && f.day === d)
+        .forEach(f => {
+          const norm = normalizeRoomLabel(f.phong_khu_vuc);
+          if (norm) rSet.add(norm);
+        });
+      const sortedRooms = Array.from(rSet).sort(naturalSortCompare);
+      for (const r of sortedRooms) {
+        const key = `${selectedKtx}||${d}||${r}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        list.push({
+          ktx: selectedKtx,
+          day: d,
+          roomLabel: formatRoomDisplay(r),
+          url: buildRoomIssueQrUrl(origin, selectedKtx, d, r),
+        });
+      }
+    }
+    return list;
+  }, [selectedKtx, dayOptions, facilities, origin]);
+
+  const handlePrintBatch = async (scope: 'day' | 'ktx') => {
+    const items: BatchRoomQrItem[] =
+      scope === 'day'
+        ? roomOptions.map(r => ({
+            ktx: selectedKtx,
+            day: selectedDay,
+            roomLabel: formatRoomDisplay(r),
+            url: buildRoomIssueQrUrl(origin, selectedKtx, selectedDay, r),
+          }))
+        : allRoomsInKtx;
+
+    if (items.length === 0) {
+      toast.error('Không có danh sách phòng để in tem QR hàng loạt.');
+      return;
+    }
+
+    setPrintingBatch(true);
+    try {
+      const title =
+        scope === 'day'
+          ? `TEM QR BÁO HỎNG CỬA PHÒNG — ${selectedKtx} · ${selectedDay} (${items.length} phòng)`
+          : `TEM QR BÁO HỎNG CỬA PHÒNG — TOÀN BỘ ${selectedKtx} (${items.length} phòng)`;
+      const ok = await printBatchRoomIssueQrStickers(items, title);
+      if (ok) {
+        toast.success(`Đã mở bản in A4 gồm ${items.length} tem QR (${Math.ceil(items.length / 6)} trang).`);
+      } else {
+        toast.error('Không thể tạo bản in tem QR hàng loạt.');
+      }
+    } finally {
+      setPrintingBatch(false);
     }
   };
 
@@ -270,6 +338,37 @@ export default function RoomIssueQrPortalTab() {
               {printing ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
               <span>In Poster QR</span>
             </button>
+          </div>
+
+          {/* Batch 6-up A4 Room QR Printing */}
+          <div className="rounded-xl bg-act/60 border border-bdr2 p-4 space-y-2.5">
+            <div className="flex items-center gap-2 text-xs font-bold text-tx">
+              <Layers size={15} className="text-amber-500 shrink-0" />
+              <span>In hàng loạt tem QR dán cửa (Khổ A4 — 6 tem/trang có đường kẻ cắt)</span>
+            </div>
+            <p className="text-xs text-mu">
+              Tự động gom 6 phòng mỗi trang giấy A4 để in nhanh toàn bộ dãy nhà hoặc cả khu KTX chỉ với 1 lần bấm.
+            </p>
+            <div className="flex flex-wrap items-center gap-2 pt-0.5">
+              <button
+                type="button"
+                disabled={printingBatch || roomOptions.length === 0}
+                onClick={() => void handlePrintBatch('day')}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-surf hover:bg-bdg border border-bdr2 text-xs font-bold text-tx cursor-pointer disabled:opacity-50"
+              >
+                {printingBatch ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} className="text-amber-500" />}
+                <span>In cả {selectedDay || 'Dãy hiện tại'} ({roomOptions.length} phòng)</span>
+              </button>
+              <button
+                type="button"
+                disabled={printingBatch || allRoomsInKtx.length === 0}
+                onClick={() => void handlePrintBatch('ktx')}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-surf hover:bg-bdg border border-bdr2 text-xs font-bold text-tx cursor-pointer disabled:opacity-50"
+              >
+                {printingBatch ? <Loader2 size={14} className="animate-spin" /> : <Layers size={14} className="text-lnk" />}
+                <span>In toàn bộ {selectedKtx || 'KTX'} ({allRoomsInKtx.length} phòng)</span>
+              </button>
+            </div>
           </div>
         </div>
 

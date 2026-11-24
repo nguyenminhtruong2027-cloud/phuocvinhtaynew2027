@@ -25,6 +25,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const viewport: Viewport = {
+  themeColor: '#0f172a',
   width: 'device-width',
   initialScale: 1,
 };
@@ -32,8 +33,17 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: 'KTX Phước Vĩnh Tây — Quản Lý Ký Túc Xá Công Nhân',
   description: 'Hệ thống quản lý ký túc xá nội bộ cho công nhân xây dựng — theo dõi phòng, công nhân và tổ trưởng tại KTX Phước Vĩnh Tây.',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'KTX PVT',
+  },
   icons: {
-    icon: [{ url: '/favicon.ico', type: 'image/x-icon' }],
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: '/favicon.ico', type: 'image/x-icon' },
+    ],
+    apple: '/apple-touch-icon.png',
   },
 };
 

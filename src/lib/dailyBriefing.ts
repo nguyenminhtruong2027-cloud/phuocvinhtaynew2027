@@ -25,6 +25,9 @@ export interface DailyBriefingInput {
   overdueTamTru: number;
   facilityIssuesCount: number;
   maintenanceBedsCount: number;
+  activeMaintenanceTicketsCount?: number;
+  urgentMaintenanceTicketsCount?: number;
+  overdueSlaTicketsCount?: number;
   pendingRegistrationsCount?: number;
   pendingCheckoutsCount?: number;
   buildingStats: DailyBriefingBuildingStat[];
@@ -90,6 +93,24 @@ export function buildZaloDailyBriefing(input: DailyBriefingInput): string {
     `- Phòng quá tải: ${input.overloadedRooms} phòng`,
     `- Bảo trì CSVC: ${input.facilityIssuesCount} phòng có ghi chú hỏng · ${input.maintenanceBedsCount} giường bảo trì`
   );
+
+  if (typeof input.activeMaintenanceTicketsCount === 'number') {
+    const urgentPart =
+      (input.urgentMaintenanceTicketsCount ?? 0) > 0
+        ? ` (${input.urgentMaintenanceTicketsCount} khẩn cấp`
+        : '';
+    const overduePart =
+      (input.overdueSlaTicketsCount ?? 0) > 0
+        ? urgentPart
+          ? ` · ${input.overdueSlaTicketsCount} quá hạn SLA)`
+          : ` (${input.overdueSlaTicketsCount} quá hạn SLA)`
+        : urgentPart
+        ? ')'
+        : '';
+    lines.push(
+      `- Phiếu báo hỏng QR: ${input.activeMaintenanceTicketsCount} phiếu chưa xong${urgentPart}${overduePart}`
+    );
+  }
 
   if (
     typeof input.pendingRegistrationsCount === 'number' ||
@@ -259,6 +280,16 @@ export function buildPrintableDailyBriefingHtml(input: DailyBriefingInput): stri
     <div><strong>Phòng quá tải:</strong> ${input.overloadedRooms} phòng</div>
     <div><strong>Sự cố thiết bị CSVC:</strong> ${input.facilityIssuesCount} phòng có ghi chú</div>
     <div><strong>Giường đang bảo trì:</strong> ${input.maintenanceBedsCount} giường</div>
+    ${
+      typeof input.activeMaintenanceTicketsCount === 'number'
+        ? `<div><strong>Phiếu báo hỏng QR:</strong> ${input.activeMaintenanceTicketsCount} chưa xong (${input.urgentMaintenanceTicketsCount ?? 0} khẩn cấp · ${input.overdueSlaTicketsCount ?? 0} quá hạn SLA)</div>`
+        : ''
+    }
+    ${
+      typeof input.pendingRegistrationsCount === 'number' || typeof input.pendingCheckoutsCount === 'number'
+        ? `<div><strong>Hồ sơ QR chờ duyệt:</strong> ${input.pendingRegistrationsCount ?? 0} đăng ký · ${input.pendingCheckoutsCount ?? 0} check-out</div>`
+        : ''
+    }
   </div>
 
   <div class="sign">

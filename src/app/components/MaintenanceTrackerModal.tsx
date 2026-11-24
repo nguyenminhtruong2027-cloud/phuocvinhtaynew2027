@@ -24,6 +24,11 @@ import {
 } from '@/lib/facilityCapacity';
 import { hasFacilityIssueNote } from '@/lib/smartRoomAssign';
 import { naturalSortCompare } from '@/data/workers';
+import {
+  MaintenanceTicket,
+  getTicketCategoryShortLabel,
+  getTicketSlaStatus,
+} from '@/lib/maintenanceTickets';
 
 export interface MaintenanceBedItem {
   id: string;
@@ -36,6 +41,7 @@ export interface MaintenanceBedItem {
 interface Props {
   facilities: FacilityItem[];
   maintenanceBeds: MaintenanceBedItem[];
+  maintenanceTickets?: MaintenanceTicket[];
   onClose: () => void;
   onResolved: () => void;
 }
@@ -54,6 +60,7 @@ interface UnifiedMaintenanceRow {
 export default function MaintenanceTrackerModal({
   facilities,
   maintenanceBeds,
+  maintenanceTickets = [],
   onClose,
   onResolved,
 }: Props) {
@@ -195,19 +202,80 @@ export default function MaintenanceTrackerModal({
                 Theo dõi Sự cố CSVC & Bảo trì tập trung
               </h3>
               <p className="text-xs text-mu tabular-nums mt-0.5">
-                {facilityCount} phòng báo hỏng thiết bị · {bedCount} giường đang bảo trì · Đồng bộ trực tiếp với Bản đồ 3D
+                {maintenanceTickets.length} phiếu báo hỏng QR · {facilityCount} phòng CSVC · {bedCount} giường bảo trì
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 rounded-lg text-mu hover:text-tx hover:bg-act transition-colors cursor-pointer"
-            aria-label="Đóng"
-          >
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <Link
+              href="/maintenance"
+              onClick={onClose}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-pri hover:bg-pri2 text-white text-xs font-bold transition-colors whitespace-nowrap"
+            >
+              <Wrench size={13} />
+              <span>Trung tâm Bảo trì</span>
+            </Link>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 rounded-lg text-mu hover:text-tx hover:bg-act transition-colors cursor-pointer"
+              aria-label="Đóng"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
+
+        {/* Active QR Maintenance Tickets Strip */}
+        {maintenanceTickets.length > 0 && (
+          <div className="px-5 py-3 border-b border-bdr bg-act/60 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold text-tx">
+                Phiếu báo hỏng QR đang mở ({maintenanceTickets.length})
+              </span>
+              <Link
+                href="/maintenance"
+                onClick={onClose}
+                className="text-xs font-bold text-lnk hover:underline"
+              >
+                Xử lý ngay →
+              </Link>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {maintenanceTickets.slice(0, 4).map(t => {
+                const sla = getTicketSlaStatus(t);
+                return (
+                  <Link
+                    key={t.id}
+                    href="/maintenance"
+                    onClick={onClose}
+                    className={`rounded-xl bg-surf border px-3 py-2 text-xs hover:border-pri2 transition-colors ${
+                      sla.state === 'overdue' || t.priority === 'urgent' ? 'border-dgr/45' : 'border-bdr'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-tx truncate">
+                        {t.day} · {formatRoomDisplay(t.phong_so)} · {getTicketCategoryShortLabel(t.category)}
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                          sla.state === 'overdue'
+                            ? 'bg-dgrbg text-dgr'
+                            : t.priority === 'urgent'
+                            ? 'bg-dgrbg text-dgr'
+                            : 'tint-wn text-wn'
+                        }`}
+                      >
+                        {sla.state === 'overdue' ? 'Quá SLA' : t.priority === 'urgent' ? 'Khẩn cấp' : sla.elapsedLabel}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-mu truncate mt-0.5">{t.description}</p>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Filter Bar */}
         <div className="px-5 py-3 border-b border-bdr bg-page/50 flex flex-wrap items-center gap-2.5">

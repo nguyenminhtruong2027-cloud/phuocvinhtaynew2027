@@ -329,6 +329,252 @@ export async function bulkDeleteResolvedTickets(ticketIds: string[]): Promise<nu
   return count ?? ticketIds.length;
 }
 
+// ─── SLA & Maintenance Analytics Helpers ────────────────────────────────────
+export type TicketSlaState = 'ok' | 'warning' | 'overdue' | 'resolved';
+
+export interface TicketSlaResult {
+  state: TicketSlaState;
+  elapsedMinutes: number;
+  limitMinutes: number;
+  overdueMinutes: number;
+  elapsedLabel: string;
+  label: string;
+}
+
+export function formatDurationVi(totalMinutes: number): string {
+  const mins = Math.max(0, Math.round(totalMinutes));
+  if (mins < 60) return `${mins}p`;
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  if (hours < 24) {
+    return remMins > 0 ? `${hours}g ${remMins}p` : `${hours}g`;
+  }
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return remHours > 0 ? `${days} ngày ${remHours}g` : `${days} ngày`;
+}
+
+/**
+ * SLA chuẩn vận hành KTX:
+ * - Khẩn cấp (urgent): tối đa 2 giờ (120p), cảnh báo từ 90p
+ * - Bình thường (normal): tối đa 24 giờ (1440p), cảnh báo từ 18 giờ (1080p)
+ */
+export function getTicketSlaStatus(
+  ticket: MaintenanceTicket,
+  nowMs: number = Date.now()
+): TicketSlaResult {
+  const createdMs = new Date(ticket.created_at).getTime();
+  const limitMinutes = ticket.priority === 'urgent' ? 120 : 1440;
+  const warningMinutes = ticket.priority === 'urgent' ? 90 : 1080;
+
+  if (!Number.isFinite(createdMs)) {
+    return {
+      state: ticket.status === 'resolved' ? 'resolved' : 'ok',
+      elapsedMinutes: 0,
+      limitMinutes,
+      overdueMinutes: 0,
+      elapsedLabel: '0p',
+      label: ticket.status === 'resolved' ? 'Đã xong' : 'Trong hạn',
+    };
+  }
+
+  if (ticket.status === 'resolved') {
+    const resolvedMs = ticket.resolved_at ? new Date(ticket.resolved_at).getTime() : nowMs;
+    const elapsedMinutes = Math.max(0, Math.round((resolvedMs - createdMs) / 60000));
+    const overdueMinutes = Math.max(0, elapsedMinutes - limitMinutes);
+    return {
+      state: 'resolved',
+      elapsedMinutes,
+      limitMinutes,
+      overdueMinutes,
+      elapsedLabel: formatDurationVi(elapsedMinutes),
+      label: `Xử lý trong ${formatDurationVi(elapsedMinutes)}`,
+    };
+  }
+
+  const elapsedMinutes = Math.max(0, Math.round((nowMs - createdMs) / 60000));
+  if (elapsedMinutes > limitMinutes) {
+    const overdueMinutes = elapsedMinutes - limitMinutes;
+    return {
+      state: 'overdue',
+      elapsedMinutes,
+      limitMinutes,
+      overdueMinutes,
+      elapsedLabel: formatDurationVi(elapsedMinutes),
+      label: `Quá hạn SLA +${formatDurationVi(overdueMinutes)}`,
+    };
+  }
+
+  if (elapsedMinutes >= warningMinutes) {
+    const left = Math.max(1, limitMinutes - elapsedMinutes);
+    return {
+      state: 'warning',
+      elapsedMinutes,
+      limitMinutes,
+      overdueMinutes: 0,
+      elapsedLabel: formatDurationVi(elapsedMinutes),
+      label: `Sắp quá hạn (còn ${formatDurationVi(left)})`,
+    };
+  }
+
+  return {
+    state: 'ok',
+    elapsedMinutes,
+    limitMinutes,
+    overdueMinutes: 0,
+    elapsedLabel: formatDurationVi(elapsedMinutes),
+    label: `Đã chờ ${formatDurationVi(elapsedMinutes)}`,
+  };
+}
+
+export interface MaintenanceAnalytics {
+  totalTickets: number;
+  activeCount: number;
+  resolvedCount: number;
+  slaOverdueCount: number;
+  slaWarningCount: number;
+  slaCompliancePct: number | null;
+  avgResolveMinutes: number | null;
+  topCategories: Array<{
+    category: TicketCategory;
+    label: string;
+    count: number;
+    pct: number;
+  }>;
+  topRooms: Array<{
+    ktx: string;
+    day: string;
+    phong_so: string;
+    count: number;
+  }>;
+  topDays: Array<{
+    day: string;
+    count: number;
+  }>;
+}
+
+export function computeMaintenanceAnalytics(
+  tickets: MaintenanceTicket[],
+  nowMs: number = Date.now()
+): MaintenanceAnalytics {
+  let activeCount = 0;
+  let resolvedCount = 0;
+  let slaOverdueCount = 0;
+  let slaWarningCount = 0;
+  let resolveMinutesSum = 0;
+  let resolveDurationCount = 0;
+  let resolvedWithinSla = 0;
+
+  const categoryCounts = new Map<TicketCategory, number>();
+  const roomCounts = new Map<string, { ktx: string; day: string; phong_so: string; count: number }>();
+  const dayCounts = new Map<string, number>();
+
+  for (const t of tickets) {
+    const sla = getTicketSlaStatus(t, nowMs);
+    if (t.status === 'resolved') {
+      resolvedCount += 1;
+      if (t.resolved_at) {
+        resolveMinutesSum += sla.elapsedMinutes;
+        resolveDurationCount += 1;
+        if (sla.overdueMinutes === 0) resolvedWithinSla += 1;
+      }
+    } else {
+      activeCount += 1;
+      if (sla.state === 'overdue') slaOverdueCount += 1;
+      else if (sla.state === 'warning') slaWarningCount += 1;
+    }
+
+    categoryCounts.set(t.category, (categoryCounts.get(t.category) || 0) + 1);
+
+    const roomNorm = normalizeRoomLabel(t.phong_so) || t.phong_so;
+    const roomKey = `${t.ktx}||${t.day}||${roomNorm}`;
+    const existingRoom = roomCounts.get(roomKey);
+    if (existingRoom) {
+      existingRoom.count += 1;
+    } else {
+      roomCounts.set(roomKey, { ktx: t.ktx, day: t.day, phong_so: roomNorm, count: 1 });
+    }
+
+    if (t.day) {
+      dayCounts.set(t.day, (dayCounts.get(t.day) || 0) + 1);
+    }
+  }
+
+  const total = tickets.length;
+  const topCategories = Array.from(categoryCounts.entries())
+    .map(([category, count]) => ({
+      category,
+      label: getTicketCategoryShortLabel(category),
+      count,
+      pct: total > 0 ? Math.round((count / total) * 100) : 0,
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  const topRooms = Array.from(roomCounts.values())
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  const topDays = Array.from(dayCounts.entries())
+    .map(([day, count]) => ({ day, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  return {
+    totalTickets: total,
+    activeCount,
+    resolvedCount,
+    slaOverdueCount,
+    slaWarningCount,
+    slaCompliancePct:
+      resolveDurationCount > 0 ? Math.round((resolvedWithinSla / resolveDurationCount) * 100) : null,
+    avgResolveMinutes:
+      resolveDurationCount > 0 ? Math.round(resolveMinutesSum / resolveDurationCount) : null,
+    topCategories,
+    topRooms,
+    topDays,
+  };
+}
+
+/**
+ * Chuông báo tinh tế bằng Web Audio API khi có phiếu KHẨN CẤP mới (không phụ thuộc file âm thanh ngoài).
+ */
+export function playUrgentAlertChime(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+
+    const tones = [
+      { freq: 880, start: 0, dur: 0.14 },
+      { freq: 1174.66, start: 0.16, dur: 0.22 },
+    ];
+
+    tones.forEach(({ freq, start, dur }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + start);
+      gain.gain.setValueAtTime(0.0001, now + start);
+      gain.gain.exponentialRampToValueAtTime(0.14, now + start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + start);
+      osc.stop(now + start + dur + 0.02);
+    });
+
+    setTimeout(() => {
+      void ctx.close().catch(() => {});
+    }, 600);
+  } catch {
+    // Browser autoplay policy may block until first user gesture; fail silently
+  }
+}
+
 export const MAINTENANCE_SETUP_SQL = `-- Chạy 1 lần trong Supabase SQL Editor để kích hoạt phân quyền Kỹ thuật viên & Phiếu báo hỏng QR
 -- Chi tiết đầy đủ nằm tại supabase/migrations/20261129000000_technician_rbac_and_maintenance_tickets.sql
 

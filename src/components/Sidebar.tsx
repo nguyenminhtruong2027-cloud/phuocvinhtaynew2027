@@ -12,6 +12,8 @@ import { createClient } from '@/lib/supabase/client';
 import ThemeSwitcher from '@/components/ui/ThemeSwitcher';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { openCommandPalette } from '@/components/ui/CommandPalette';
+import NotificationCenter from '@/components/NotificationCenter';
+import PWAInstallButton from '@/components/PWAInstallButton';
 
 interface NavItem {
   id: string;
@@ -369,6 +371,11 @@ export default function Sidebar() {
             )}
           </button>
 
+          {/* Centralized Realtime Notification Center */}
+          <div className="mb-2.5">
+            <NotificationCenter collapsed={collapsed} />
+          </div>
+
           {!collapsed && (
             <p className="px-3 pt-1 pb-1.5 text-[10px] font-bold text-ic uppercase tracking-widest">
               CHỨC NĂNG CHÍNH
@@ -422,6 +429,7 @@ export default function Sidebar() {
                 {!collapsed && <span className="truncate">{refreshing ? 'Đang đồng bộ...' : 'Đồng bộ dữ liệu'}</span>}
               </button>
             )}
+            <PWAInstallButton collapsed={collapsed} />
             <ThemeSwitcher showLabel={!collapsed} />
           </div>
         </nav>
@@ -491,7 +499,9 @@ export default function Sidebar() {
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1">
+          <NotificationCenter compact />
+          <PWAInstallButton compact />
           <button
             type="button"
             onClick={openCommandPalette}
@@ -502,14 +512,16 @@ export default function Sidebar() {
             <Search size={17} />
           </button>
           <ThemeSwitcher compact />
-          <button
-            onClick={refreshWorkers}
-            disabled={refreshing}
-            className="p-2 rounded-xl text-nav hover:text-tx hover:bg-act transition-colors duration-100 disabled:opacity-50"
-            title="Tải lại dữ liệu"
-          >
-            <RefreshCw size={17} className={refreshing ? 'animate-spin text-pri2' : ''} />
-          </button>
+          {!isTechnician && (
+            <button
+              onClick={refreshWorkers}
+              disabled={refreshing}
+              className="p-2 rounded-xl text-nav hover:text-tx hover:bg-act transition-colors duration-100 disabled:opacity-50"
+              title="Tải lại dữ liệu"
+            >
+              <RefreshCw size={17} className={refreshing ? 'animate-spin text-pri2' : ''} />
+            </button>
+          )}
           <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shadow-sm ${avatarColor}`}>
             {avatarInitial}
           </div>
@@ -584,14 +596,17 @@ export default function Sidebar() {
                 )}
 
                 <div className="pt-4 border-t border-bdr mt-3 space-y-1">
-                  <button
-                    onClick={() => { refreshWorkers(); setMobileOpen(false); }}
-                    disabled={refreshing}
-                    className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-nav hover:bg-act hover:text-tx transition-colors duration-100 disabled:opacity-60 text-sm font-semibold"
-                  >
-                    <RefreshCw size={18} className={refreshing ? 'animate-spin text-pri2' : ''} />
-                    <span>{refreshing ? 'Đang đồng bộ...' : 'Đồng bộ dữ liệu'}</span>
-                  </button>
+                  <PWAInstallButton />
+                  {!isTechnician && (
+                    <button
+                      onClick={() => { refreshWorkers(); setMobileOpen(false); }}
+                      disabled={refreshing}
+                      className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-nav hover:bg-act hover:text-tx transition-colors duration-100 disabled:opacity-60 text-sm font-semibold"
+                    >
+                      <RefreshCw size={18} className={refreshing ? 'animate-spin text-pri2' : ''} />
+                      <span>{refreshing ? 'Đang đồng bộ...' : 'Đồng bộ dữ liệu'}</span>
+                    </button>
+                  )}
                 </div>
               </div>
 

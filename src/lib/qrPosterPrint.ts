@@ -236,3 +236,210 @@ export async function printQrBulletinPoster(config: QrPosterConfig): Promise<boo
   printHtmlViaIframe(html);
   return true;
 }
+
+export interface BatchRoomQrItem {
+  ktx: string;
+  day: string;
+  roomLabel: string;
+  url: string;
+}
+
+/**
+ * In hàng loạt tem QR báo hỏng dán cửa phòng theo bố cục A4 (6 tem/trang — 2 cột x 3 hàng, có đường kẻ cắt).
+ */
+export async function printBatchRoomIssueQrStickers(
+  items: BatchRoomQrItem[],
+  headerTitle: string
+): Promise<boolean> {
+  if (!items || items.length === 0) return false;
+
+  const qrDataUrls = await Promise.all(
+    items.map(item => generateQrDataUrl(item.url, { width: 320, margin: 2 }))
+  );
+
+  // Split into pages of 6 stickers (2 columns x 3 rows)
+  const pages: Array<Array<{ item: BatchRoomQrItem; qr: string }>> = [];
+  for (let i = 0; i < items.length; i += 6) {
+    const chunk: Array<{ item: BatchRoomQrItem; qr: string }> = [];
+    for (let j = i; j < Math.min(i + 6, items.length); j++) {
+      const qr = qrDataUrls[j];
+      if (qr) chunk.push({ item: items[j], qr });
+    }
+    if (chunk.length > 0) pages.push(chunk);
+  }
+  if (pages.length === 0) return false;
+
+  const pagesHtml = pages
+    .map((page, pageIdx) => {
+      const cardsHtml = page
+        .map(
+          ({ item, qr }) => `
+            <div class="sticker">
+              <div class="st-top">
+                <span class="st-org">KTX PHƯỚC VĨNH TÂY</span>
+                <span class="st-badge">BÁO HỎNG QR</span>
+              </div>
+              <div class="st-body">
+                <div class="st-room">${escapeHtml(item.day)} · ${escapeHtml(item.roomLabel)}</div>
+                <div class="st-ktx">${escapeHtml(item.ktx)}</div>
+                <div class="st-qr">
+                  <img src="${qr}" alt="${escapeHtml(item.day)} ${escapeHtml(item.roomLabel)}" />
+                </div>
+                <div class="st-sub">Quét bằng Zalo / Camera — Tự điền sẵn phòng</div>
+                <div class="st-cats">Điều hòa · Quạt · Đèn điện · Nước · Giường tủ · Khóa cửa</div>
+              </div>
+              <div class="st-foot">1. Quét mã &nbsp;→&nbsp; 2. Chọn thiết bị hỏng &nbsp;→&nbsp; 3. Gửi Tổ Kỹ thuật</div>
+            </div>
+          `
+        )
+        .join('');
+
+      return `
+        <section class="page ${pageIdx < pages.length - 1 ? 'page-break' : ''}">
+          <div class="page-head">
+            <span>${escapeHtml(headerTitle)}</span>
+            <span>Trang ${pageIdx + 1}/${pages.length} · Cắt theo đường nét đứt dán cửa phòng</span>
+          </div>
+          <div class="grid-6">
+            ${cardsHtml}
+          </div>
+        </section>
+      `;
+    })
+    .join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(headerTitle)}</title>
+  <style>
+    @page { size: A4 portrait; margin: 8mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      color: #0f172a;
+      background: #ffffff;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .page {
+      width: 100%;
+    }
+    .page-break {
+      page-break-after: always;
+      break-after: page;
+    }
+    .page-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 9.5px;
+      color: #475569;
+      padding: 0 2px 5px;
+      margin-bottom: 5px;
+      border-bottom: 1px solid #cbd5e1;
+      font-weight: 600;
+    }
+    .grid-6 {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      grid-template-rows: repeat(3, 1fr);
+      gap: 6mm;
+      height: 270mm;
+    }
+    .sticker {
+      border: 1.5px dashed #64748b;
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      background: #ffffff;
+    }
+    .st-top {
+      background: #b45309;
+      color: #ffffff;
+      padding: 6px 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .st-org {
+      font-size: 9.5px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+    }
+    .st-badge {
+      font-size: 8.5px;
+      font-weight: 800;
+      background: rgba(255,255,255,0.2);
+      border: 1px solid rgba(255,255,255,0.35);
+      border-radius: 999px;
+      padding: 2px 7px;
+    }
+    .st-body {
+      flex: 1;
+      padding: 7px 10px 6px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+    .st-room {
+      font-size: 16px;
+      font-weight: 900;
+      color: #0f172a;
+      letter-spacing: -0.01em;
+      line-height: 1.15;
+    }
+    .st-ktx {
+      font-size: 9.5px;
+      font-weight: 600;
+      color: #64748b;
+      margin-top: 2px;
+    }
+    .st-qr {
+      margin: 6px 0 5px;
+      padding: 5px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 8px;
+      background: #ffffff;
+    }
+    .st-qr img {
+      width: 38mm;
+      height: 38mm;
+      display: block;
+    }
+    .st-sub {
+      font-size: 9.5px;
+      font-weight: 700;
+      color: #b45309;
+    }
+    .st-cats {
+      font-size: 8.5px;
+      color: #475569;
+      margin-top: 2px;
+    }
+    .st-foot {
+      background: #f8fafc;
+      border-top: 1px solid #e2e8f0;
+      padding: 5px 8px;
+      text-align: center;
+      font-size: 8.5px;
+      font-weight: 700;
+      color: #334155;
+    }
+  </style>
+</head>
+<body>
+  ${pagesHtml}
+</body>
+</html>`;
+
+  printHtmlViaIframe(html);
+  return true;
+}
+

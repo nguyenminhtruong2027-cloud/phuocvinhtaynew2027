@@ -41,6 +41,11 @@ import { fetchWorkerFluctuationReport, getVNDateString } from '@/lib/workerFluct
 import { hasFacilityIssueNote } from '@/lib/smartRoomAssign';
 import { daysSinceVN } from '@/lib/vnDate';
 import type { DailyBriefingInput } from '@/lib/dailyBriefing';
+import {
+  fetchMaintenanceTickets,
+  getTicketSlaStatus,
+  type MaintenanceTicket,
+} from '@/lib/maintenanceTickets';
 
 const RoomDrawer = dynamic(() => import('./components/RoomDrawer'), { ssr: false });
 const TopUnitsRankingCard = dynamic(() => import('./components/TopUnitsRankingCard'), { ssr: false });
@@ -648,6 +653,7 @@ export default function OccupancyDashboardPage() {
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [roomGenderMap, setRoomGenderMap] = useState<Record<string, 'male' | 'female' | 'auto'>>({});
   const [capacities, setCapacities] = useState<RoomCapacityMap>({});
+  const [activeMaintenanceTickets, setActiveMaintenanceTickets] = useState<MaintenanceTicket[]>([]);
   const [facilitiesList, setFacilitiesList] = useState<FacilityItem[]>([]);
   const [roomFilterMode, setRoomFilterMode] = useState<'all' | 'overloaded' | 'empty'>('all');
   const [showOverloadedModal, setShowOverloadedModal] = useState(false);
@@ -742,11 +748,11 @@ export default function OccupancyDashboardPage() {
     };
   }, []);
 
-  // Load maintenance beds + pending QR counts for Maintenance Tracker & Daily Briefing
+  // Load maintenance beds + active QR maintenance tickets + pending QR counts
   const reloadOperationalSupportData = useCallback(async () => {
     try {
       const supabase = createClient();
-      const [bedsRes, qrRes] = await Promise.all([
+      const [bedsRes, qrRes, ticketsRes] = await Promise.all([
         supabase
           .from('beds')
           .select('id, ktx, day, phong_so, giuong')
@@ -755,6 +761,10 @@ export default function OccupancyDashboardPage() {
           .from('worker_registrations')
           .select('id, ghi_chu')
           .eq('status', 'pending'),
+        fetchMaintenanceTickets({ activeOnly: true }).catch(() => ({
+          tickets: [] as MaintenanceTicket[],
+          tableMissing: true,
+        })),
       ]);
       if (!bedsRes.error && bedsRes.data) {
         setMaintenanceBeds(bedsRes.data as MaintenanceBedItem[]);
@@ -768,6 +778,9 @@ export default function OccupancyDashboardPage() {
         }
         setPendingQrSummary({ registrations: reg, checkouts: chk });
       }
+      if (!ticketsRes.tableMissing) {
+        setActiveMaintenanceTickets(ticketsRes.tickets);
+      }
     } catch {
       // non-blocking
     }
@@ -775,6 +788,22 @@ export default function OccupancyDashboardPage() {
 
   useEffect(() => {
     void reloadOperationalSupportData();
+    const supabase = createClient();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const schedule = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        void reloadOperationalSupportData();
+      }, 450);
+    };
+    const channel = supabase
+      .channel('dashboard_maintenance_tickets_rt')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'maintenance_tickets' }, schedule)
+      .subscribe();
+    return () => {
+      if (timer) clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
   }, [reloadOperationalSupportData]);
 
   const isEmpty = !loading && workers.length === 0 && facilitiesList.length === 0;
@@ -1309,7 +1338,26 @@ export default function OccupancyDashboardPage() {
     [scopedFacilities]
   );
 
-  const totalMaintenanceCount = facilityIssuesCount + scopedMaintenanceBeds.length;
+  const scopedActiveTickets = useMemo(
+    () =>
+      activeMaintenanceTickets.filter(
+        t => selectedKTX === 'all' || t.ktx.trim() === selectedKTX.trim()
+      ),
+    [activeMaintenanceTickets, selectedKTX]
+  );
+
+  const urgentTicketsCount = useMemo(
+    () => scopedActiveTickets.filter(t => t.priority === 'urgent').length,
+    [scopedActiveTickets]
+  );
+
+  const overdueSlaTicketsCount = useMemo(
+    () => scopedActiveTickets.filter(t => getTicketSlaStatus(t).state === 'overdue').length,
+    [scopedActiveTickets]
+  );
+
+  const totalMaintenanceCount =
+    facilityIssuesCount + scopedMaintenanceBeds.length + scopedActiveTickets.length;
 
   const roomsMissingEquipment = useMemo(() => {
     return accommodationFacilities.filter(f => {
@@ -1427,6 +1475,9 @@ export default function OccupancyDashboardPage() {
       overdueTamTru,
       facilityIssuesCount,
       maintenanceBedsCount: scopedMaintenanceBeds.length,
+      activeMaintenanceTicketsCount: scopedActiveTickets.length,
+      urgentMaintenanceTicketsCount: urgentTicketsCount,
+      overdueSlaTicketsCount,
       pendingRegistrationsCount: pendingQrSummary.registrations,
       pendingCheckoutsCount: pendingQrSummary.checkouts,
       buildingStats,
@@ -1450,6 +1501,9 @@ export default function OccupancyDashboardPage() {
     todayStats.left,
     facilityIssuesCount,
     scopedMaintenanceBeds.length,
+    scopedActiveTickets.length,
+    urgentTicketsCount,
+    overdueSlaTicketsCount,
     pendingQrSummary,
   ]);
 
@@ -1662,6 +1716,7 @@ export default function OccupancyDashboardPage() {
               missingWorkerDataCount={missingData}
               facilityIssuesCount={facilityIssuesCount}
               maintenanceBedsCount={scopedMaintenanceBeds.length}
+              activeMaintenanceTicketsCount={scopedActiveTickets.length}
               onGoFacilities={() => router.push('/facilities')}
               onGoUserMgmt={() => router.push('/user-management')}
               onGoWorkers={handleMissingDataClick}
@@ -1710,7 +1765,13 @@ export default function OccupancyDashboardPage() {
                 />
                 <ExecutiveAlertCard
                   icon={Wrench}
-                  tone={totalMaintenanceCount > 0 ? 'amber' : 'slate'}
+                  tone={
+                    urgentTicketsCount > 0 || overdueSlaTicketsCount > 0
+                      ? 'rose'
+                      : totalMaintenanceCount > 0
+                      ? 'amber'
+                      : 'slate'
+                  }
                   label="Sự cố & Bảo trì"
                   value={`${totalMaintenanceCount} mục`}
                   onClick={() => setShowMaintenanceModal(true)}
@@ -2417,6 +2478,7 @@ export default function OccupancyDashboardPage() {
           <MaintenanceTrackerModal
             facilities={scopedFacilities}
             maintenanceBeds={scopedMaintenanceBeds}
+            maintenanceTickets={scopedActiveTickets}
             onClose={() => setShowMaintenanceModal(false)}
             onResolved={() => {
               void reloadOperationalSupportData();

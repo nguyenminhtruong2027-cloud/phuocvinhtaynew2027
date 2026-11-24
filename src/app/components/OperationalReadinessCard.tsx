@@ -35,6 +35,7 @@ interface Props {
   missingWorkerDataCount: number;
   facilityIssuesCount: number;
   maintenanceBedsCount: number;
+  activeMaintenanceTicketsCount?: number;
   onGoFacilities: () => void;
   onGoUserMgmt: () => void;
   onGoWorkers: () => void;
@@ -53,6 +54,7 @@ export default function OperationalReadinessCard({
   missingWorkerDataCount,
   facilityIssuesCount,
   maintenanceBedsCount,
+  activeMaintenanceTicketsCount = 0,
   onGoFacilities,
   onGoUserMgmt,
   onGoWorkers,
@@ -60,7 +62,7 @@ export default function OperationalReadinessCard({
   onOpenMaintenance,
   onDismiss,
 }: Props) {
-  const totalIssues = facilityIssuesCount + maintenanceBedsCount;
+  const totalIssues = facilityIssuesCount + maintenanceBedsCount + activeMaintenanceTicketsCount;
 
   const items: ReadinessCheckItem[] = [
     {
@@ -118,7 +120,7 @@ export default function OperationalReadinessCard({
       detail:
         missingWorkerDataCount === 0 && totalIssues === 0
           ? 'Không có hồ sơ thiếu phòng hoặc sự cố bảo trì tồn đọng'
-          : `${missingWorkerDataCount} hồ sơ chưa xếp phòng · ${facilityIssuesCount} phòng báo hỏng · ${maintenanceBedsCount} giường bảo trì`,
+          : `${missingWorkerDataCount} hồ sơ chưa xếp phòng · ${activeMaintenanceTicketsCount} phiếu QR · ${facilityIssuesCount} phòng CSVC · ${maintenanceBedsCount} giường bảo trì`,
       done: missingWorkerDataCount === 0 && totalIssues === 0,
       severity: missingWorkerDataCount === 0 && totalIssues === 0 ? 'ok' : 'warning',
       actionLabel: totalIssues > 0 ? 'Xem sự cố' : 'Xem hồ sơ',
