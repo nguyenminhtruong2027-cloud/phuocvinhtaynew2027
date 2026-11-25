@@ -454,26 +454,65 @@ export default function UserManagementClient() {
             } catch {}
 
             const { url: supabaseUrl, key: supabaseKey } = getSupabaseConfig();
-            const response = await fetch(`${supabaseUrl}/functions/v1/create-user`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'apikey': supabaseKey,
-                'Authorization': `Bearer ${session.access_token}`,
-              },
-              body: JSON.stringify({
-                email: form.email.trim(),
-                password: form.password,
-                full_name: form.full_name.trim(),
-                role: requestedRole,
-                assigned_blocks: effectiveBlocks,
-              }),
-            });
-            const result = await response.json().catch(() => ({}));
+            const callCreateUserEdge = async (roleToSend: UserRole) => {
+              const res = await fetch(`${supabaseUrl}/functions/v1/create-user`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'apikey': supabaseKey,
+                  'Authorization': `Bearer ${session!.access_token}`,
+                },
+                body: JSON.stringify({
+                  email: form.email.trim(),
+                  password: form.password,
+                  full_name: form.full_name.trim(),
+                  role: roleToSend,
+                  assigned_blocks: effectiveBlocks,
+                }),
+              });
+              const data = await res.json().catch(() => ({}));
+              return { res, data };
+            };
+
+            const { res: response, data: result } = await callCreateUserEdge(requestedRole);
             if (response.ok && !result.error) {
               createdUserId = result.user?.id || null;
+            } else if (
+              requestedRole === 'technician' &&
+              typeof result?.error === 'string' &&
+              /admin.*staff/i.test(result.error)
+            ) {
+              // Legacy deployed create-user Edge Function only allows 'admin' | 'staff'.
+              // Automatically create Auth user via 'staff', then switch profile role to 'technician'.
+              const fallback = await callCreateUserEdge('staff');
+              if (fallback.res.ok && !fallback.data?.error && fallback.data?.user?.id) {
+                createdUserId = fallback.data.user.id;
+                const { error: promoteTechErr } = await supabase
+                  .from('profiles')
+                  .update({
+                    full_name: form.full_name.trim(),
+                    role: 'technician',
+                    assigned_blocks: effectiveBlocks,
+                  })
+                  .eq('id', createdUserId);
+
+                if (promoteTechErr) {
+                  await loadProfiles();
+                  const hint = promoteTechErr.message.includes('profiles_role_check')
+                    ? ' Vui lòng chạy file SQL migration 20261129000000_technician_rbac_and_maintenance_tickets.sql trên Supabase SQL Editor rồi bấm Sửa tài khoản để chuyển sang Kỹ thuật viên.'
+                    : '';
+                  edgeError = `Đã tạo tài khoản đăng nhập nhưng chưa chuyển được sang vai trò Kỹ thuật viên (${promoteTechErr.message}).${hint}`;
+                }
+              } else if (fallback.data?.error) {
+                edgeError = fallback.data.error;
+              } else {
+                edgeError = `Lỗi Edge Function (${fallback.res.status}).`;
+              }
             } else if (result?.error) {
-              edgeError = result.error;
+              const hint = String(result.error).includes('profiles_role_check')
+                ? ' (Vui lòng chạy SQL khởi tạo phân quyền Kỹ thuật viên trong Supabase SQL Editor trước)'
+                : '';
+              edgeError = `${result.error}${hint}`;
             } else if (!response.ok) {
               edgeError = `Lỗi Edge Function (${response.status}).`;
             }
