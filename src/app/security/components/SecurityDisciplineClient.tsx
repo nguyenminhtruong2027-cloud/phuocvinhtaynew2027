@@ -32,6 +32,7 @@ import { getVNDateString } from '@/lib/vnDate';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { SlidingTabs } from '@/components/ui/MotionPrimitives';
 import { StatusTag } from '@/components/ui/StatusTag';
+import { CACHE_KEYS, getCachedData, setCachedData } from '@/lib/clientCache';
 import {
   BlacklistRecord,
   createDisciplineRecord,
@@ -60,11 +61,17 @@ export default function SecurityDisciplineClient() {
   const { addLog } = useAudit();
   const { workers } = useWorkers();
 
+  type SecurityBundleCache = {
+    disciplines: DisciplineRecord[];
+    blacklist: BlacklistRecord[];
+    tableMissing: boolean;
+  };
+  const cachedSecurity = getCachedData<SecurityBundleCache>(CACHE_KEYS.SECURITY_BUNDLE);
   const [activeTab, setActiveTab] = useState<SecurityTab>('disciplines');
-  const [disciplines, setDisciplines] = useState<DisciplineRecord[]>([]);
-  const [blacklist, setBlacklist] = useState<BlacklistRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [tableMissing, setTableMissing] = useState(false);
+  const [disciplines, setDisciplines] = useState<DisciplineRecord[]>(() => cachedSecurity?.disciplines ?? []);
+  const [blacklist, setBlacklist] = useState<BlacklistRecord[]>(() => cachedSecurity?.blacklist ?? []);
+  const [loading, setLoading] = useState<boolean>(() => !cachedSecurity);
+  const [tableMissing, setTableMissing] = useState<boolean>(() => cachedSecurity?.tableMissing ?? false);
   const [copiedPath, setCopiedPath] = useState(false);
 
   // Filters
@@ -135,20 +142,27 @@ export default function SecurityDisciplineClient() {
     [workers]
   );
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [discRes, blRes] = await Promise.all([fetchDisciplines(), fetchBlacklist()]);
+      const missing = discRes.tableMissing || blRes.tableMissing;
+      setCachedData(CACHE_KEYS.SECURITY_BUNDLE, {
+        disciplines: discRes.data,
+        blacklist: blRes.data,
+        tableMissing: missing,
+      });
       setDisciplines(discRes.data);
       setBlacklist(blRes.data);
-      setTableMissing(discRes.tableMissing || blRes.tableMissing);
+      setTableMissing(missing);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void loadData();
+    const hasWarm = Boolean(getCachedData(CACHE_KEYS.SECURITY_BUNDLE));
+    void loadData(hasWarm);
   }, [loadData]);
 
   const runGhostScan = useCallback(

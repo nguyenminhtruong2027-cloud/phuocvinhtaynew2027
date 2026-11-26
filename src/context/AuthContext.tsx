@@ -1,10 +1,11 @@
 'use client';
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   createClient,
   getRememberMePreference,
   setRememberMePreference,
 } from '@/lib/supabase/client';
+import { invalidateCachedData } from '@/lib/clientCache';
 
 export type UserRole = 'super_admin' | 'admin' | 'staff' | 'technician';
 
@@ -342,6 +343,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           loadedUserIdRef.current = null;
           loadingUserIdRef.current = null;
           clearCachedProfile();
+          invalidateCachedData();
           setCurrentUserState(null);
           setLoading(false);
           return;
@@ -482,6 +484,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loadedUserIdRef.current = null;
     loadingUserIdRef.current = null;
     clearCachedProfile();
+    invalidateCachedData();
     try {
       localStorage.removeItem('ktx_local_user');
     } catch {}
@@ -638,42 +641,76 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const setCurrentUser = useCallback((user: AppUser) => { setCurrentUserState(user); }, []);
 
+  const contextValue = useMemo<AuthContextValue>(() => ({
+    currentUser,
+    user: currentUser,
+    isSuperAdmin,
+    isSubAdmin,
+    isAdmin,
+    isStaff,
+    isTechnician,
+    isManager,
+    canOperateMaintenance,
+    canCreateMaintenanceTicket,
+    canDeleteResolvedTicket,
+    canDeleteSingle,
+    canBulkDelete,
+    canDeleteAll,
+    canDelete: canDeleteSingle,
+    canManageAccounts,
+    canManageAdmins,
+    canRunMigrations,
+    canConfigKTX,
+    loading,
+    canWriteBlock,
+    canAccessMaintenanceBlock,
+    getAccountPermissions,
+    signIn,
+    signOut,
+    users,
+    addUser,
+    updateUser,
+    deleteUser,
+    toggleUserStatus,
+    updateProfile,
+    changePassword,
+    setCurrentUser,
+  }), [
+    currentUser,
+    isSuperAdmin,
+    isSubAdmin,
+    isAdmin,
+    isStaff,
+    isTechnician,
+    isManager,
+    canOperateMaintenance,
+    canCreateMaintenanceTicket,
+    canDeleteResolvedTicket,
+    canDeleteSingle,
+    canBulkDelete,
+    canDeleteAll,
+    canManageAccounts,
+    canManageAdmins,
+    canRunMigrations,
+    canConfigKTX,
+    loading,
+    canWriteBlock,
+    canAccessMaintenanceBlock,
+    getAccountPermissions,
+    signIn,
+    signOut,
+    users,
+    addUser,
+    updateUser,
+    deleteUser,
+    toggleUserStatus,
+    updateProfile,
+    changePassword,
+    setCurrentUser,
+  ]);
+
   return (
-    <AuthContext.Provider value={{
-      currentUser,
-      user: currentUser,
-      isSuperAdmin,
-      isSubAdmin,
-      isAdmin,
-      isStaff,
-      isTechnician,
-      isManager,
-      canOperateMaintenance,
-      canCreateMaintenanceTicket,
-      canDeleteResolvedTicket,
-      canDeleteSingle,
-      canBulkDelete,
-      canDeleteAll,
-      canDelete: canDeleteSingle,
-      canManageAccounts,
-      canManageAdmins,
-      canRunMigrations,
-      canConfigKTX,
-      loading,
-      canWriteBlock,
-      canAccessMaintenanceBlock,
-      getAccountPermissions,
-      signIn,
-      signOut,
-      users,
-      addUser,
-      updateUser,
-      deleteUser,
-      toggleUserStatus,
-      updateProfile,
-      changePassword,
-      setCurrentUser,
-    }}>
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

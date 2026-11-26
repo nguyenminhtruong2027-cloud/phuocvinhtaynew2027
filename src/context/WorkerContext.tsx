@@ -761,26 +761,43 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
     );
   }, [supabase]);
 
+  const contextValue = useMemo<WorkerContextValue>(() => ({
+    workers,
+    workerCount: workers.length,
+    totalWorkerCount: workers.length,
+    loading,
+    refreshing,
+    addWorker,
+    updateWorker,
+    deleteWorker,
+    deleteWorkers,
+    deleteAllWorkers,
+    importWorkers,
+    updateTamTruStatus,
+    bulkUpdateKtx,
+    bulkUpdateWorkers,
+    refreshWorkers,
+    markWorkersDeleted,
+    setWorkers,
+  }), [
+    workers,
+    loading,
+    refreshing,
+    addWorker,
+    updateWorker,
+    deleteWorker,
+    deleteWorkers,
+    deleteAllWorkers,
+    importWorkers,
+    updateTamTruStatus,
+    bulkUpdateKtx,
+    bulkUpdateWorkers,
+    refreshWorkers,
+    markWorkersDeleted,
+  ]);
+
   return (
-    <WorkerContext.Provider value={{
-      workers,
-      workerCount: workers.length,
-      totalWorkerCount: workers.length,
-      loading,
-      refreshing,
-      addWorker,
-      updateWorker,
-      deleteWorker,
-      deleteWorkers,
-      deleteAllWorkers,
-      importWorkers,
-      updateTamTruStatus,
-      bulkUpdateKtx,
-      bulkUpdateWorkers,
-      refreshWorkers,
-      markWorkersDeleted,
-      setWorkers,
-    }}>
+    <WorkerContext.Provider value={contextValue}>
       {children}
     </WorkerContext.Provider>
   );

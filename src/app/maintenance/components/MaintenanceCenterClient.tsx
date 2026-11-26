@@ -37,6 +37,7 @@ import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
+import { CACHE_KEYS, getCachedData, setCachedData } from '@/lib/clientCache';
 import {
   MAINTENANCE_SETUP_SQL,
   MaintenanceTicket,
@@ -118,15 +119,22 @@ export default function MaintenanceCenterClient() {
   const { ktxGroups } = useKtxStructure();
   const supabase = useMemo(() => createClient(), []);
 
+  type MaintenanceBundleCache = {
+    tickets: MaintenanceTicket[];
+    tableMissing: boolean;
+    facilities: FacilityItem[];
+    maintenanceBeds: MaintenanceBedRow[];
+  };
+  const cachedMaint = getCachedData<MaintenanceBundleCache>(CACHE_KEYS.MAINTENANCE_BUNDLE);
   const [activeTab, setActiveTab] = useState<'tickets' | 'facilities_beds'>('tickets');
-  const [tickets, setTickets] = useState<MaintenanceTicket[]>([]);
-  const [tableMissing, setTableMissing] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [tickets, setTickets] = useState<MaintenanceTicket[]>(() => cachedMaint?.tickets ?? []);
+  const [tableMissing, setTableMissing] = useState<boolean>(() => cachedMaint?.tableMissing ?? false);
+  const [loading, setLoading] = useState<boolean>(() => !cachedMaint);
   const [refreshing, setRefreshing] = useState(false);
 
   // Facilities & maintenance beds for Tab 2
-  const [facilities, setFacilities] = useState<FacilityItem[]>([]);
-  const [maintenanceBeds, setMaintenanceBeds] = useState<MaintenanceBedRow[]>([]);
+  const [facilities, setFacilities] = useState<FacilityItem[]>(() => cachedMaint?.facilities ?? []);
+  const [maintenanceBeds, setMaintenanceBeds] = useState<MaintenanceBedRow[]>(() => cachedMaint?.maintenanceBeds ?? []);
   const [resolvingInfraUid, setResolvingInfraUid] = useState<string | null>(null);
 
   // Filters
@@ -191,10 +199,18 @@ export default function MaintenanceCenterClient() {
             .eq('status', 'maintenance'),
         ]);
 
+        const visibleFacs = (facList || []).filter(f => f.is_visible !== false);
+        const maintBeds = (bedsRes.data || []) as MaintenanceBedRow[];
+        setCachedData(CACHE_KEYS.MAINTENANCE_BUNDLE, {
+          tickets: ticketRes.tickets,
+          tableMissing: ticketRes.tableMissing,
+          facilities: visibleFacs,
+          maintenanceBeds: maintBeds,
+        });
         setTableMissing(ticketRes.tableMissing);
         setTickets(ticketRes.tickets);
-        setFacilities((facList || []).filter(f => f.is_visible !== false));
-        setMaintenanceBeds((bedsRes.data || []) as MaintenanceBedRow[]);
+        setFacilities(visibleFacs);
+        setMaintenanceBeds(maintBeds);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Không thể tải dữ liệu bảo trì.');
       } finally {
@@ -206,7 +222,8 @@ export default function MaintenanceCenterClient() {
   );
 
   useEffect(() => {
-    void loadAll(false);
+    const hasWarm = Boolean(getCachedData(CACHE_KEYS.MAINTENANCE_BUNDLE));
+    void loadAll(hasWarm);
   }, [loadAll]);
 
   // Realtime subscription on maintenance_tickets

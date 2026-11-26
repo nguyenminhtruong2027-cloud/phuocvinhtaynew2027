@@ -1,15 +1,11 @@
 'use client';
-import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect, useDeferredValue } from 'react';
+import dynamic from 'next/dynamic';
 import { toast } from 'sonner';
 import { Worker, getProfileStatus, calcSoNgay, DEFAULT_ROOM_CAPACITY, removeAccents } from '@/data/workers';
 import WorkerTable from './WorkerTable';
 import WorkerFilters from './WorkerFilters';
-import WorkerFormModal from './WorkerFormModal';
-import WorkerDetailModal from './WorkerDetailModal';
-import DeleteConfirmModal from './DeleteConfirmModal';
 import BulkActionBar from './BulkActionBar';
-import BatchSmartAssignModal from './BatchSmartAssignModal';
-import BatchCheckoutReconcileModal from './BatchCheckoutReconcileModal';
 import { Plus, Download, Upload, X, FileText, AlertCircle, AlertTriangle, FileCheck, ChevronLeft, ChevronRight, Trash2, Building2, CheckSquare, Filter, Users, ArrowRightLeft, ShieldAlert, UserMinus } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { exportToExcel } from '@/lib/exportExcel';
@@ -24,6 +20,13 @@ import { loadSavedRoomGenderMap, fetchRoomLabelsAuthoritative, normalizeGender }
 import { BatchAssignmentPlanItem } from '@/lib/smartRoomAssign';
 import { daysSinceVN } from '@/lib/vnDate';
 import { fetchBlacklist, matchBlacklistInMemory, type BlacklistRecord } from '@/lib/disciplineService';
+import { CACHE_KEYS, getCachedData, setCachedData } from '@/lib/clientCache';
+
+const WorkerFormModal = dynamic(() => import('./WorkerFormModal'), { ssr: false });
+const WorkerDetailModal = dynamic(() => import('./WorkerDetailModal'), { ssr: false });
+const DeleteConfirmModal = dynamic(() => import('./DeleteConfirmModal'), { ssr: false });
+const BatchSmartAssignModal = dynamic(() => import('./BatchSmartAssignModal'), { ssr: false });
+const BatchCheckoutReconcileModal = dynamic(() => import('./BatchCheckoutReconcileModal'), { ssr: false });
 
 export interface FilterState {
   search: string;
@@ -1914,8 +1917,8 @@ export function WorkerManagementClient() {
 
   const { currentUser, canDeleteSingle, canBulkDelete, canDeleteAll, isAdmin, canWriteBlock } = useAuth();
   const { addLog } = useAudit();
-  const [roomCapacities, setRoomCapacities] = useState<RoomCapacityMap>({});
-  const [facilitiesCatalog, setFacilitiesCatalog] = useState<FacilityItem[]>([]);
+  const [roomCapacities, setRoomCapacities] = useState<RoomCapacityMap>(() => getCachedData<RoomCapacityMap>(CACHE_KEYS.BEDS_CAPACITIES) ?? {});
+  const [facilitiesCatalog, setFacilitiesCatalog] = useState<FacilityItem[]>(() => getCachedData<FacilityItem[]>(CACHE_KEYS.BEDS_FACILITIES) ?? []);
   const [showBatchSmartAssign, setShowBatchSmartAssign] = useState(false);
   const [applyingSmartAssign, setApplyingSmartAssign] = useState(false);
   const [batchReconcileTab, setBatchReconcileTab] = useState<'batch-checkout' | 'reconcile' | null>(() => {
@@ -1930,12 +1933,18 @@ export function WorkerManagementClient() {
     const loadCapacities = () => {
       fetchRoomCapacities()
         .then(map => {
-          if (active) setRoomCapacities(map);
+          if (active) {
+            setCachedData(CACHE_KEYS.BEDS_CAPACITIES, map);
+            setRoomCapacities(map);
+          }
         })
         .catch(() => {});
       fetchFacilitiesList(false)
         .then(list => {
-          if (active && list) setFacilitiesCatalog(list);
+          if (active && list) {
+            setCachedData(CACHE_KEYS.BEDS_FACILITIES, list);
+            setFacilitiesCatalog(list);
+          }
         })
         .catch(() => {});
     };
@@ -2087,9 +2096,11 @@ export function WorkerManagementClient() {
     return map;
   }, [workers]);
 
+  const deferredSearch = useDeferredValue(filters.search);
+
   const filtered = useMemo(() => {
     let list = [...workers];
-    const s = removeAccents(filters.search);
+    const s = removeAccents(deferredSearch);
     if (s) {
       list = list.filter(w => (searchIndexById.get(w.id) || '').includes(s));
     }
@@ -2132,7 +2143,7 @@ export function WorkerManagementClient() {
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return list;
-  }, [workers, searchIndexById, filters, sortKey, sortDir]);
+  }, [workers, searchIndexById, deferredSearch, filters.ktx, filters.building, filters.room, filters.platoon, filters.profileStatus, filters.toTruong, filters.province, filters.tamTruStatus, sortKey, sortDir]);
 
   const totalPages = Math.ceil(filtered.length / pageSize);
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   Users2,
@@ -29,6 +29,7 @@ import { SlidingTabs } from '@/components/ui/MotionPrimitives';
 import { StatusTag } from '@/components/ui/StatusTag';
 import { Worker, compareKtxNames, naturalSortCompare, removeAccents } from '@/data/workers';
 import { formatRoomDisplay } from '@/lib/facilityCapacity';
+import { CACHE_KEYS, getCachedData, setCachedData } from '@/lib/clientCache';
 import {
   TeamGroupDimension,
   TeamGroupSummary,
@@ -51,10 +52,14 @@ export default function TeamsManagementClient() {
   const [dayFilter, setDayFilter] = useState<string>('all');
   const [quickFilter, setQuickFilter] = useState<QuickFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const [selectedGroup, setSelectedGroup] = useState<TeamGroupSummary | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [zaloPreview, setZaloPreview] = useState<{ title: string; text: string } | null>(null);
-  const [recentAbsentIds, setRecentAbsentIds] = useState<Set<string>>(new Set());
+  const [recentAbsentIds, setRecentAbsentIds] = useState<Set<string>>(() => {
+    const cached = getCachedData<string[]>(CACHE_KEYS.TEAMS_ABSENT_IDS);
+    return new Set(cached ?? []);
+  });
 
   // Fetch latest attendance session absences (best-effort, silent if empty/unavailable)
   useEffect(() => {
@@ -78,9 +83,9 @@ export default function TeamsManagementClient() {
           .in('status', ['absent', 'vắng', 'vang']);
 
         if (active && Array.isArray(absentRows)) {
-          setRecentAbsentIds(
-            new Set(absentRows.map((r: { worker_id?: string }) => String(r.worker_id || '')).filter(Boolean))
-          );
+          const ids = absentRows.map((r: { worker_id?: string }) => String(r.worker_id || '')).filter(Boolean);
+          setCachedData(CACHE_KEYS.TEAMS_ABSENT_IDS, ids);
+          setRecentAbsentIds(new Set(ids));
         }
       } catch {
         // Non-blocking
@@ -124,7 +129,7 @@ export default function TeamsManagementClient() {
   }, [scopedWorkers, dimension, recentAbsentIds]);
 
   const filteredGroups = useMemo(() => {
-    const q = removeAccents(searchQuery.trim()).toLowerCase();
+    const q = removeAccents(deferredSearchQuery.trim()).toLowerCase();
     return allGroups.filter(g => {
       if (quickFilter === 'scattered' && g.dispersionLevel !== 'scattered') return false;
       if (quickFilter === 'tamtru' && g.unregisteredTamTru.length === 0) return false;
@@ -135,7 +140,7 @@ export default function TeamsManagementClient() {
       ).toLowerCase();
       return hay.includes(q);
     });
-  }, [allGroups, quickFilter, searchQuery]);
+  }, [allGroups, quickFilter, deferredSearchQuery]);
 
   const kpis = useMemo(() => {
     const assignedGroups = allGroups.filter(g => !g.isUnassignedGroup);

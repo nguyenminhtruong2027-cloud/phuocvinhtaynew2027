@@ -1,5 +1,5 @@
 'use client';
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
@@ -82,15 +82,17 @@ export function AuditProvider({ children }: { children: React.ReactNode }) {
   const { currentUser, isAdmin, loading: authLoading } = useAuth();
   const pathname = usePathname();
   const isPublicPath = PUBLIC_PATHS.some(p => pathname?.startsWith(p));
+  const isAuditPage = Boolean(pathname?.startsWith('/audit-log'));
   const shouldLoadAudit = !authLoading && Boolean(currentUser) && isAdmin && !isPublicPath;
 
   const [logs, setLogs] = useState<AuditEntry[]>([]);
   const [totalLogCount, setTotalLogCount] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const supabase = createClient();
+  const [loading, setLoading] = useState(false);
+  const hasLoadedLogsRef = useRef(false);
+  const supabase = useMemo(() => createClient(), []);
 
   const fetchLogs = useCallback(async () => {
-    setLoading(true);
+    if (!hasLoadedLogsRef.current) setLoading(true);
     try {
       const { data, count, error } = await supabase
         .from('audit_logs')
@@ -105,6 +107,7 @@ export function AuditProvider({ children }: { children: React.ReactNode }) {
           action: row.action as AuditAction,
           detail: row.detail,
         }));
+        hasLoadedLogsRef.current = true;
         setLogs(dedupeById(mapped));
         if (typeof count === 'number') setTotalLogCount(count);
         else setTotalLogCount(mapped.length);
@@ -203,13 +206,16 @@ export function AuditProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (authLoading) return;
     if (!shouldLoadAudit) {
+      hasLoadedLogsRef.current = false;
       setLogs([]);
       setTotalLogCount(0);
       setLoading(false);
       return;
     }
-    fetchLogs();
-  }, [authLoading, shouldLoadAudit, fetchLogs]);
+    if (isAuditPage) {
+      void fetchLogs();
+    }
+  }, [authLoading, shouldLoadAudit, isAuditPage, fetchLogs]);
 
   const prependRealtimeEntry = useCallback((entry: AuditEntry) => {
     if (!entry?.id) return;
@@ -244,19 +250,22 @@ export function AuditProvider({ children }: { children: React.ReactNode }) {
     }
   }, [supabase]);
 
+  const contextValue = useMemo<AuditContextValue>(
+    () => ({
+      logs,
+      totalLogCount,
+      addLog,
+      prependRealtimeEntry,
+      loading,
+      refetchLogs: fetchLogs,
+      fetchLogsPage,
+      fetchFilteredLogs,
+    }),
+    [logs, totalLogCount, addLog, prependRealtimeEntry, loading, fetchLogs, fetchLogsPage, fetchFilteredLogs]
+  );
+
   return (
-    <AuditContext.Provider
-      value={{
-        logs,
-        totalLogCount,
-        addLog,
-        prependRealtimeEntry,
-        loading,
-        refetchLogs: fetchLogs,
-        fetchLogsPage,
-        fetchFilteredLogs,
-      }}
-    >
+    <AuditContext.Provider value={contextValue}>
       {children}
     </AuditContext.Provider>
   );

@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useState, useRef } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import {
   BedDouble, RefreshCw, Search, X, User, UserCheck, UserX, Box,
   ArrowRightLeft, Loader2, Building2, Phone, Briefcase, VenusAndMars,
@@ -23,6 +24,7 @@ import { verifyWorkerDeletionIntegrity, invalidateDeletedTombstoneCache } from '
 import { invalidateWorkerHierarchyCache } from '@/lib/workerHierarchy';
 import { invalidateKtxStructureCache } from '@/lib/ktxStructure';
 import { exportToExcel } from '@/lib/exportExcel';
+import { CACHE_KEYS, getCachedData, setCachedData } from '@/lib/clientCache';
 import {
   BedReservation,
   BedReservationSlotInput,
@@ -32,13 +34,14 @@ import {
   fulfillReservationForBed,
   isReservationOverdue,
 } from '@/lib/bedReservations';
-import BedQrPrintModal from './BedQrPrintModal';
-import BedTransferModal from './BedTransferModal';
-import RoomConsolidationModal from './RoomConsolidationModal';
-import BedSwapModal from './BedSwapModal';
-import BedReserveModal from './BedReserveModal';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { SlidingTabs } from '@/components/ui/MotionPrimitives';
+
+const BedQrPrintModal = dynamic(() => import('./BedQrPrintModal'), { ssr: false });
+const BedTransferModal = dynamic(() => import('./BedTransferModal'), { ssr: false });
+const RoomConsolidationModal = dynamic(() => import('./RoomConsolidationModal'), { ssr: false });
+const BedSwapModal = dynamic(() => import('./BedSwapModal'), { ssr: false });
+const BedReserveModal = dynamic(() => import('./BedReserveModal'), { ssr: false });
 
 type BedStatus = 'empty' | 'occupied' | 'maintenance';
 type BedFilterStatus = 'all' | BedStatus | 'reserved';
@@ -78,7 +81,7 @@ function formatGiuongTag(raw?: string | null): string {
   return norm ? `G${norm}` : raw ? `G${raw}` : '—';
 }
 
-function BedHoverSlot({
+const BedHoverSlot = React.memo(function BedHoverSlot({
   enabled,
   className,
   onClick,
@@ -119,7 +122,7 @@ function BedHoverSlot({
       {enabled && hovered && renderTooltip ? renderTooltip() : null}
     </button>
   );
-}
+});
 
 async function fetchAllRows<T extends { id?: unknown }>(
   supabase: ReturnType<typeof createClient>,
@@ -182,7 +185,8 @@ export default function BedManagementClient() {
     markWorkersDeleted: markContextWorkersDeleted,
     refreshWorkers,
   } = useWorkers();
-  const [beds, setBeds] = useState<BedRow[]>([]);
+  const cachedBedsOnMount = getCachedData<BedRow[]>(CACHE_KEYS.BEDS_LIST);
+  const [beds, setBeds] = useState<BedRow[]>(() => cachedBedsOnMount ?? []);
   const workers = useMemo<WorkerLite[]>(
     () =>
       (contextWorkers || []).map(w => ({
@@ -201,9 +205,9 @@ export default function BedManagementClient() {
       })),
     [contextWorkers]
   );
-  const [capacities, setCapacities] = useState<RoomCapacityMap>({});
-  const [facilitiesList, setFacilitiesList] = useState<FacilityItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [capacities, setCapacities] = useState<RoomCapacityMap>(() => getCachedData<RoomCapacityMap>(CACHE_KEYS.BEDS_CAPACITIES) ?? {});
+  const [facilitiesList, setFacilitiesList] = useState<FacilityItem[]>(() => getCachedData<FacilityItem[]>(CACHE_KEYS.BEDS_FACILITIES) ?? []);
+  const [loading, setLoading] = useState<boolean>(() => !cachedBedsOnMount);
   const [refreshing, setRefreshing] = useState(false);
   const [actionError, setActionError] = useState('');
 
@@ -218,6 +222,7 @@ export default function BedManagementClient() {
 
   const [view, setView] = useState<ViewMode>(initialView);
   const [searchQuery, setSearchQuery] = useState(() => searchParams?.get('q') || '');
+  const deferredSearchQuery = useDeferredValue(searchQuery);
 
   const [filterKtx, setFilterKtx] = useState(() => searchParams?.get('ktx') || '');
   const [filterDay, setFilterDay] = useState(() => searchParams?.get('day') || '');
@@ -254,7 +259,7 @@ export default function BedManagementClient() {
     () => searchParams?.get('action') === 'consolidate'
   );
   // Group 3: Bed Reservations, Global Swap Modal, and Drag & Drop Mode
-  const [reservations, setReservations] = useState<BedReservation[]>([]);
+  const [reservations, setReservations] = useState<BedReservation[]>(() => getCachedData<BedReservation[]>(CACHE_KEYS.BEDS_RESERVATIONS) ?? []);
   const [reservationsMissingTable, setReservationsMissingTable] = useState(false);
   const [reserveModalState, setReserveModalState] = useState<{
     open: boolean;
@@ -328,6 +333,7 @@ export default function BedManagementClient() {
           };
         });
       const { kept: deduped } = deduplicateBedRows(mapped);
+      setCachedData(CACHE_KEYS.BEDS_LIST, deduped);
       setBeds(deduped);
       setActionError('');
     } catch (err) {
@@ -349,6 +355,8 @@ export default function BedManagementClient() {
         fetchRoomCapacities(),
         fetchFacilitiesList(false).catch(() => [] as FacilityItem[]),
       ]);
+      setCachedData(CACHE_KEYS.BEDS_CAPACITIES, capMap);
+      setCachedData(CACHE_KEYS.BEDS_FACILITIES, facList);
       setCapacities(capMap);
       setFacilitiesList(facList);
     } catch (err) {
@@ -358,12 +366,14 @@ export default function BedManagementClient() {
 
   const loadReservations = useCallback(async () => {
     const res = await fetchActiveReservations(supabase);
+    setCachedData(CACHE_KEYS.BEDS_RESERVATIONS, res.data);
     setReservations(res.data);
     setReservationsMissingTable(res.missingTable);
   }, [supabase]);
 
   useEffect(() => {
-    loadBeds();
+    const hasWarmBeds = Boolean(getCachedData<BedRow[]>(CACHE_KEYS.BEDS_LIST));
+    loadBeds(hasWarmBeds);
     loadCapacities();
     loadReservations();
   }, [loadBeds, loadCapacities, loadReservations]);
@@ -392,11 +402,21 @@ export default function BedManagementClient() {
               ho_va_ten: r?.ho_va_ten ? String(r.ho_va_ten) : null,
               worker_id: r?.worker_id ? String(r.worker_id) : null,
             };
-            setBeds(prev => deduplicateBedRows(prev.map(b => (b.id === rid ? mappedRow : b))).kept);
+            setBeds(prev => {
+              const next = deduplicateBedRows(prev.map(b => (b.id === rid ? mappedRow : b))).kept;
+              setCachedData(CACHE_KEYS.BEDS_LIST, next);
+              return next;
+            });
             setDrawerBed(prev => (prev && prev.id === rid ? mappedRow : prev));
           } else if (payload.eventType === 'DELETE' && payload.old) {
             const rid = String((payload.old as Record<string, unknown>)?.id ?? '');
-            if (rid) setBeds(prev => prev.filter(b => b.id !== rid));
+            if (rid) {
+              setBeds(prev => {
+                const next = prev.filter(b => b.id !== rid);
+                setCachedData(CACHE_KEYS.BEDS_LIST, next);
+                return next;
+              });
+            }
           } else {
             if (facTimer) clearTimeout(facTimer);
             facTimer = setTimeout(() => loadBeds(true), 400);
@@ -489,7 +509,7 @@ export default function BedManagementClient() {
   );
 
   const bedsFiltered = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const q = deferredSearchQuery.trim().toLowerCase();
     return (beds || []).filter(b => {
       // Only real KTX/Dãy/Phòng/Giường rows — no placeholder placeholders ever.
       const ktx = String(b?.ktx ?? '').trim();
@@ -516,7 +536,7 @@ export default function BedManagementClient() {
       ].map(v => String(v ?? '').toLowerCase());
       return haystack.some(v => v.includes(q)) || `g${bedNo.toLowerCase().replace(/[^0-9a-z]/g, '')}`.includes(q);
     });
-  }, [beds, filterKtx, filterDay, filterRoom, filterStatus, searchQuery, workerById, getReservationForBed]);
+  }, [beds, filterKtx, filterDay, filterRoom, filterStatus, deferredSearchQuery, workerById, getReservationForBed]);
 
   const ktxList = useMemo(
     () =>

@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback, useDeferredValue } from 'react';
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/context/AuthContext';
@@ -18,13 +18,11 @@ import { CraftIconBadge, type CraftTone } from '@/components/ui/CraftIcon';
 import { AnimatedNumber, SlidingTabs, StaggerGrid, StaggerItem } from '@/components/ui/MotionPrimitives';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabase/client';
-import WorkerFormModal from '@/app/worker-management/components/WorkerFormModal';
 import ExecutiveSpecialistsCard from './components/ExecutiveSpecialistsCard';
 import DataQualityAlert from './components/DataQualityAlert';
 import OperationalReadinessCard from './components/OperationalReadinessCard';
-import MaintenanceTrackerModal, { MaintenanceBedItem } from './components/MaintenanceTrackerModal';
-import DailyBriefingModal from './components/DailyBriefingModal';
-import BulkGenderAndPrintModal, { BulkRoomDescriptor } from './components/BulkGenderAndPrintModal';
+import type { MaintenanceBedItem } from './components/MaintenanceTrackerModal';
+import type { BulkRoomDescriptor } from './components/BulkGenderAndPrintModal';
 import RiskCommandRadar from './components/RiskCommandRadar';
 import { SpecialistWithDuty } from '@/lib/dutyRoster';
 import {
@@ -59,10 +57,23 @@ import {
   printExecutiveReportA4,
   type ExecutiveReportBuildingRow,
 } from '@/lib/executiveReportPrint';
+import { CACHE_KEYS, getCachedData, setCachedData } from '@/lib/clientCache';
 
 const RoomDrawer = dynamic(() => import('./components/RoomDrawer'), { ssr: false });
 const TopUnitsRankingCard = dynamic(() => import('./components/TopUnitsRankingCard'), { ssr: false });
 const RecentEntriesFeed = dynamic(() => import('./components/RecentEntriesFeed'), { ssr: false });
+const WorkerFormModal = dynamic(() => import('@/app/worker-management/components/WorkerFormModal'), { ssr: false });
+const MaintenanceTrackerModal = dynamic(() => import('./components/MaintenanceTrackerModal'), { ssr: false });
+const DailyBriefingModal = dynamic(() => import('./components/DailyBriefingModal'), { ssr: false });
+const BulkGenderAndPrintModal = dynamic(() => import('./components/BulkGenderAndPrintModal'), { ssr: false });
+
+interface DashboardSupportCache {
+  maintenanceBeds: MaintenanceBedItem[];
+  pendingQrSummary: { registrations: number; checkouts: number };
+  allMaintenanceTickets: MaintenanceTicket[];
+  disciplineRecords: DisciplineRecord[];
+  blacklistRecords: BlacklistRecord[];
+}
 
 const EMPTY_TOOLTIP_WORKERS: { hoVaTen: string; maNV: string; gioiTinh?: string }[] = [];
 
@@ -282,12 +293,13 @@ function ExecutiveAlertCard({
 function GlobalSearchBar({ onSelectWorker }: { onSelectWorker: (id: string) => void }) {
   const { workers } = useWorkers();
   const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   const results = useMemo(() => {
-    if (!query.trim() || query.length < 2) return [];
-    const q = query.toLowerCase();
+    if (!deferredQuery.trim() || deferredQuery.length < 2) return [];
+    const q = deferredQuery.toLowerCase();
     return workers.filter(w =>
       w.hoVaTen?.toLowerCase().includes(q) ||
       w.maNV?.toLowerCase().includes(q) ||
@@ -295,7 +307,7 @@ function GlobalSearchBar({ onSelectWorker }: { onSelectWorker: (id: string) => v
       w.phongSo?.toLowerCase().includes(q) ||
       w.soDienThoai?.toLowerCase().includes(q)
     ).slice(0, 8);
-  }, [query, workers]);
+  }, [deferredQuery, workers]);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -660,18 +672,34 @@ export default function OccupancyDashboardPage() {
   const [selectedKTX, setSelectedKTX] = useState<string>('all');
   const [drawerRoom, setDrawerRoom] = useState<{ ktx: string; building: string; room: string } | null>(null);
   const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null);
-  const [todayStats, setTodayStats] = useState<{ entered: number; left: number }>({ entered: 0, left: 0 });
+  const cachedDashboardSupport = getCachedData<DashboardSupportCache>(CACHE_KEYS.DASHBOARD_SUPPORT);
+  const cachedDashboardFacilities = getCachedData<FacilityItem[]>(CACHE_KEYS.DASHBOARD_FACILITIES);
+  const [todayStats, setTodayStats] = useState<{ entered: number; left: number }>(
+    () => getCachedData<{ entered: number; left: number }>(CACHE_KEYS.DASHBOARD_TODAY_STATS) ?? { entered: 0, left: 0 }
+  );
   const [blockAssignments, setBlockAssignments] = useState<BlockAssignment[]>([]);
   const [specialists, setSpecialists] = useState<{ id: string; name: string; email?: string; role: 'super_admin' | 'admin' | 'staff'; assignedBlocks?: string[] }[]>([]);
   const [dutyRoster, setDutyRoster] = useState<SpecialistWithDuty[]>([]);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [roomGenderMap, setRoomGenderMap] = useState<Record<string, 'male' | 'female' | 'auto'>>({});
-  const [capacities, setCapacities] = useState<RoomCapacityMap>({});
-  const [activeMaintenanceTickets, setActiveMaintenanceTickets] = useState<MaintenanceTicket[]>([]);
-  const [allMaintenanceTickets, setAllMaintenanceTickets] = useState<MaintenanceTicket[]>([]);
-  const [disciplineRecords, setDisciplineRecords] = useState<DisciplineRecord[]>([]);
-  const [blacklistRecords, setBlacklistRecords] = useState<BlacklistRecord[]>([]);
-  const [facilitiesList, setFacilitiesList] = useState<FacilityItem[]>([]);
+  const [capacities, setCapacities] = useState<RoomCapacityMap>(() =>
+    cachedDashboardFacilities ? buildRoomCapacityMapFromFacilities(cachedDashboardFacilities) : {}
+  );
+  const [activeMaintenanceTickets, setActiveMaintenanceTickets] = useState<MaintenanceTicket[]>(() =>
+    cachedDashboardSupport
+      ? cachedDashboardSupport.allMaintenanceTickets.filter(t => t.status === 'open' || t.status === 'in_progress')
+      : []
+  );
+  const [allMaintenanceTickets, setAllMaintenanceTickets] = useState<MaintenanceTicket[]>(
+    () => cachedDashboardSupport?.allMaintenanceTickets ?? []
+  );
+  const [disciplineRecords, setDisciplineRecords] = useState<DisciplineRecord[]>(
+    () => cachedDashboardSupport?.disciplineRecords ?? []
+  );
+  const [blacklistRecords, setBlacklistRecords] = useState<BlacklistRecord[]>(
+    () => cachedDashboardSupport?.blacklistRecords ?? []
+  );
+  const [facilitiesList, setFacilitiesList] = useState<FacilityItem[]>(() => cachedDashboardFacilities ?? []);
   const [roomFilterMode, setRoomFilterMode] = useState<'all' | 'overloaded' | 'empty'>('all');
   const [showOverloadedModal, setShowOverloadedModal] = useState(false);
   const [showReadinessCard, setShowReadinessCard] = useState<boolean>(() => {
@@ -682,11 +710,12 @@ export default function OccupancyDashboardPage() {
   const [showBriefingModal, setShowBriefingModal] = useState(false);
   const [bulkModalMode, setBulkModalMode] = useState<'gender' | 'print' | null>(null);
   const [dashboardTab, setDashboardTab] = useState<'overview' | 'heatmap' | 'analytics' | 'risk'>('overview');
-  const [maintenanceBeds, setMaintenanceBeds] = useState<MaintenanceBedItem[]>([]);
-  const [pendingQrSummary, setPendingQrSummary] = useState<{ registrations: number; checkouts: number }>({
-    registrations: 0,
-    checkouts: 0,
-  });
+  const [maintenanceBeds, setMaintenanceBeds] = useState<MaintenanceBedItem[]>(
+    () => cachedDashboardSupport?.maintenanceBeds ?? []
+  );
+  const [pendingQrSummary, setPendingQrSummary] = useState<{ registrations: number; checkouts: number }>(
+    () => cachedDashboardSupport?.pendingQrSummary ?? { registrations: 0, checkouts: 0 }
+  );
 
   // Load and sync room gender designations (Supabase room_units is authoritative)
   useEffect(() => {
@@ -733,6 +762,7 @@ export default function OccupancyDashboardPage() {
       try {
         const facs = await fetchFacilitiesList(force);
         if (active) {
+          setCachedData(CACHE_KEYS.DASHBOARD_FACILITIES, facs);
           setFacilitiesList(facs);
           setCapacities(buildRoomCapacityMapFromFacilities(facs));
         }
@@ -792,8 +822,15 @@ export default function OccupancyDashboardPage() {
           tableMissing: true,
         })),
       ]);
+      const nextSupport: DashboardSupportCache = {
+        maintenanceBeds: (!bedsRes.error && bedsRes.data ? (bedsRes.data as MaintenanceBedItem[]) : (getCachedData<DashboardSupportCache>(CACHE_KEYS.DASHBOARD_SUPPORT)?.maintenanceBeds ?? [])),
+        pendingQrSummary: getCachedData<DashboardSupportCache>(CACHE_KEYS.DASHBOARD_SUPPORT)?.pendingQrSummary ?? { registrations: 0, checkouts: 0 },
+        allMaintenanceTickets: !allTicketsRes.tableMissing ? allTicketsRes.tickets : (getCachedData<DashboardSupportCache>(CACHE_KEYS.DASHBOARD_SUPPORT)?.allMaintenanceTickets ?? []),
+        disciplineRecords: !discRes.tableMissing ? discRes.data : (getCachedData<DashboardSupportCache>(CACHE_KEYS.DASHBOARD_SUPPORT)?.disciplineRecords ?? []),
+        blacklistRecords: !blRes.tableMissing ? blRes.data : (getCachedData<DashboardSupportCache>(CACHE_KEYS.DASHBOARD_SUPPORT)?.blacklistRecords ?? []),
+      };
       if (!bedsRes.error && bedsRes.data) {
-        setMaintenanceBeds(bedsRes.data as MaintenanceBedItem[]);
+        setMaintenanceBeds(nextSupport.maintenanceBeds);
       }
       if (!qrRes.error && qrRes.data) {
         let reg = 0;
@@ -802,20 +839,22 @@ export default function OccupancyDashboardPage() {
           if (r.ghi_chu?.startsWith('[CHECKOUT]')) chk++;
           else reg++;
         }
-        setPendingQrSummary({ registrations: reg, checkouts: chk });
+        nextSupport.pendingQrSummary = { registrations: reg, checkouts: chk };
+        setPendingQrSummary(nextSupport.pendingQrSummary);
       }
       if (!allTicketsRes.tableMissing) {
-        setAllMaintenanceTickets(allTicketsRes.tickets);
+        setAllMaintenanceTickets(nextSupport.allMaintenanceTickets);
         setActiveMaintenanceTickets(
-          allTicketsRes.tickets.filter(t => t.status === 'open' || t.status === 'in_progress')
+          nextSupport.allMaintenanceTickets.filter(t => t.status === 'open' || t.status === 'in_progress')
         );
       }
       if (!discRes.tableMissing) {
-        setDisciplineRecords(discRes.data);
+        setDisciplineRecords(nextSupport.disciplineRecords);
       }
       if (!blRes.tableMissing) {
-        setBlacklistRecords(blRes.data);
+        setBlacklistRecords(nextSupport.blacklistRecords);
       }
+      setCachedData(CACHE_KEYS.DASHBOARD_SUPPORT, nextSupport);
     } catch {
       // non-blocking
     }
@@ -1280,10 +1319,14 @@ export default function OccupancyDashboardPage() {
           preloadedWorkerRows: preloadedFluctuationRows,
         });
         if (active) {
-          setTodayStats({
+          const nextStats = {
             entered: report.today.so_tang,
             left: report.today.so_giam,
-          });
+          };
+          if (selectedKTX === 'all' && !selectedBuilding) {
+            setCachedData(CACHE_KEYS.DASHBOARD_TODAY_STATS, nextStats);
+          }
+          setTodayStats(nextStats);
         }
       } catch (err) {
         console.warn('[Dashboard] load todayStats warning:', err);

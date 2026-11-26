@@ -148,7 +148,7 @@ function TamTruTag({ worker, onToggle }: { worker: Worker; onToggle?: (w: Worker
   );
 }
 
-export default function WorkerTable({
+const WorkerTable = React.memo(function WorkerTable({
   workers,
   sortKey,
   sortDir,
@@ -391,4 +391,6 @@ export default function WorkerTable({
       </div>
     </div>
   );
-}
+});
+
+export default WorkerTable;
