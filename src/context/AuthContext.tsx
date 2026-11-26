@@ -1,8 +1,65 @@
 'use client';
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import {
+  createClient,
+  getRememberMePreference,
+  setRememberMePreference,
+} from '@/lib/supabase/client';
 
 export type UserRole = 'super_admin' | 'admin' | 'staff' | 'technician';
+
+const PROFILE_CACHE_KEY = 'ktx_profile_cache_v1';
+
+function readCachedProfile(userId: string): AppUser | null {
+  if (typeof window === 'undefined') return null;
+  const stores: Storage[] = [];
+  try { stores.push(window.localStorage); } catch {}
+  try { stores.push(window.sessionStorage); } catch {}
+  for (const store of stores) {
+    try {
+      const raw = store.getItem(PROFILE_CACHE_KEY);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as Partial<AppUser>;
+      if (parsed && parsed.id === userId && typeof parsed.email === 'string') {
+        return {
+          id: parsed.id,
+          email: parsed.email,
+          name: typeof parsed.name === 'string' && parsed.name ? parsed.name : parsed.email.split('@')[0],
+          role: normalizeUserRole(parsed.role),
+          status: 'active',
+          assignedBlocks: Array.isArray(parsed.assignedBlocks) ? parsed.assignedBlocks : [],
+        };
+      }
+    } catch {}
+  }
+  return null;
+}
+
+function writeCachedProfile(profile: AppUser): void {
+  if (typeof window === 'undefined') return;
+  const serialized = JSON.stringify({
+    id: profile.id,
+    email: profile.email,
+    name: profile.name,
+    role: profile.role,
+    assignedBlocks: profile.assignedBlocks,
+  });
+  try {
+    if (getRememberMePreference()) {
+      window.localStorage.setItem(PROFILE_CACHE_KEY, serialized);
+      window.sessionStorage.removeItem(PROFILE_CACHE_KEY);
+    } else {
+      window.sessionStorage.setItem(PROFILE_CACHE_KEY, serialized);
+      window.localStorage.removeItem(PROFILE_CACHE_KEY);
+    }
+  } catch {}
+}
+
+function clearCachedProfile(): void {
+  if (typeof window === 'undefined') return;
+  try { window.localStorage.removeItem(PROFILE_CACHE_KEY); } catch {}
+  try { window.sessionStorage.removeItem(PROFILE_CACHE_KEY); } catch {}
+}
 
 export function isSuperAdminRole(role?: string | null): boolean {
   return role === 'super_admin';
@@ -85,8 +142,8 @@ interface AuthContextValue {
   canAccessMaintenanceBlock: (blockName: string, ktxName?: string) => boolean;
   /** Evaluate hierarchical permissions against a target account */
   getAccountPermissions: (targetRole: UserRole, targetId?: string) => AccountPermissionResult;
-  /** Supabase sign in */
-  signIn: (email: string, password: string) => Promise<void>;
+  /** Supabase sign in (rememberMe = true keeps session across browser restarts) */
+  signIn: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
   /** Supabase sign out */
   signOut: () => Promise<void>;
   // Legacy user management (kept for UserManagementClient compatibility)
@@ -111,12 +168,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const supabase = supabaseRef.current;
   const loadingUserIdRef = useRef<string | null>(null);
   const loadedUserIdRef = useRef<string | null>(null);
+  const lastRefreshAttemptRef = useRef<number>(0);
 
   const loadUserProfile = useCallback(async (userId: string, email: string, force = false) => {
     if (!force && (loadedUserIdRef.current === userId || loadingUserIdRef.current === userId)) {
       setLoading(false);
       return;
     }
+
+    // Hydrate immediately from verified-session profile cache while refreshing from server
+    const cached = readCachedProfile(userId);
+    if (cached && !loadedUserIdRef.current) {
+      setCurrentUserState(cached);
+    }
+
     loadingUserIdRef.current = userId;
     try {
       const { data, error } = await supabase
@@ -125,7 +190,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .eq('id', userId)
         .single();
 
-      if (error || !data) {
+      if (!error && data) {
+        const resolvedUser: AppUser = {
+          id: data.id,
+          email: data.email ?? email,
+          name: data.full_name ?? email.split('@')[0],
+          role: normalizeUserRole(data.role),
+          status: 'active',
+          assignedBlocks: data.assigned_blocks ?? [],
+        };
+        loadedUserIdRef.current = userId;
+        writeCachedProfile(resolvedUser);
+        setCurrentUserState(resolvedUser);
+        return;
+      }
+
+      // Only attempt first-time profile creation if online and server explicitly reported 0 rows (PGRST116)
+      const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      if (!isOffline && error?.code === 'PGRST116') {
         const { data: newProfile } = await supabase
           .from('profiles')
           .insert({ id: userId, email, full_name: email.split('@')[0], role: 'staff', assigned_blocks: [] })
@@ -133,37 +215,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .single();
 
         if (newProfile) {
-          loadedUserIdRef.current = userId;
-          setCurrentUserState({
+          const createdUser: AppUser = {
             id: newProfile.id,
             email: newProfile.email ?? email,
             name: newProfile.full_name ?? email.split('@')[0],
             role: normalizeUserRole(newProfile.role),
             status: 'active',
             assignedBlocks: newProfile.assigned_blocks ?? [],
-          });
+          };
+          loadedUserIdRef.current = userId;
+          writeCachedProfile(createdUser);
+          setCurrentUserState(createdUser);
+          return;
         }
-      } else {
+      }
+
+      // Transient network hiccup: keep existing/cached user so role & session are never disrupted
+      if (cached) {
         loadedUserIdRef.current = userId;
-        setCurrentUserState({
-          id: data.id,
-          email: data.email ?? email,
-          name: data.full_name ?? email.split('@')[0],
-          role: normalizeUserRole(data.role),
-          status: 'active',
-          assignedBlocks: data.assigned_blocks ?? [],
-        });
+        setCurrentUserState(cached);
+      } else {
+        setCurrentUserState(prev =>
+          prev && prev.id === userId
+            ? prev
+            : {
+                id: userId,
+                email,
+                name: email.split('@')[0],
+                role: 'staff',
+                status: 'active',
+                assignedBlocks: [],
+              }
+        );
       }
     } catch {
-      loadedUserIdRef.current = userId;
-      setCurrentUserState({
-        id: userId,
-        email,
-        name: email.split('@')[0],
-        role: 'staff',
-        status: 'active',
-        assignedBlocks: [],
-      });
+      if (cached) {
+        loadedUserIdRef.current = userId;
+        setCurrentUserState(cached);
+      } else {
+        setCurrentUserState(prev =>
+          prev && prev.id === userId
+            ? prev
+            : {
+                id: userId,
+                email,
+                name: email.split('@')[0],
+                role: 'staff',
+                status: 'active',
+                assignedBlocks: [],
+              }
+        );
+      }
     } finally {
       if (loadingUserIdRef.current === userId) {
         loadingUserIdRef.current = null;
@@ -172,42 +274,101 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [supabase]);
 
+  // Proactively keep the Supabase session fresh when returning from background/sleep/offline
+  const ensureFreshSession = useCallback(async (minRemainingSeconds = 600) => {
+    const now = Date.now();
+    if (now - lastRefreshAttemptRef.current < 15000) return;
+    try {
+      const { data } = await supabase.auth.getSession();
+      const session = data?.session;
+      if (!session) return;
+
+      const expiresAtMs = (session.expires_at ?? 0) * 1000;
+      const shouldRefresh = expiresAtMs > 0 && expiresAtMs - now < minRemainingSeconds * 1000;
+      if (shouldRefresh) {
+        lastRefreshAttemptRef.current = now;
+        await supabase.auth.refreshSession();
+      }
+    } catch {
+      // Transient network issue — keep existing session and retry next visibility/online cycle
+    }
+  }, [supabase]);
+
   useEffect(() => {
     let mounted = true;
 
     const resolveUser = async () => {
       try {
-        const res = await supabase.auth.getUser();
+        // Use getSession() first so persisted sessions survive offline startups & tab resumes
+        const { data } = await supabase.auth.getSession();
         if (!mounted) return;
-        const user = res?.data?.user;
-        if (user) {
-          await loadUserProfile(user.id, user.email ?? '');
+        let session = data?.session ?? null;
+
+        if (session?.user) {
+          const expiresAtMs = (session.expires_at ?? 0) * 1000;
+          if (expiresAtMs > 0 && expiresAtMs - Date.now() < 300_000) {
+            try {
+              const refreshed = await supabase.auth.refreshSession();
+              if (refreshed?.data?.session) {
+                session = refreshed.data.session;
+              }
+            } catch {
+              // Keep local session if momentarily offline
+            }
+          }
+          if (!mounted) return;
+          await loadUserProfile(session.user.id, session.user.email ?? '');
         } else {
+          loadedUserIdRef.current = null;
           setCurrentUserState(null);
           setLoading(false);
         }
       } catch (err) {
         console.warn('[AuthContext] resolveUser notice:', err);
         if (mounted) {
-          setCurrentUserState(null);
           setLoading(false);
         }
       }
     };
 
-    resolveUser();
+    void resolveUser();
 
     let subscription: { unsubscribe: () => void } | undefined;
     try {
       const authSubRes = supabase.auth.onAuthStateChange(async (event, session) => {
-        if (event === 'TOKEN_REFRESHED') return;
-        if (session?.user) {
-          await loadUserProfile(session.user.id, session.user.email ?? '', event === 'USER_UPDATED');
-        } else {
+        if (!mounted) return;
+
+        if (event === 'SIGNED_OUT') {
           loadedUserIdRef.current = null;
           loadingUserIdRef.current = null;
+          clearCachedProfile();
           setCurrentUserState(null);
           setLoading(false);
+          return;
+        }
+
+        if (event === 'TOKEN_REFRESHED') {
+          if (session?.user && !loadedUserIdRef.current) {
+            await loadUserProfile(session.user.id, session.user.email ?? '');
+          }
+          return;
+        }
+
+        if (session?.user) {
+          await loadUserProfile(
+            session.user.id,
+            session.user.email ?? '',
+            event === 'USER_UPDATED' || event === 'SIGNED_IN'
+          );
+        } else if (event !== 'INITIAL_SESSION') {
+          // Double-check storage before clearing state to avoid race conditions
+          const check = await supabase.auth.getSession().catch(() => ({ data: { session: null } }));
+          if (!check?.data?.session && mounted) {
+            loadedUserIdRef.current = null;
+            loadingUserIdRef.current = null;
+            setCurrentUserState(null);
+            setLoading(false);
+          }
         }
       });
       subscription = authSubRes?.data?.subscription;
@@ -215,11 +376,56 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.warn('[AuthContext] onAuthStateChange notice:', subErr);
     }
 
+    // Visibility-aware auto-refresh: prevents background tabs from racing on refresh token rotation
+    // and immediately refreshes expired tokens when waking from sleep or reconnecting.
+    const handleVisibilityOrFocus = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        void supabase.auth.stopAutoRefresh();
+        return;
+      }
+      void supabase.auth.startAutoRefresh();
+      void ensureFreshSession(600);
+    };
+
+    const handleOnline = () => {
+      void supabase.auth.startAutoRefresh();
+      void ensureFreshSession(600);
+      if (loadedUserIdRef.current) {
+        void supabase.auth.getSession().then(({ data }) => {
+          if (data?.session?.user) {
+            void loadUserProfile(data.session.user.id, data.session.user.email ?? '', true);
+          }
+        });
+      }
+    };
+
+    if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+      void supabase.auth.startAutoRefresh();
+    }
+
+    const keepAliveTimer = setInterval(() => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        void ensureFreshSession(600);
+      }
+    }, 4 * 60 * 1000);
+
+    if (typeof window !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.addEventListener('focus', handleVisibilityOrFocus);
+      window.addEventListener('online', handleOnline);
+    }
+
     return () => {
       mounted = false;
+      clearInterval(keepAliveTimer);
       subscription?.unsubscribe();
+      if (typeof window !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+        window.removeEventListener('focus', handleVisibilityOrFocus);
+        window.removeEventListener('online', handleOnline);
+      }
     };
-  }, [supabase, loadUserProfile]);
+  }, [supabase, loadUserProfile, ensureFreshSession]);
 
   // Keep the current user's displayed name/role in sync with `profiles` in real time.
   useEffect(() => {
@@ -239,7 +445,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [currentUser?.id, currentUser?.email, supabase, loadUserProfile]);
 
-  const signIn = useCallback(async (email: string, password: string) => {
+  const signIn = useCallback(async (email: string, password: string, rememberMe = true) => {
     const trimmedEmail = (email || '').trim();
     const trimmedPassword = (password || '').trim();
 
@@ -249,6 +455,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!trimmedPassword) {
       throw new Error('Vui lòng nhập Mật khẩu.');
     }
+
+    // Apply storage persistence mode BEFORE signing in so tokens land in localStorage or sessionStorage
+    setRememberMePreference(rememberMe);
 
     const { data, error } = await supabase.auth.signInWithPassword({
       email: trimmedEmail,
@@ -264,6 +473,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (data?.session?.user) {
+      void supabase.auth.startAutoRefresh();
       await loadUserProfile(data.session.user.id, data.session.user.email ?? trimmedEmail, true);
     }
   }, [supabase, loadUserProfile]);
@@ -271,6 +481,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     loadedUserIdRef.current = null;
     loadingUserIdRef.current = null;
+    clearCachedProfile();
     try {
       localStorage.removeItem('ktx_local_user');
     } catch {}

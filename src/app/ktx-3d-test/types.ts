@@ -7,6 +7,7 @@ export type ViewLevel = 'campus' | 'room';
 export type CampusColorMode =
   | 'occupancy'
   | 'gender'
+  | 'contractor'
   | 'vacant_only'
   | 'overloaded_only'
   | 'tam_tru'
@@ -90,11 +91,15 @@ export interface CampusRoomNode {
   genderInfo: RoomGenderInfo;
   workers: Worker[];
   dominantUnit: string;
+  dominantContractor?: string;
   platoonCounts: Record<string, number>;
   unitCounts: Record<string, number>;
   unregisteredTamTruCount: number;
   unassignedBedCount: number;
   maintenanceBedCount: number;
+  activeTicketCount?: number;
+  urgentTicketCount?: number;
+  overdueSlaTicketCount?: number;
   hasFacilityIssue: boolean;
   hasWriteAccess: boolean;
   facility: FacilityItem | null;

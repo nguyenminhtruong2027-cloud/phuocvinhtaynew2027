@@ -22,6 +22,12 @@ import {
   Box,
   DoorOpen,
   Wrench,
+  ShieldAlert,
+  Minimize2,
+  Users2,
+  UserMinus,
+  ArrowLeftRight,
+  BookmarkCheck,
 } from 'lucide-react';
 import { useWorkers } from '@/context/WorkerContext';
 import { useAuth } from '@/context/AuthContext';
@@ -194,6 +200,38 @@ export default function CommandPalette() {
         onSelect: () => navigate('/worker-management'),
       },
       {
+        id: 'route-teams',
+        group: 'route',
+        label: 'Quản Lý Tổ Đội & Báo Cáo Zalo',
+        sublabel: 'Gom nhóm Tổ trưởng / Tiểu đoàn / Đơn vị & copy báo cáo Zalo 1 chạm',
+        icon: Users2,
+        onSelect: () => navigate('/teams'),
+      },
+      {
+        id: 'action-batch-checkout',
+        group: 'action',
+        label: 'Check-out Hàng Loạt & Đối Chiếu Quân Số',
+        sublabel: 'Dán danh sách nghỉ việc hoặc đối soát Excel nhân sự công trường ↔ KTX',
+        icon: UserMinus,
+        onSelect: () => navigate('/worker-management?action=batch-checkout'),
+      },
+      {
+        id: 'action-bed-swap',
+        group: 'action',
+        label: 'Hoán Đổi Giường 2 Công Nhân (A ⇄ B)',
+        sublabel: 'Đổi chỗ trực tiếp 2 người ở Quản lý Giường',
+        icon: ArrowLeftRight,
+        onSelect: () => navigate('/bed-management?action=swap'),
+      },
+      {
+        id: 'action-bed-reserve',
+        group: 'action',
+        label: 'Đặt Giữ Chỗ Giường Cho Đoàn Sắp Vào',
+        sublabel: 'Khoanh trước phòng/giường trống để tránh xếp nhầm',
+        icon: BookmarkCheck,
+        onSelect: () => navigate('/bed-management?action=reserve'),
+      },
+      {
         id: 'route-facilities',
         group: 'route',
         label: 'Cơ Sở Vật Chất',
@@ -224,6 +262,14 @@ export default function CommandPalette() {
         sublabel: 'Phiếu báo hỏng QR, phân công xử lý & lịch sử sửa chữa',
         icon: Wrench,
         onSelect: () => navigate('/maintenance'),
+      },
+      {
+        id: 'route-security',
+        group: 'route',
+        label: 'An Ninh & Kỷ Luật KTX',
+        sublabel: 'Sổ vi phạm, Danh sách Đen (Blacklist) & Quét công nhân ảo',
+        icon: ShieldAlert,
+        onSelect: () => navigate('/security'),
       },
       {
         id: 'route-qr',
@@ -259,6 +305,18 @@ export default function CommandPalette() {
 
   const actionItems: CommandItem[] = useMemo(
     () => [
+      ...(!isTechnician
+        ? [
+            {
+              id: 'action-consolidate',
+              group: 'action' as const,
+              label: 'Dồn phòng thông minh (Smart Defragmentation)',
+              sublabel: 'Tự động gom phòng thưa người để giải phóng phòng trống nguyên căn',
+              icon: Minimize2,
+              onSelect: () => navigate('/bed-management?action=consolidate'),
+            },
+          ]
+        : []),
       {
         id: 'action-theme',
         group: 'action',
@@ -282,7 +340,7 @@ export default function CommandPalette() {
         },
       },
     ],
-    [themeMode, toggleTheme, refreshWorkers, refreshing]
+    [isTechnician, navigate, themeMode, toggleTheme, refreshWorkers, refreshing]
   );
 
   const workerMatches: CommandItem[] = useMemo(() => {

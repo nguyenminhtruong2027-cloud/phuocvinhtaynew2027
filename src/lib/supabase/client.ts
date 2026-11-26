@@ -54,15 +54,22 @@ async function safeSupabaseFetch(input: RequestInfo | URL, init?: RequestInit): 
     console.warn('[Supabase Network] fetch caught exception:', err?.message || err);
     const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
 
-    // Gracefully handle auth user check if offline/unreachable
+    // Gracefully handle auth user check if offline/unreachable:
+    // NEVER return 200 { user: null } because that falsely triggers logout on brief network blips.
     if (urlStr.includes('/auth/v1/user')) {
-      return new Response(JSON.stringify({ user: null }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return new Response(
+        JSON.stringify({
+          error: 'network_error',
+          message: 'Không thể kết nối đến máy chủ xác thực. Đang giữ nguyên phiên hiện tại.',
+        }),
+        {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
     }
 
-    // Gracefully handle auth token login if offline/unreachable
+    // Gracefully handle auth token login/refresh if offline/unreachable
     if (urlStr.includes('/auth/v1/token')) {
       return new Response(
         JSON.stringify({
@@ -103,6 +110,75 @@ async function safeSupabaseFetch(input: RequestInfo | URL, init?: RequestInit): 
   }
 }
 
+export const REMEMBER_ME_STORAGE_KEY = 'ktx_remember_me';
+
+export function getRememberMePreference(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    const raw = window.localStorage.getItem(REMEMBER_ME_STORAGE_KEY);
+    return raw !== '0';
+  } catch {
+    return true;
+  }
+}
+
+export function setRememberMePreference(remember: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(REMEMBER_ME_STORAGE_KEY, remember ? '1' : '0');
+  } catch {
+    // Ignore storage quota/privacy restrictions
+  }
+}
+
+/**
+ * Adaptive Supabase Auth storage:
+ * - When "Duy trì đăng nhập" is enabled (default): persists tokens in localStorage across browser restarts & PWA launches.
+ * - When disabled: stores tokens in sessionStorage so the session ends automatically when the browser closes.
+ * - Reads from both stores seamlessly so active sessions are never accidentally dropped.
+ */
+const adaptiveAuthStorage = {
+  getItem(key: string): string | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      const fromLocal = window.localStorage.getItem(key);
+      if (fromLocal !== null) return fromLocal;
+    } catch {}
+    try {
+      return window.sessionStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  setItem(key: string, value: string): void {
+    if (typeof window === 'undefined') return;
+    const remember = getRememberMePreference();
+    try {
+      if (remember) {
+        window.localStorage.setItem(key, value);
+        window.sessionStorage.removeItem(key);
+      } else {
+        window.sessionStorage.setItem(key, value);
+        window.localStorage.removeItem(key);
+      }
+    } catch {
+      // Fallback if localStorage is restricted
+      try {
+        window.sessionStorage.setItem(key, value);
+      } catch {}
+    }
+  },
+  removeItem(key: string): void {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.removeItem(key);
+    } catch {}
+    try {
+      window.sessionStorage.removeItem(key);
+    } catch {}
+  },
+};
+
 let _client: SupabaseClient | null = null;
 let _clientUrl: string | null = null;
 let _clientKey: string | null = null;
@@ -119,6 +195,7 @@ export function createClient(): SupabaseClient {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: false,
+      storage: adaptiveAuthStorage,
     },
     global: {
       fetch: safeSupabaseFetch,

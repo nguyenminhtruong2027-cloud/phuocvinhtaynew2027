@@ -54,6 +54,7 @@ import { useAudit } from '@/context/AuditContext';
 import {
   fetchMaintenanceTickets,
   getTicketCategoryShortLabel,
+  getTicketSlaStatus,
   type MaintenanceTicket,
 } from '@/lib/maintenanceTickets';
 import {
@@ -95,7 +96,12 @@ import BedOperationsPanel from './BedOperationsPanel';
 import RoomEquipmentEditorPanel, {
   type FacilityEquipmentPatch,
 } from './RoomEquipmentEditorPanel';
-import { getRoomUnitMatchCount } from '../scene/campusBuilder';
+import RoomQuickInspectorCard from './RoomQuickInspectorCard';
+import { getContractorColorSpec, getRoomUnitMatchCount } from '../scene/campusBuilder';
+import {
+  composeExecutive3DSnapshot,
+  type SnapshotLegendItem,
+} from '../utils/executiveSnapshot';
 import {
   CAMPUS_BLUEPRINT_CONFIG,
   fetchCampusBlueprintConfig,
@@ -714,12 +720,26 @@ export default function Ktx3DTestClient() {
             }
           });
 
+          let dominantContractor = '';
+          let maxContractor = 0;
+          Object.entries(unitCounts).forEach(([u, cnt]) => {
+            if (cnt > maxContractor) {
+              maxContractor = cnt;
+              dominantContractor = u;
+            }
+          });
+          if (!dominantContractor) dominantContractor = dominantUnit;
+
           const hasWriteAccess = isAdmin || (isTechnician ? canAccessMaintenanceBlock(day, ktx) : canWriteBlock(day, ktx));
           const maintKey = `${normalizeKtxCompact(ktx)}||${normalizeDayKey(
             day
           )}||${normalizeRoomLabel(roomRaw)}`;
           const maintenanceBedCount = maintenanceBedsByRoom[maintKey] || 0;
           const openRoomTickets = activeTicketsByRoom[maintKey] || [];
+          const urgentTicketCount = openRoomTickets.filter(t => t.priority === 'urgent').length;
+          const overdueSlaTicketCount = openRoomTickets.filter(
+            t => getTicketSlaStatus(t).state === 'overdue'
+          ).length;
           const ticketSummary =
             openRoomTickets.length > 0
               ? `${openRoomTickets.length} phiếu QR (${openRoomTickets
@@ -748,11 +768,15 @@ export default function Ktx3DTestClient() {
             genderInfo,
             workers: rWorkers,
             dominantUnit,
+            dominantContractor,
             platoonCounts,
             unitCounts,
             unregisteredTamTruCount,
             unassignedBedCount,
             maintenanceBedCount,
+            activeTicketCount: openRoomTickets.length,
+            urgentTicketCount,
+            overdueSlaTicketCount,
             hasFacilityIssue,
             hasWriteAccess,
             facility: fac,
@@ -1937,12 +1961,134 @@ export default function Ktx3DTestClient() {
     }
   }, [activeRoom, selectedBed, editModeUnlocked, addLog, actorLabel, refreshWorkers]);
 
-  const handleCaptureSnapshot = useCallback(() => {
-    const dataUrl = viewportRef.current?.captureSnapshot();
-    if (!dataUrl) {
+  const contractorLegend = useMemo(() => {
+    const counts = new Map<string, number>();
+    visibleRoomsFlat.forEach(r => {
+      if (!r.isVisible || r.roomType !== 'accommodation' || r.occupied <= 0) return;
+      const label = (r.dominantContractor || r.dominantUnit || '').trim();
+      if (!label) return;
+      counts.set(label, (counts.get(label) || 0) + 1);
+    });
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || naturalSortCompare(a[0], b[0]))
+      .slice(0, 6)
+      .map(([name, roomCount]) => ({
+        name,
+        roomCount,
+        color: getContractorColorSpec(name).css,
+      }));
+  }, [visibleRoomsFlat]);
+
+  const overdueSlaTotalCount = useMemo(
+    () => visibleRoomsFlat.reduce((s, r) => s + (r.overdueSlaTicketCount || 0), 0),
+    [visibleRoomsFlat]
+  );
+
+  const handleCaptureSnapshot = useCallback(async () => {
+    const rawWebglUrl = viewportRef.current?.captureSnapshot();
+    if (!rawWebglUrl) {
       toast.error('Không thể chụp ảnh mô hình 3D lúc này');
       return;
     }
+
+    const modeLabels: Record<CampusColorMode, string> = {
+      occupancy: 'Tỷ lệ Lấp đầy',
+      gender: 'Phân loại Nam / Nữ',
+      contractor: 'Theo Nhà thầu / Đơn vị',
+      maintenance: 'Sự cố CSVC & Quá hạn SLA',
+      tam_tru: 'Tình trạng Tạm trú',
+      vacant_only: 'Phòng còn trống',
+      overloaded_only: 'Phòng quá tải',
+      unit_xray: unitXRayFilter ? `X-quang: ${unitXRayFilter.label}` : 'X-quang Đơn vị',
+    };
+
+    let legendItems: SnapshotLegendItem[] = [];
+    if (viewLevel === 'room') {
+      legendItems = [
+        { label: 'Đang ở', color: '#3b82f6' },
+        { label: 'Giường trống', color: '#10b981' },
+        { label: 'Đang bảo trì', color: '#ef4444' },
+        { label: 'Chờ check-out', color: '#f59e0b' },
+      ];
+    } else if (colorMode === 'gender') {
+      legendItems = [
+        { label: 'Phòng Nam', color: '#3b82f6' },
+        { label: 'Phòng Nữ', color: '#ec4899' },
+        { label: 'Hỗn hợp', color: '#f59e0b' },
+        { label: 'Trống', color: '#64748b' },
+      ];
+    } else if (colorMode === 'contractor') {
+      legendItems = [
+        ...contractorLegend.map(c => ({ label: `${c.name} (${c.roomCount}P)`, color: c.color })),
+        { label: 'Phòng trống', color: '#64748b' },
+      ];
+    } else if (colorMode === 'maintenance') {
+      legendItems = [
+        { label: 'Khẩn cấp / Quá hạn SLA / ≥2G', color: '#ef4444' },
+        { label: 'Sự cố CSVC / 1G bảo trì', color: '#f97316' },
+        { label: 'Ổn định', color: '#64748b' },
+      ];
+    } else if (colorMode === 'tam_tru') {
+      legendItems = [
+        { label: 'Đủ tạm trú', color: '#10b981' },
+        { label: 'Thiếu <50%', color: '#f59e0b' },
+        { label: 'Thiếu ≥50%', color: '#ef4444' },
+        { label: 'Trống', color: '#64748b' },
+      ];
+    } else {
+      legendItems = [
+        { label: 'Còn chỗ', color: '#10b981' },
+        { label: 'Đầy 100%', color: '#f59e0b' },
+        { label: 'Quá tải', color: '#ef4444' },
+        { label: 'Trống', color: '#64748b' },
+      ];
+    }
+
+    const scopeTitle =
+      viewLevel === 'room' && activeRoom
+        ? `${activeRoom.ktx} · ${activeRoom.day} · ${activeRoom.roomLabel}`
+        : selectedKtxFilter === 'all'
+          ? 'Toàn bộ Ký Túc Xá Phước Vĩnh Tây'
+          : selectedKtxFilter;
+
+    const totalOcc =
+      viewLevel === 'room' && activeRoom
+        ? activeRoom.occupied
+        : visibleKtxNodes.reduce((s, n) => s + n.totalOccupied, 0);
+    const totalCap =
+      viewLevel === 'room' && activeRoom
+        ? activeRoom.capacity
+        : visibleKtxNodes.reduce((s, n) => s + n.totalCapacity, 0);
+    const totalRooms =
+      viewLevel === 'room' && activeRoom
+        ? 1
+        : visibleKtxNodes.reduce((s, n) => s + n.totalRooms, 0);
+    const issueRooms = visibleRoomsFlat.filter(
+      r => r.isVisible && (r.maintenanceBedCount > 0 || r.hasFacilityIssue)
+    ).length;
+
+    let finalDataUrl = rawWebglUrl;
+    try {
+      finalDataUrl = await composeExecutive3DSnapshot({
+        webglDataUrl: rawWebglUrl,
+        scopeTitle,
+        modeLabel: viewLevel === 'room' ? 'Nội thất Phòng 3D' : modeLabels[colorMode],
+        theme: sceneTheme,
+        stats: {
+          occupied: totalOcc,
+          capacity: totalCap,
+          vacant: Math.max(0, totalCap - totalOcc),
+          fillRatePct: totalCap > 0 ? Math.round((totalOcc / totalCap) * 100) : 0,
+          roomsCount: totalRooms,
+          issueRoomsCount: issueRooms,
+          overdueSlaCount: overdueSlaTotalCount,
+        },
+        legend: legendItems,
+      });
+    } catch {
+      // Fallback to raw WebGL PNG if composition fails
+    }
+
     const rawSlug =
       viewLevel === 'room' && activeRoom
         ? `${activeRoom.ktx}_${activeRoom.day}_${activeRoom.roomLabel}`
@@ -1952,13 +2098,24 @@ export default function Ktx3DTestClient() {
     const safeSlug = removeAccents(rawSlug).replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
     const stamp = new Date().toISOString().slice(0, 10);
     const link = document.createElement('a');
-    link.href = dataUrl;
-    link.download = `KTX_3D_${safeSlug}_${stamp}.png`;
+    link.href = finalDataUrl;
+    link.download = `KTX_BaoCao3D_${safeSlug}_${stamp}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    toast.success('Đã lưu ảnh chụp mô hình 3D (PNG)');
-  }, [viewLevel, activeRoom, selectedKtxFilter]);
+    toast.success('Đã xuất Ảnh Báo Cáo 3D chuẩn trình chiếu (PNG)');
+  }, [
+    viewLevel,
+    activeRoom,
+    selectedKtxFilter,
+    colorMode,
+    unitXRayFilter,
+    contractorLegend,
+    sceneTheme,
+    visibleKtxNodes,
+    visibleRoomsFlat,
+    overdueSlaTotalCount,
+  ]);
 
   const handleLocateRoomOnCampus = useCallback(
     (room: CampusRoomNode) => {
@@ -2449,7 +2606,10 @@ export default function Ktx3DTestClient() {
                         ? ` · Thiếu tạm trú ${campusTotals.unregisteredTamTru.toLocaleString('vi-VN')} người`
                         : ''}
                       {colorMode === 'maintenance'
-                        ? ` · Sự cố CSVC ${campusTotals.maintenanceIssueRooms} phòng`
+                        ? ` · Sự cố ${campusTotals.maintenanceIssueRooms}P${overdueSlaTotalCount > 0 ? ` (${overdueSlaTotalCount} quá SLA)` : ''}`
+                        : ''}
+                      {colorMode === 'contractor'
+                        ? ` · ${contractorLegend.length} nhóm nhà thầu chính`
                         : ''}
                       {colorMode === 'unit_xray' && unitXRayFilter
                         ? ` · Khớp ${campusTotals.xrayMatchedRooms} phòng (${unitXRayFilter.label})`
@@ -2924,146 +3084,52 @@ export default function Ktx3DTestClient() {
             </div>
           )}
 
-          {/* ── Focused Room Quick Inspector & Visibility/Type Bar (Campus View) ── */}
+          {/* ── Focused Room Quick Inspector with Visual Bunk-Bed Map & Quick Ticket Creator ── */}
           {viewLevel === 'campus' && focusedRoom && (
-            <div className={`flex flex-col gap-2 rounded-xl border px-3 py-2.5 text-xs ${hudCard}`}>
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                  <MapPin
-                    size={14}
-                    className={
-                      !focusedRoom.isVisible
-                        ? 'text-slate-400 shrink-0'
-                        : focusedRoom.roomType === 'functional'
-                          ? 'text-violet-400 shrink-0'
-                          : 'text-sky-500 shrink-0'
-                    }
-                  />
-                  <span className="font-bold truncate">
-                    {focusedRoom.ktx} · {focusedRoom.day} · {focusedRoom.roomLabel}
-                  </span>
-                  {focusedRoom.roomType === 'functional' ? (
-                    <span className="px-1.5 py-0.5 rounded bg-violet-500/20 border border-violet-500/40 text-[10px] font-bold text-violet-400">
-                      Phòng chức năng
-                    </span>
-                  ) : (
-                    <span className={`font-tabular shrink-0 ${hudMuted}`}>
-                      ({focusedRoom.occupied}/{focusedRoom.capacity} chỗ)
-                    </span>
-                  )}
-                  {!focusedRoom.isVisible && (
-                    <span className="px-1.5 py-0.5 rounded bg-slate-500/20 border border-slate-500/40 text-[10px] font-bold text-slate-400">
-                      Đang ẩn
-                    </span>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setFocusedRoomKey(null)}
-                  className={`p-1 rounded-lg ${hudMuted} hover:text-blue-500 shrink-0`}
-                  aria-label="Đóng thẻ phòng đang chọn"
-                >
-                  <X size={13} />
-                </button>
-              </div>
-
-              {(focusedRoom.ghiChu || focusedRoom.facility) && (
-                <div className={`text-[11px] flex flex-wrap items-center gap-x-3 gap-y-1 ${hudMuted}`}>
-                  {focusedRoom.ghiChu && (
-                    <span className="italic">Ghi chú: {focusedRoom.ghiChu}</span>
-                  )}
-                  {focusedRoom.facility && (
-                    <span className="font-tabular">
-                      {[
-                        Number(focusedRoom.facility.giuong) > 0
-                          ? `${focusedRoom.facility.giuong} giường`
-                          : null,
-                        Number(focusedRoom.facility.dieu_hoa) > 0
-                          ? `${focusedRoom.facility.dieu_hoa} ĐH`
-                          : null,
-                        Number(focusedRoom.facility.tu) > 0
-                          ? `${focusedRoom.facility.tu} tủ`
-                          : null,
-                        Number(focusedRoom.facility.quat) > 0
-                          ? `${focusedRoom.facility.quat} quạt`
-                          : null,
-                        Number(focusedRoom.facility.ban_an) > 0
-                          ? `${focusedRoom.facility.ban_an} bàn`
-                          : null,
-                      ]
-                        .filter(Boolean)
-                        .join(' · ') || 'Chưa khai báo thiết bị'}
-                    </span>
-                  )}
-                </div>
-              )}
-
-              <div className="flex flex-wrap items-center gap-1.5">
-                {focusedRoom.roomType === 'accommodation' && focusedRoom.isVisible && (
-                  <button
-                    type="button"
-                    onClick={() => handleEnterRoom(focusedRoom)}
-                    className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold transition-colors"
-                  >
-                    Vào phòng 3D →
-                  </button>
-                )}
-
-                  {focusedRoom.hasWriteAccess && focusedRoom.facility?.id && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEquipmentEditDefault(true);
-                        setCampusEquipmentRoomKey(prev =>
-                          prev === focusedRoom.key ? null : focusedRoom.key
-                        );
-                      }}
-                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border font-semibold transition-colors ${
-                        campusEquipmentRoomKey === focusedRoom.key
-                          ? 'bg-orange-600 border-orange-500 text-white'
-                          : hudSubtleBtn
-                      }`}
-                    >
-                      <Wrench size={12} className={campusEquipmentRoomKey === focusedRoom.key ? '' : 'text-orange-500'} />
-                      <span>CSVC / Báo hỏng</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={roomStatusBusy}
-                      onClick={() => handleToggleRoomVisibilityIn3D(focusedRoom)}
-                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border font-semibold transition-colors disabled:opacity-50 ${
-                        focusedRoom.isVisible
-                          ? hudSubtleBtn
-                          : 'bg-emerald-600 hover:bg-emerald-500 border-emerald-500 text-white'
-                      }`}
-                    >
-                      {focusedRoom.isVisible ? <EyeOff size={12} /> : <Eye size={12} />}
-                      <span>{focusedRoom.isVisible ? 'Ẩn phòng' : 'Hiện lại phòng'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={roomStatusBusy}
-                      onClick={() => handleToggleRoomTypeIn3D(focusedRoom)}
-                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border font-semibold transition-colors disabled:opacity-50 ${
-                        focusedRoom.roomType === 'functional'
-                          ? 'bg-blue-600/20 border-blue-500/45 text-blue-400 hover:bg-blue-600/30'
-                          : 'bg-violet-600/20 border-violet-500/45 text-violet-400 hover:bg-violet-600/30'
-                      }`}
-                    >
-                      <Building2 size={12} />
-                      <span>
-                        {focusedRoom.roomType === 'functional'
-                          ? 'Đổi về Phòng ở'
-                          : 'Đặt Phòng chức năng'}
-                      </span>
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
+            <RoomQuickInspectorCard
+              room={focusedRoom}
+              roomTickets={
+                activeTicketsByRoom[
+                  `${normalizeKtxCompact(focusedRoom.ktx)}||${normalizeDayKey(focusedRoom.day)}||${normalizeRoomLabel(focusedRoom.roomRaw)}`
+                ] || []
+              }
+              isLight={isLight}
+              hudCard={hudCard}
+              hudMuted={hudMuted}
+              hudSubtleBtn={hudSubtleBtn}
+              roomStatusBusy={roomStatusBusy}
+              equipmentOpen={campusEquipmentRoomKey === focusedRoom.key}
+              reporterName={currentUser?.name || currentUser?.email || 'Quản lý 3D'}
+              canCreateTicket={Boolean(currentUser)}
+              onClose={() => setFocusedRoomKey(null)}
+              onEnterRoom={handleEnterRoom}
+              onEnterRoomAtBed={(r, bedNumber) => {
+                pendingFocusBedNumRef.current = bedNumber;
+                handleEnterRoom(r);
+              }}
+              onToggleEquipment={() => {
+                setEquipmentEditDefault(true);
+                setCampusEquipmentRoomKey(prev =>
+                  prev === focusedRoom.key ? null : focusedRoom.key
+                );
+              }}
+              onToggleVisibility={handleToggleRoomVisibilityIn3D}
+              onToggleRoomType={handleToggleRoomTypeIn3D}
+              onTicketCreated={created => {
+                const key = `${normalizeKtxCompact(created.ktx)}||${normalizeDayKey(created.day)}||${normalizeRoomLabel(created.phong_so)}`;
+                setActiveTicketsByRoom(prev => ({
+                  ...prev,
+                  [key]: [created, ...(prev[key] || [])],
+                }));
+                try {
+                  addLog(
+                    actorLabel,
+                    'FACILITY_UPDATE',
+                    `[3D] Tạo phiếu bảo trì ${created.ticket_code} tại ${created.ktx} · ${created.day} · ${created.phong_so}: ${created.description}`
+                  );
+                } catch {}
+              }}
+            />
           )}
 
           {/* ── Inline Equipment & Issue Editor in Campus View (when opened from Focused Room) ── */}
@@ -3732,8 +3798,9 @@ export default function Ktx3DTestClient() {
                       [
                         { id: 'occupancy', label: 'Lấp đầy' },
                         { id: 'gender', label: 'Nam / Nữ' },
+                        { id: 'contractor', label: 'Nhà thầu' },
+                        { id: 'maintenance', label: 'Sự cố & SLA' },
                         { id: 'tam_tru', label: 'Tạm trú' },
-                        { id: 'maintenance', label: 'Sự cố CSVC' },
                         { id: 'vacant_only', label: 'Còn trống' },
                         { id: 'overloaded_only', label: 'Quá tải' },
                       ] as { id: CampusColorMode; label: string }[]
@@ -3749,7 +3816,9 @@ export default function Ktx3DTestClient() {
                           colorMode === opt.id
                             ? opt.id === 'maintenance'
                               ? 'bg-orange-600 text-white'
-                              : 'bg-blue-600 text-white'
+                              : opt.id === 'contractor'
+                                ? 'bg-violet-600 text-white'
+                                : 'bg-blue-600 text-white'
                             : `${hudMuted} hover:text-blue-500`
                         }`}
                       >
@@ -4093,15 +4162,36 @@ export default function Ktx3DTestClient() {
                           Trống
                         </span>
                       </>
+                    ) : colorMode === 'contractor' ? (
+                      <>
+                        {contractorLegend.length > 0 ? (
+                          contractorLegend.map(c => (
+                            <span key={c.name} className="inline-flex items-center gap-1.5">
+                              <span
+                                className="w-2.5 h-2.5 rounded-sm shrink-0"
+                                style={{ backgroundColor: c.color }}
+                              />
+                              <span className="truncate max-w-[140px]">{c.name}</span>
+                              <span className="opacity-70 font-tabular">({c.roomCount}P)</span>
+                            </span>
+                          ))
+                        ) : (
+                          <span>Chưa có dữ liệu nhà thầu</span>
+                        )}
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-sm bg-slate-500/60" />
+                          Trống
+                        </span>
+                      </>
                     ) : colorMode === 'maintenance' ? (
                       <>
                         <span className="inline-flex items-center gap-1.5">
                           <span className="w-2.5 h-2.5 rounded-sm bg-rose-500" />
-                          Sự cố nghiêm trọng / ≥2G
+                          Khẩn cấp / Quá SLA / ≥2G
                         </span>
                         <span className="inline-flex items-center gap-1.5">
                           <span className="w-2.5 h-2.5 rounded-sm bg-orange-500" />
-                          Có sự cố CSVC / 1G bảo trì
+                          Sự cố CSVC / 1G bảo trì
                         </span>
                         <span className="inline-flex items-center gap-1.5">
                           <span className="w-2.5 h-2.5 rounded-sm bg-slate-500/50" />

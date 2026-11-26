@@ -28,6 +28,7 @@ import {
   Copy,
   FileSpreadsheet,
   Calendar,
+  ShieldAlert,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
@@ -47,6 +48,7 @@ import { QrCodeImage, downloadQrPng } from '@/components/QrCodeImage';
 import { printQrBulletinPoster, PosterPaperSize } from '@/lib/qrPosterPrint';
 import { exportToExcel } from '@/lib/exportExcel';
 import { getVNDateString } from '@/lib/vnDate';
+import { fetchBlacklist, matchBlacklistInMemory, type BlacklistRecord } from '@/lib/disciplineService';
 import {
   buildWorkerHierarchyFromWorkers,
   fetchRoomBedAvailability,
@@ -290,6 +292,28 @@ function DetailModal({
     setEditForm(prev => ({ ...prev, don_vi: val }));
   };
 
+  const [blacklistRecords, setBlacklistRecords] = useState<BlacklistRecord[]>([]);
+  const [adminOverrideBlacklist, setAdminOverrideBlacklist] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    fetchBlacklist()
+      .then(res => {
+        if (active && !res.tableMissing) setBlacklistRecords(res.data);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  const blacklistHit = useMemo(() => {
+    const res = matchBlacklistInMemory(blacklistRecords, editForm.so_cccd, editForm.ma_nv);
+    return res.isBanned ? (res.matchedRecord ?? null) : null;
+  }, [blacklistRecords, editForm.so_cccd, editForm.ma_nv]);
+
+  useEffect(() => {
+    setAdminOverrideBlacklist(false);
+  }, [editForm.so_cccd, editForm.ma_nv]);
+
   const dupMatch = useMemo(() => {
     return checkDuplicateWorker(hierarchy.workers, editForm.so_cccd, editForm.so_dien_thoai);
   }, [hierarchy.workers, editForm.so_cccd, editForm.so_dien_thoai]);
@@ -430,6 +454,46 @@ function DetailModal({
               </span>
             )}
           </div>
+
+          {/* CẢNH BÁO AN NINH: DANH SÁCH ĐEN (BLACKLIST GUARD) */}
+          {blacklistHit && (
+            <div className="p-3.5 rounded-xl tint-dgr border border-dgr text-xs space-y-2">
+              <div className="flex items-start gap-2">
+                <ShieldAlert size={16} className="text-dgr shrink-0 mt-0.5" />
+                <div className="space-y-1 flex-1 min-w-0">
+                  <p className="font-extrabold text-dgr uppercase tracking-wide">
+                    CẢNH BÁO AN NINH — CÔNG NHÂN THUỘC DANH SÁCH ĐEN (BLACKLIST)
+                  </p>
+                  <p className="text-tx font-semibold">
+                    {blacklistHit.ho_va_ten} · CCCD: <span className="font-mono">{blacklistHit.cccd}</span>
+                    {blacklistHit.ma_nv ? ` · Mã NV: ${blacklistHit.ma_nv}` : ''}
+                  </p>
+                  <p className="text-dgr font-medium">
+                    Lý do cấm: {blacklistHit.reason}
+                  </p>
+                  <p className="text-[11px] text-mu">
+                    Ban hành bởi {blacklistHit.banned_by} · Khuyến nghị từ chối hồ sơ này.
+                  </p>
+                </div>
+              </div>
+              {isPending && isAdmin && (
+                <label className="flex items-center gap-2 pt-2 border-t border-dgr/30 cursor-pointer select-none text-tx font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={adminOverrideBlacklist}
+                    onChange={e => setAdminOverrideBlacklist(e.target.checked)}
+                    className="w-4 h-4 accent-rose-600 rounded cursor-pointer"
+                  />
+                  <span>Tôi là Quản trị viên và xác nhận ngoại lệ duyệt lại hồ sơ thuộc Danh sách Đen này</span>
+                </label>
+              )}
+              {isPending && !isAdmin && (
+                <p className="pt-1.5 border-t border-dgr/30 text-[11px] font-bold text-dgr">
+                  Chuyên viên không được phép duyệt hồ sơ thuộc Danh sách Đen. Vui lòng từ chối hoặc báo cáo Quản trị viên.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Cảnh báo trùng hồ sơ */}
           {dupMatch && (
@@ -869,11 +933,17 @@ function DetailModal({
                 <button
                   type="button"
                   onClick={handleApproveSubmit}
-                  disabled={isProcessing || Boolean(selectedBedError)}
+                  disabled={
+                    isProcessing ||
+                    Boolean(selectedBedError) ||
+                    Boolean(blacklistHit && (!isAdmin || !adminOverrideBlacklist))
+                  }
                   className="flex-1 py-2 px-3 bg-ok2 hover:opacity-90 text-ok2-fg rounded text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer text-center"
                 >
                   {isProcessing ? <Loader2 size={13} className="animate-spin inline mr-1" /> : <CheckCircle2 size={13} className="inline mr-1" />}
-                  Duyệt hồ sơ (Lưu bản chỉnh sửa)
+                  {blacklistHit && !isAdmin
+                    ? 'Bị chặn bởi Danh sách Đen'
+                    : 'Duyệt hồ sơ (Lưu bản chỉnh sửa)'}
                 </button>
               </div>
             </div>

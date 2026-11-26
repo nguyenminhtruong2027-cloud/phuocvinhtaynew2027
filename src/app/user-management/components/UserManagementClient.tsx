@@ -5,11 +5,17 @@ import { useRouter } from 'next/navigation';
 import { useAuth, UserRole } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
 import { createClient, getSupabaseConfig } from '@/lib/supabase/client';
-import { UserPlus, Pencil, Trash2, Shield, ShieldCheck, Crown, Lock, RefreshCw, AlertCircle, CheckCircle, Building2, Search, Database, Check, Copy, KeyRound, UserCog, Wrench } from 'lucide-react';
+import { UserPlus, Pencil, Trash2, Shield, ShieldCheck, Crown, Lock, RefreshCw, AlertCircle, CheckCircle, Building2, Search, Database, Check, Copy, KeyRound, UserCog, Wrench, HardDriveDownload, FileSpreadsheet, FileJson } from 'lucide-react';
 import { useKtxStructure, KtxBlockGroup } from '@/lib/ktxStructure';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { SlidingTabs } from '@/components/ui/MotionPrimitives';
 import { StatusTag } from '@/components/ui/StatusTag';
+import {
+  exportFullSystemExcelBackup,
+  exportFullSystemJsonBackup,
+  FullSystemBackupSnapshot,
+} from '@/lib/systemBackup';
+import { BED_RESERVATIONS_SETUP_SQL } from '@/lib/bedReservations';
 
 interface ProfileRecord {
   id: string;
@@ -110,9 +116,39 @@ export default function UserManagementClient() {
     superAdminRbac: 'unknown' | 'applied' | 'missing';
     packageASecurity: 'unknown' | 'applied' | 'missing';
     technicianMaintenance: 'unknown' | 'applied' | 'missing';
+    disciplineBlacklist: 'unknown' | 'applied' | 'missing';
+    bedReservations: 'unknown' | 'applied' | 'missing';
     checkedAt?: string;
-  }>({ entryLog: 'unknown', rlsLookup: 'unknown', superAdminRbac: 'unknown', packageASecurity: 'unknown', technicianMaintenance: 'unknown' });
+  }>({ entryLog: 'unknown', rlsLookup: 'unknown', superAdminRbac: 'unknown', packageASecurity: 'unknown', technicianMaintenance: 'unknown', disciplineBlacklist: 'unknown', bedReservations: 'unknown' });
   const [copiedMigrationPath, setCopiedMigrationPath] = useState<string | null>(null);
+  const [backupBusy, setBackupBusy] = useState<'excel' | 'json' | null>(null);
+  const [lastBackup, setLastBackup] = useState<{ format: 'Excel' | 'JSON'; snapshot: FullSystemBackupSnapshot } | null>(null);
+
+  const handleFullSystemBackup = async (format: 'excel' | 'json') => {
+    if (!isSuperAdmin || backupBusy) return;
+    setBackupBusy(format);
+    try {
+      const actor = currentUser?.email || currentUser?.name || 'super_admin';
+      const snapshot =
+        format === 'excel'
+          ? await exportFullSystemExcelBackup(actor)
+          : await exportFullSystemJsonBackup(actor);
+      setLastBackup({ format: format === 'excel' ? 'Excel' : 'JSON', snapshot });
+      addLog(
+        actor,
+        'SYSTEM_BACKUP',
+        `Sao lưu toàn hệ thống (${format === 'excel' ? 'Excel nhiều sheet' : 'JSON'}) — ${snapshot.totalRecords} bản ghi`
+      );
+      showToast(
+        `Đã xuất gói sao lưu ${format === 'excel' ? 'Excel' : 'JSON'} thành công (${snapshot.totalRecords.toLocaleString('vi-VN')} bản ghi).`,
+        'success'
+      );
+    } catch (err) {
+      showToast(`Không thể sao lưu dữ liệu: ${err instanceof Error ? err.message : 'Lỗi không xác định'}`, 'error');
+    } finally {
+      setBackupBusy(null);
+    }
+  };
 
   const checkDatabaseMigrations = useCallback(async () => {
     setCheckingMigrations(true);
@@ -183,12 +219,46 @@ export default function UserManagementClient() {
       technicianMaintenance = 'missing';
     }
 
+    let disciplineBlacklist: 'applied' | 'missing' = 'missing';
+    try {
+      const { error: blErr } = await supabase.from('worker_blacklist').select('id').limit(1);
+      if (!blErr) {
+        disciplineBlacklist = 'applied';
+      } else {
+        const msg = blErr.message.toLowerCase();
+        disciplineBlacklist =
+          msg.includes('does not exist') || msg.includes('schema cache') || msg.includes('not find')
+            ? 'missing'
+            : 'applied';
+      }
+    } catch {
+      disciplineBlacklist = 'missing';
+    }
+
+    let bedReservations: 'applied' | 'missing' = 'missing';
+    try {
+      const { error: brErr } = await supabase.from('bed_reservations').select('id').limit(1);
+      if (!brErr) {
+        bedReservations = 'applied';
+      } else {
+        const msg = brErr.message.toLowerCase();
+        bedReservations =
+          msg.includes('does not exist') || msg.includes('schema cache') || msg.includes('not find')
+            ? 'missing'
+            : 'applied';
+      }
+    } catch {
+      bedReservations = 'missing';
+    }
+
     setMigrationStatus({
       entryLog,
       rlsLookup,
       superAdminRbac,
       packageASecurity,
       technicianMaintenance,
+      disciplineBlacklist,
+      bedReservations,
       checkedAt: new Date().toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
     });
     setCheckingMigrations(false);
@@ -1050,6 +1120,76 @@ export default function UserManagementClient() {
         )}
       </div>
 
+      {/* Super Admin 1-Click Full System Backup Panel */}
+      {isSuperAdmin && (
+        <div className="surface-elevated rounded-2xl p-5 space-y-3.5 border border-bdr2">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <CraftIconBadge icon={HardDriveDownload} badgeIcon={Crown} tone="amber" size="md" interactive={false} />
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-sm font-bold text-tx">Sao lưu Toàn hệ thống (1-Click Full Backup)</h2>
+                  <StatusTag tone="amber" size="sm" icon={Crown}>Super Admin</StatusTag>
+                </div>
+                <p className="text-xs text-mu mt-1 leading-relaxed">
+                  Đóng gói đồng bộ toàn bộ 11 bảng dữ liệu vận hành (Công nhân, Giường, CSVC, Cấu hình phòng, Phiếu bảo trì, Hồ sơ QR, Biến động vào/ra, Vi phạm Kỷ luật, Danh sách Đen, Tài khoản & Nhật ký) về máy để lưu trữ định kỳ hoặc phục hồi khẩn cấp.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => handleFullSystemBackup('excel')}
+                disabled={backupBusy !== null}
+                className="btn-glow-primary px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-60 whitespace-nowrap"
+              >
+                {backupBusy === 'excel' ? <RefreshCw size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
+                <span>{backupBusy === 'excel' ? 'Đang đóng gói Excel...' : 'Tải Excel nhiều sheet (.xlsx)'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleFullSystemBackup('json')}
+                disabled={backupBusy !== null}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-surf border border-bdr2 text-tx text-xs font-semibold hover:bg-act shadow-sm cursor-pointer disabled:opacity-60 whitespace-nowrap transition-colors"
+              >
+                {backupBusy === 'json' ? <RefreshCw size={14} className="animate-spin text-pri2" /> : <FileJson size={14} className="text-pri2" />}
+                <span>{backupBusy === 'json' ? 'Đang xuất JSON...' : 'Tải gói phục hồi (.json)'}</span>
+              </button>
+            </div>
+          </div>
+
+          {lastBackup && (
+            <div className="pt-3 border-t border-bdr space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="font-semibold text-ok flex items-center gap-1.5">
+                  <CheckCircle size={13} />
+                  Đã sao lưu gói {lastBackup.format} lúc <span className="font-tabular">{lastBackup.snapshot.generatedAtVN}</span>
+                </span>
+                <span className="font-tabular font-bold text-tx">
+                  Tổng: {lastBackup.snapshot.totalRecords.toLocaleString('vi-VN')} bản ghi
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {lastBackup.snapshot.summaries.map(item => (
+                  <span
+                    key={item.key}
+                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium border ${
+                      item.ok
+                        ? 'bg-surf border-bdr text-tx'
+                        : 'tint-wn border-wn/35 text-wn'
+                    }`}
+                    title={item.error || `${item.label}: ${item.count} bản ghi`}
+                  >
+                    <span>{item.label}</span>
+                    <span className="font-tabular font-bold">{item.count}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Database Migration Readiness Panel */}
       <div className="bg-card border border-border rounded-2xl shadow-sm p-5 space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -1060,7 +1200,7 @@ export default function UserManagementClient() {
             <div>
               <h2 className="text-sm font-bold text-foreground">Trạng thái nâng cấp Database (SQL Migrations)</h2>
               <p className="text-xs text-muted-foreground">
-                Kiểm tra 4 bản vá SQL trong thư mục <code className="px-1 py-0.5 rounded bg-muted">supabase/migrations/</code> đã được chạy trên Supabase hay chưa
+                Kiểm tra 7 bản vá SQL trong thư mục <code className="px-1 py-0.5 rounded bg-muted">supabase/migrations/</code> đã được chạy trên Supabase hay chưa
               </p>
             </div>
           </div>
@@ -1081,32 +1221,49 @@ export default function UserManagementClient() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {[
             {
               file: 'supabase/migrations/20261116000000_create_worker_entry_log.sql',
               title: 'Sổ nhật ký biến động vào/ra (worker_entry_log)',
               status: migrationStatus.entryLog,
+              sqlText: undefined as string | undefined,
             },
             {
               file: 'supabase/migrations/20261116010000_harden_rls_policies.sql',
               title: 'Siết RLS & hàm tra cứu QR (lookup_worker_qr)',
               status: migrationStatus.rlsLookup,
+              sqlText: undefined as string | undefined,
             },
             {
               file: 'supabase/migrations/20261117000000_add_super_admin_rbac.sql',
               title: 'Phân quyền 3 cấp (Super Admin > Admin > Staff)',
               status: migrationStatus.superAdminRbac,
+              sqlText: undefined as string | undefined,
             },
             {
               file: 'supabase/migrations/20261118000000_package_a_security_hardening.sql',
               title: 'Bảo mật Gói A (RLS theo dãy, Audit Append-only & RPC)',
               status: migrationStatus.packageASecurity,
+              sqlText: undefined as string | undefined,
             },
             {
               file: 'supabase/migrations/20261129000000_technician_rbac_and_maintenance_tickets.sql',
               title: 'Phân quyền Kỹ thuật viên & Phiếu báo hỏng QR',
               status: migrationStatus.technicianMaintenance,
+              sqlText: undefined as string | undefined,
+            },
+            {
+              file: 'supabase/migrations/20261130000000_discipline_and_blacklist.sql',
+              title: 'An ninh KTX: Sổ Vi phạm & Danh sách Đen (Blacklist)',
+              status: migrationStatus.disciplineBlacklist,
+              sqlText: undefined as string | undefined,
+            },
+            {
+              file: 'supabase/migrations/20261201000000_bed_reservations.sql',
+              title: 'Giữ chỗ giường cho đoàn sắp vào (bed_reservations)',
+              status: migrationStatus.bedReservations,
+              sqlText: BED_RESERVATIONS_SETUP_SQL,
             },
           ].map(item => (
             <div key={item.file} className="p-3.5 rounded-xl border border-border bg-muted/20 flex flex-col gap-2">
@@ -1131,15 +1288,21 @@ export default function UserManagementClient() {
                 <button
                   type="button"
                   onClick={() => {
-                    navigator.clipboard?.writeText(item.file);
+                    navigator.clipboard?.writeText(item.sqlText ?? item.file);
                     setCopiedMigrationPath(item.file);
+                    showToast(
+                      item.sqlText
+                        ? 'Đã chép mã SQL! Dán trực tiếp vào Supabase SQL Editor và bấm Run.'
+                        : `Đã chép đường dẫn: ${item.file}`,
+                      'success'
+                    );
                     setTimeout(() => setCopiedMigrationPath(null), 2000);
                   }}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-border hover:bg-muted text-foreground shrink-0"
-                  title="Sao chép đường dẫn file SQL"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-border hover:bg-muted text-foreground shrink-0 cursor-pointer"
+                  title={item.sqlText ? 'Sao chép trực tiếp mã SQL để dán chạy trong Supabase' : 'Sao chép đường dẫn file SQL'}
                 >
                   {copiedMigrationPath === item.file ? <Check size={11} className="text-ok" /> : <Copy size={11} />}
-                  <span>{copiedMigrationPath === item.file ? 'Đã chép' : 'Chép path'}</span>
+                  <span>{copiedMigrationPath === item.file ? 'Đã chép' : item.sqlText ? 'Chép mã SQL' : 'Chép path'}</span>
                 </button>
               </div>
             </div>
@@ -1152,7 +1315,10 @@ export default function UserManagementClient() {
             {(migrationStatus.entryLog === 'missing' ||
               migrationStatus.rlsLookup === 'missing' ||
               migrationStatus.superAdminRbac === 'missing' ||
-              migrationStatus.packageASecurity === 'missing') &&
+              migrationStatus.packageASecurity === 'missing' ||
+              migrationStatus.technicianMaintenance === 'missing' ||
+              migrationStatus.disciplineBlacklist === 'missing' ||
+              migrationStatus.bedReservations === 'missing') &&
               ' — Mở Supabase Dashboard → SQL Editor và chạy các file được đánh dấu "Chưa chạy SQL" để bật đầy đủ tính năng.'}
           </p>
         )}

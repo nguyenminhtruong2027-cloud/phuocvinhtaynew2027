@@ -9,7 +9,8 @@ import WorkerDetailModal from './WorkerDetailModal';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import BulkActionBar from './BulkActionBar';
 import BatchSmartAssignModal from './BatchSmartAssignModal';
-import { Plus, Download, Upload, X, FileText, AlertCircle, AlertTriangle, FileCheck, ChevronLeft, ChevronRight, Trash2, Building2, CheckSquare, Filter, Users, ArrowRightLeft } from 'lucide-react';
+import BatchCheckoutReconcileModal from './BatchCheckoutReconcileModal';
+import { Plus, Download, Upload, X, FileText, AlertCircle, AlertTriangle, FileCheck, ChevronLeft, ChevronRight, Trash2, Building2, CheckSquare, Filter, Users, ArrowRightLeft, ShieldAlert, UserMinus } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { exportToExcel } from '@/lib/exportExcel';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
@@ -19,9 +20,10 @@ import { useWorkers } from '@/context/WorkerContext';
 import { useSearchParams } from 'next/navigation';
 import { useKtxStructure } from '@/lib/ktxStructure';
 import { FacilityItem, fetchFacilitiesList, fetchRoomCapacities, getRoomCapacity, normalizeRoomLabel, RoomCapacityMap } from '@/lib/facilityCapacity';
-import { loadSavedRoomGenderMap } from '@/lib/roomGender';
+import { loadSavedRoomGenderMap, fetchRoomLabelsAuthoritative, normalizeGender } from '@/lib/roomGender';
 import { BatchAssignmentPlanItem } from '@/lib/smartRoomAssign';
 import { daysSinceVN } from '@/lib/vnDate';
+import { fetchBlacklist, matchBlacklistInMemory, type BlacklistRecord } from '@/lib/disciplineService';
 
 export interface FilterState {
   search: string;
@@ -190,10 +192,11 @@ interface ParsedWorkerRow {
   giuong: string;
 }
 
-const PREVIEW_HEADERS = ['Trạng thái', 'KTX', 'Họ và Tên', 'Mã NV', 'CCCD', 'SĐT', 'Dãy', 'Phòng', 'Ngày Sinh', 'Quê Quán', 'Tổ Trưởng', 'Ngày Vào KTX', 'Ghi Chú'];
+const PREVIEW_HEADERS = ['Trạng thái & Cảnh báo', 'KTX', 'Họ và Tên', 'Giới tính', 'Mã NV', 'CCCD', 'SĐT', 'Dãy', 'Phòng', 'Ngày Sinh', 'Quê Quán', 'Tổ Trưởng', 'Ngày Vào KTX', 'Ghi Chú'];
 const PREVIEW_PAGE_SIZE = 20;
 
 type DuplicateResolutionMode = 'skip' | 'update' | 'add_all';
+type ImportPreviewFilter = 'all' | 'new' | 'duplicate' | 'warning';
 
 function normDupMaNV(val?: string | null): string {
   const s = (val || '').trim().toLowerCase();
@@ -244,7 +247,10 @@ function ExcelImportModal({
   const [hasKtxColumn, setHasKtxColumn] = useState(false);
   const [dupMode, setDupMode] = useState<DuplicateResolutionMode>('skip');
   const [capacities, setCapacities] = useState<RoomCapacityMap>({});
+  const [roomGenderMap, setRoomGenderMap] = useState<Record<string, 'male' | 'female' | 'auto'>>(() => loadSavedRoomGenderMap());
+  const [previewFilter, setPreviewFilter] = useState<ImportPreviewFilter>('all');
   const [showOverloadDetails, setShowOverloadDetails] = useState(false);
+  const [blacklistRecords, setBlacklistRecords] = useState<BlacklistRecord[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -252,6 +258,20 @@ function ExcelImportModal({
     fetchRoomCapacities()
       .then(map => {
         if (active) setCapacities(map);
+      })
+      .catch(() => {});
+    fetchRoomLabelsAuthoritative()
+      .then(res => {
+        if (active && res.ok) {
+          setRoomGenderMap(prev => ({ ...prev, ...res.data }));
+        }
+      })
+      .catch(() => {});
+    fetchBlacklist()
+      .then(res => {
+        if (active && !res.tableMissing) {
+          setBlacklistRecords(res.data);
+        }
       })
       .catch(() => {});
     return () => {
@@ -324,15 +344,13 @@ function ExcelImportModal({
     return { newCount, sysDupCount, fileDupCount };
   }, [rowAnalyses]);
 
-  const previewTotalPages = Math.ceil(parsedRows.length / PREVIEW_PAGE_SIZE);
-  const previewRows = parsedRows.slice((previewPage - 1) * PREVIEW_PAGE_SIZE, previewPage * PREVIEW_PAGE_SIZE);
-
   const parseExcelFile = (file: File) => {
     setFileName(file.name);
     setParseError('');
     setParsedRows([]);
     setTotal(0);
     setPreviewPage(1);
+    setPreviewFilter('all');
     setHasKtxColumn(false);
 
     const reader = new FileReader();
@@ -474,11 +492,20 @@ function ExcelImportModal({
     return selectedKtx || (ktxNames[0] || '');
   }, [hasKtxColumn, selectedKtx, ktxNames]);
 
+  const rowBlacklistMatches = useMemo(() => {
+    return parsedRows.map(row => {
+      const res = matchBlacklistInMemory(blacklistRecords, row.soCCCD, row.maCongNhan);
+      return res.isBanned ? (res.matchedRecord ?? null) : null;
+    });
+  }, [parsedRows, blacklistRecords]);
+
   const effectiveImportIndices = useMemo(() => {
     const idxs: number[] = [];
     parsedRows.forEach((_, idx) => {
       const analysis = rowAnalyses[idx];
       if (!analysis) return;
+      // Blacklist Guard: always auto-skip workers in active Blacklist
+      if (rowBlacklistMatches[idx]) return;
       if (dupMode === 'skip') {
         if (analysis.status === 'new') idxs.push(idx);
       } else if (dupMode === 'update') {
@@ -488,7 +515,7 @@ function ExcelImportModal({
       }
     });
     return idxs;
-  }, [parsedRows, rowAnalyses, dupMode]);
+  }, [parsedRows, rowAnalyses, rowBlacklistMatches, dupMode]);
 
   const capacityCheck = useMemo(() => {
     const updatedExistingIds = new Set<string>();
@@ -543,6 +570,198 @@ function ExcelImportModal({
     overloadedList.sort((a, b) => (b.projectedCount - b.capacity) - (a.projectedCount - a.capacity));
     return { overloadedList, overloadedRoomKeys };
   }, [effectiveImportIndices, rowAnalyses, dupMode, existingWorkers, parsedRows, getEffectiveKtx, capacities]);
+
+  const rowDiagnostics = useMemo(() => {
+    const existingGenderByRoom = new Map<string, { male: number; female: number }>();
+    existingWorkers.forEach(w => {
+      if (!w.ktx || !w.day || !w.phongSo) return;
+      const key = `${w.ktx.trim()}||${w.day.trim()}||${normalizeRoomLabel(w.phongSo)}`;
+      const entry = existingGenderByRoom.get(key) || { male: 0, female: 0 };
+      const g = normalizeGender(w.gioiTinh);
+      if (g === 'nam') entry.male++;
+      else if (g === 'nu') entry.female++;
+      existingGenderByRoom.set(key, entry);
+    });
+
+    const incomingGenderByRoom = new Map<string, { male: number; female: number }>();
+    parsedRows.forEach(row => {
+      const ktx = getEffectiveKtx(row).trim();
+      const day = normalizeDayNha(row.dayNha).trim();
+      const phong = normalizePhong(row.soPhong).trim();
+      if (!ktx || !day || !phong) return;
+      const key = `${ktx}||${day}||${normalizeRoomLabel(phong)}`;
+      const entry = incomingGenderByRoom.get(key) || { male: 0, female: 0 };
+      const g = normalizeGender(row.gioiTinh);
+      if (g === 'nam') entry.male++;
+      else if (g === 'nu') entry.female++;
+      incomingGenderByRoom.set(key, entry);
+    });
+
+    const normalizedSavedGender = new Map<string, 'male' | 'female'>();
+    Object.entries(roomGenderMap).forEach(([rawKey, val]) => {
+      if (val !== 'male' && val !== 'female') return;
+      const parts = rawKey.split('||');
+      if (parts.length === 3) {
+        normalizedSavedGender.set(
+          `${parts[0].trim()}||${parts[1].trim()}||${normalizeRoomLabel(parts[2])}`,
+          val
+        );
+      }
+    });
+
+    return parsedRows.map((row, idx) => {
+      const analysis = rowAnalyses[idx];
+      const ktx = getEffectiveKtx(row).trim();
+      const dayNorm = normalizeDayNha(row.dayNha).trim();
+      const phongNorm = normalizePhong(row.soPhong).trim();
+      const roomKey = ktx && dayNorm && phongNorm ? `${ktx}||${dayNorm}||${normalizeRoomLabel(phongNorm)}` : '';
+      const isOverloaded = roomKey ? capacityCheck.overloadedRoomKeys.has(roomKey) : false;
+
+      let genderMismatch: string | null = null;
+      const rowGender = normalizeGender(row.gioiTinh);
+      if (roomKey && rowGender !== 'other') {
+        const assigned = normalizedSavedGender.get(roomKey);
+        if (assigned === 'male' && rowGender === 'nu') {
+          genderMismatch = 'Lệch giới tính (Phòng Nam)';
+        } else if (assigned === 'female' && rowGender === 'nam') {
+          genderMismatch = 'Lệch giới tính (Phòng Nữ)';
+        } else {
+          const existingG = existingGenderByRoom.get(roomKey);
+          if (existingG) {
+            if (existingG.male > 0 && existingG.female === 0 && rowGender === 'nu') {
+              genderMismatch = 'Lệch giới tính (Đang ở Nam)';
+            } else if (existingG.female > 0 && existingG.male === 0 && rowGender === 'nam') {
+              genderMismatch = 'Lệch giới tính (Đang ở Nữ)';
+            }
+          }
+          if (!genderMismatch) {
+            const incomingG = incomingGenderByRoom.get(roomKey);
+            if (incomingG && incomingG.male > 0 && incomingG.female > 0) {
+              genderMismatch = 'Trộn Nam/Nữ trong cùng phòng';
+            }
+          }
+        }
+      }
+
+      const fieldWarnings: string[] = [];
+      if (!dayNorm || !phongNorm) {
+        fieldWarnings.push('Thiếu Dãy/Phòng');
+      }
+      if (!normDupMaNV(row.maCongNhan) && !normDupCCCD(row.soCCCD)) {
+        fieldWarnings.push('Thiếu Mã NV & CCCD');
+      }
+      const cccdDigits = (row.soCCCD || '').replace(/\D/g, '');
+      if (row.soCCCD && cccdDigits.length > 0 && cccdDigits.length !== 9 && cccdDigits.length !== 12) {
+        fieldWarnings.push('CCCD chưa đúng 9/12 số');
+      }
+      const phoneDigits = (row.soDienThoai || '').replace(/\D/g, '');
+      if (row.soDienThoai && phoneDigits.length > 0 && (phoneDigits.length < 9 || phoneDigits.length > 11)) {
+        fieldWarnings.push('SĐT chưa hợp lệ');
+      }
+
+      let roomChangeNote: string | null = null;
+      if (analysis?.matchedWorker && dayNorm && phongNorm) {
+        const oldLoc = `${analysis.matchedWorker.day || '?'} - P.${analysis.matchedWorker.phongSo || '?'}`;
+        const newLoc = `${dayNorm} - P.${phongNorm}`;
+        if (oldLoc !== newLoc) {
+          roomChangeNote = `Đổi phòng: ${oldLoc} → ${newLoc}`;
+        }
+      }
+
+      const blacklistMatch = rowBlacklistMatches[idx] || null;
+      const blacklistReason = blacklistMatch
+        ? `DANH SÁCH ĐEN: ${blacklistMatch.reason}`
+        : null;
+
+      const hasWarning = Boolean(blacklistReason || genderMismatch || isOverloaded || fieldWarnings.length > 0);
+      const issueReasons: string[] = [];
+      if (blacklistReason) issueReasons.push(blacklistReason);
+      if (analysis && analysis.status !== 'new') issueReasons.push(analysis.reason);
+      if (genderMismatch) issueReasons.push(genderMismatch);
+      if (isOverloaded) issueReasons.push('Phòng vượt sức chứa');
+      if (fieldWarnings.length > 0) issueReasons.push(...fieldWarnings);
+
+      return {
+        blacklistReason,
+        isOverloaded,
+        genderMismatch,
+        fieldWarnings,
+        roomChangeNote,
+        hasWarning,
+        hasAnyIssue: Boolean(blacklistReason) || (analysis ? analysis.status !== 'new' : false) || hasWarning,
+        issueReasons,
+      };
+    });
+  }, [parsedRows, rowAnalyses, rowBlacklistMatches, existingWorkers, roomGenderMap, getEffectiveKtx, capacityCheck.overloadedRoomKeys]);
+
+  const warningStats = useMemo(() => {
+    let warningCount = 0;
+    let genderMismatchCount = 0;
+    let blacklistCount = 0;
+    let issueExportCount = 0;
+    rowDiagnostics.forEach(d => {
+      if (d.hasWarning) warningCount++;
+      if (d.genderMismatch) genderMismatchCount++;
+      if (d.blacklistReason) blacklistCount++;
+      if (d.hasAnyIssue) issueExportCount++;
+    });
+    return { warningCount, genderMismatchCount, blacklistCount, issueExportCount };
+  }, [rowDiagnostics]);
+
+  const filteredPreviewIndices = useMemo(() => {
+    const out: number[] = [];
+    parsedRows.forEach((_, idx) => {
+      const analysis = rowAnalyses[idx];
+      const diag = rowDiagnostics[idx];
+      if (previewFilter === 'all') out.push(idx);
+      else if (previewFilter === 'new' && analysis?.status === 'new') out.push(idx);
+      else if (previewFilter === 'duplicate' && analysis?.status !== 'new') out.push(idx);
+      else if (previewFilter === 'warning' && diag?.hasWarning) out.push(idx);
+    });
+    return out;
+  }, [parsedRows, rowAnalyses, rowDiagnostics, previewFilter]);
+
+  const previewTotalPages = Math.max(1, Math.ceil(filteredPreviewIndices.length / PREVIEW_PAGE_SIZE));
+  const safePreviewPage = Math.min(previewPage, previewTotalPages);
+  const previewIndicesPage = filteredPreviewIndices.slice(
+    (safePreviewPage - 1) * PREVIEW_PAGE_SIZE,
+    safePreviewPage * PREVIEW_PAGE_SIZE
+  );
+
+  const handleExportIssueRows = () => {
+    const issueRows = parsedRows
+      .map((row, idx) => {
+        const analysis = rowAnalyses[idx];
+        const diag = rowDiagnostics[idx];
+        if (!diag?.hasAnyIssue) return null;
+        return {
+          'DÒNG': idx + 1,
+          'TRẠNG THÁI': analysis?.status === 'new' ? 'Mới (Có cảnh báo)' : analysis?.reason || 'Trùng lặp',
+          'CẢNH BÁO / LÝ DO': diag.issueReasons.join(' | '),
+          'KTX': getEffectiveKtx(row),
+          'HỌ VÀ TÊN': row.hoTen,
+          'GIỚI TÍNH': row.gioiTinh,
+          'MÃ NV': row.maCongNhan,
+          'CCCD': row.soCCCD,
+          'SĐT': row.soDienThoai,
+          'DÃY': normalizeDayNha(row.dayNha),
+          'PHÒNG': normalizePhong(row.soPhong),
+          'SỐ GIƯỜNG': row.giuong,
+          'ĐƠN VỊ': row.donVi,
+          'GHI CHÚ': row.ghiChu,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
+
+    if (issueRows.length === 0) {
+      toast.info('Không có dòng lỗi hoặc cảnh báo nào để xuất.');
+      return;
+    }
+
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    exportToExcel(issueRows, `Dong_loi_canh_bao_import_${today}.xlsx`, 'Dong_Loi_Canh_Bao');
+    toast.success(`Đã xuất ${issueRows.length} dòng lỗi/cảnh báo ra file Excel.`);
+  };
 
   const canConfirm = parsedRows.length > 0 && effectiveImportIndices.length > 0 && (hasKtxColumn || selectedKtx !== '');
 
@@ -704,8 +923,62 @@ function ExcelImportModal({
                         <span>Cảnh báo quá tải: {capacityCheck.overloadedList.length} phòng</span>
                       </button>
                     )}
+                    {warningStats.blacklistCount > 0 && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-dgr text-white text-xs font-extrabold shadow-sm">
+                        <ShieldAlert size={12} /> Chặn Blacklist: {warningStats.blacklistCount} (tự động bỏ qua)
+                      </span>
+                    )}
+                    {warningStats.genderMismatchCount > 0 && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md tint-dgr text-dgr text-xs font-bold border border-dgr/40">
+                        <AlertTriangle size={12} /> Lệch giới tính: {warningStats.genderMismatchCount}
+                      </span>
+                    )}
                   </div>
-                  <span className="text-xs text-muted-foreground">(Trang {previewPage}/{previewTotalPages})</span>
+                  <div className="flex items-center gap-2">
+                    {warningStats.issueExportCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleExportIssueRows}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-card border border-dgr/40 text-dgr hover:bg-dgrbg text-xs font-semibold transition-colors cursor-pointer"
+                        title="Tải về file Excel chỉ chứa các dòng trùng lặp hoặc có cảnh báo để kiểm tra lại"
+                      >
+                        <Download size={12} />
+                        <span>Xuất {warningStats.issueExportCount} dòng lỗi/cảnh báo</span>
+                      </button>
+                    )}
+                    <span className="text-xs text-muted-foreground font-tabular">(Trang {safePreviewPage}/{previewTotalPages})</span>
+                  </div>
+                </div>
+
+                {/* Preview filter tabs */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  {([
+                    { id: 'all', label: 'Tất cả', count: total },
+                    { id: 'new', label: 'Mới hợp lệ', count: dupStats.newCount },
+                    { id: 'duplicate', label: 'Trùng lặp', count: dupStats.sysDupCount + dupStats.fileDupCount },
+                    { id: 'warning', label: 'Cảnh báo', count: warningStats.warningCount },
+                  ] as { id: ImportPreviewFilter; label: string; count: number }[]).map(tab => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => {
+                        setPreviewFilter(tab.id);
+                        setPreviewPage(1);
+                      }}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                        previewFilter === tab.id
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'bg-card text-foreground border-border hover:border-primary/50'
+                      }`}
+                    >
+                      <span>{tab.label}</span>
+                      <span className={`px-1.5 py-0.2 rounded text-[10px] font-tabular ${
+                        previewFilter === tab.id ? 'bg-white/20 text-primary-foreground' : 'bg-muted text-muted-foreground'
+                      }`}>
+                        {tab.count}
+                      </span>
+                    </button>
+                  ))}
                 </div>
 
                 {/* Duplicate resolution options */}
@@ -722,7 +995,7 @@ function ExcelImportModal({
                           key={opt.id}
                           type="button"
                           onClick={() => setDupMode(opt.id)}
-                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
                             dupMode === opt.id
                               ? 'bg-primary text-primary-foreground border-primary'
                               : 'bg-card text-foreground border-border hover:border-primary/50'
@@ -766,70 +1039,101 @@ function ExcelImportModal({
                     </tr>
                   </thead>
                   <tbody>
-                    {previewRows.map((row, i) => {
-                      const absIdx = (previewPage - 1) * PREVIEW_PAGE_SIZE + i;
-                      const analysis = rowAnalyses[absIdx];
-                      const effectiveKtx = getEffectiveKtx(row);
-                      const dayNorm = normalizeDayNha(row.dayNha);
-                      const phongNorm = normalizePhong(row.soPhong);
-                      const roomKey = `${effectiveKtx.trim()}||${dayNorm.trim()}||${normalizeRoomLabel(phongNorm)}`;
-                      const isOverloadedRoom = capacityCheck.overloadedRoomKeys.has(roomKey);
-                      const willSkip =
-                        (dupMode === 'skip' && analysis?.status !== 'new') ||
-                        (dupMode === 'update' && analysis?.status === 'dup_in_file');
+                    {previewIndicesPage.length === 0 ? (
+                      <tr>
+                        <td colSpan={PREVIEW_HEADERS.length + 1} className="px-3 py-8 text-center text-muted-foreground">
+                          Không có dòng nào thuộc bộ lọc này.
+                        </td>
+                      </tr>
+                    ) : (
+                      previewIndicesPage.map((absIdx) => {
+                        const row = parsedRows[absIdx];
+                        const analysis = rowAnalyses[absIdx];
+                        const diag = rowDiagnostics[absIdx];
+                        const effectiveKtx = getEffectiveKtx(row);
+                        const dayNorm = normalizeDayNha(row.dayNha);
+                        const phongNorm = normalizePhong(row.soPhong);
+                        const willSkip =
+                          Boolean(diag?.blacklistReason) ||
+                          (dupMode === 'skip' && analysis?.status !== 'new') ||
+                          (dupMode === 'update' && analysis?.status === 'dup_in_file');
 
-                      return (
-                        <tr key={i} className={`border-t border-border hover:bg-muted/20 ${willSkip ? 'opacity-50' : ''}`}>
-                          <td className="px-2 py-1.5 text-muted-foreground">{absIdx + 1}</td>
-                          <td className="px-2 py-1.5 whitespace-nowrap">
-                            <div className="flex items-center gap-1">
-                              {analysis?.status === 'new' ? (
-                                <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-okbg text-ok border border-ok2/35">Mới</span>
-                              ) : analysis?.status === 'dup_system' ? (
-                                <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold tint-wn text-wn border border-wn/40" title={analysis.reason}>
-                                  {analysis.reason}
-                                </span>
-                              ) : (
-                                <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold tint-wn text-wn border border-wn/40" title={analysis?.reason}>
-                                  Trùng file
-                                </span>
-                              )}
-                              {isOverloadedRoom && !willSkip && (
-                                <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold tint-dgr text-dgr border border-dgr/40" title="Phòng sẽ quá tải">
-                                  Quá tải
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-2 py-1.5 whitespace-nowrap">
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold bg-primary/10 text-primary border border-primary/20">
-                              {effectiveKtx || '—'}
-                            </span>
-                          </td>
-                          <td className="px-2 py-1.5 text-foreground font-medium whitespace-nowrap max-w-[160px] truncate">{row.hoTen || '—'}</td>
-                          <td className="px-2 py-1.5 text-foreground whitespace-nowrap">{row.maCongNhan || '—'}</td>
-                          <td className="px-2 py-1.5 font-tabular text-foreground whitespace-nowrap">{row.soCCCD || '—'}</td>
-                          <td className="px-2 py-1.5 font-tabular text-foreground whitespace-nowrap">{row.soDienThoai || '—'}</td>
-                          <td className="px-2 py-1.5 text-foreground whitespace-nowrap">{dayNorm || '—'}</td>
-                          <td className="px-2 py-1.5 text-foreground whitespace-nowrap">{phongNorm || '—'}</td>
-                          <td className="px-2 py-1.5 text-foreground whitespace-nowrap">{row.ngaySinh || '—'}</td>
-                          <td className="px-2 py-1.5 text-foreground whitespace-nowrap max-w-[120px] truncate">{row.queQuan || '—'}</td>
-                          <td className="px-2 py-1.5 text-foreground whitespace-nowrap max-w-[120px] truncate">{row.toTruong || '—'}</td>
-                          <td className="px-2 py-1.5 text-foreground whitespace-nowrap">{row.ngayVao || '—'}</td>
-                          <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap max-w-[100px] truncate">{row.ghiChu || '—'}</td>
-                        </tr>
-                      );
-                    })}
+                        return (
+                          <tr key={absIdx} className={`border-t border-border hover:bg-muted/20 ${diag?.blacklistReason ? 'tint-dgr/40' : ''} ${willSkip ? 'opacity-65' : ''}`}>
+                            <td className="px-2 py-1.5 text-muted-foreground font-tabular">{absIdx + 1}</td>
+                            <td className="px-2 py-1.5 whitespace-nowrap">
+                              <div className="flex items-center gap-1 flex-wrap max-w-[230px]">
+                                {diag?.blacklistReason ? (
+                                  <span className="px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-dgr text-white" title={diag.blacklistReason}>
+                                    BLACKLIST · Bỏ qua
+                                  </span>
+                                ) : analysis?.status === 'new' ? (
+                                  <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-okbg text-ok border border-ok2/35">Mới</span>
+                                ) : analysis?.status === 'dup_system' ? (
+                                  <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold tint-wn text-wn border border-wn/40" title={diag?.roomChangeNote || analysis.reason}>
+                                    {analysis.reason}
+                                  </span>
+                                ) : (
+                                  <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold tint-wn text-wn border border-wn/40" title={analysis?.reason}>
+                                    Trùng file
+                                  </span>
+                                )}
+                                {diag?.roomChangeNote && dupMode === 'update' && (
+                                  <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-bdg text-lnk border border-bdr2" title={diag.roomChangeNote}>
+                                    Đổi phòng
+                                  </span>
+                                )}
+                                {diag?.genderMismatch && !willSkip && (
+                                  <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold tint-dgr text-dgr border border-dgr/40" title={diag.genderMismatch}>
+                                    Lệch GT
+                                  </span>
+                                )}
+                                {diag?.isOverloaded && !willSkip && (
+                                  <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold tint-dgr text-dgr border border-dgr/40" title="Phòng sẽ quá tải">
+                                    Quá tải
+                                  </span>
+                                )}
+                                {diag?.fieldWarnings && diag.fieldWarnings.length > 0 && (
+                                  <span
+                                    className="px-1.5 py-0.5 rounded-md text-[10px] font-bold tint-wn text-wn border border-wn/40"
+                                    title={diag.fieldWarnings.join(' · ')}
+                                  >
+                                    {diag.fieldWarnings[0]}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-2 py-1.5 whitespace-nowrap">
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold bg-primary/10 text-primary border border-primary/20">
+                                {effectiveKtx || '—'}
+                              </span>
+                            </td>
+                            <td className="px-2 py-1.5 text-foreground font-medium whitespace-nowrap max-w-[160px] truncate">{row.hoTen || '—'}</td>
+                            <td className="px-2 py-1.5 text-foreground whitespace-nowrap">{row.gioiTinh || '—'}</td>
+                            <td className="px-2 py-1.5 text-foreground whitespace-nowrap">{row.maCongNhan || '—'}</td>
+                            <td className="px-2 py-1.5 font-tabular text-foreground whitespace-nowrap">{row.soCCCD || '—'}</td>
+                            <td className="px-2 py-1.5 font-tabular text-foreground whitespace-nowrap">{row.soDienThoai || '—'}</td>
+                            <td className="px-2 py-1.5 text-foreground whitespace-nowrap">{dayNorm || '—'}</td>
+                            <td className="px-2 py-1.5 text-foreground whitespace-nowrap">{phongNorm || '—'}</td>
+                            <td className="px-2 py-1.5 text-foreground whitespace-nowrap">{row.ngaySinh || '—'}</td>
+                            <td className="px-2 py-1.5 text-foreground whitespace-nowrap max-w-[120px] truncate">{row.queQuan || '—'}</td>
+                            <td className="px-2 py-1.5 text-foreground whitespace-nowrap max-w-[120px] truncate">{row.toTruong || '—'}</td>
+                            <td className="px-2 py-1.5 text-foreground whitespace-nowrap">{row.ngayVao || '—'}</td>
+                            <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap max-w-[100px] truncate">{row.ghiChu || '—'}</td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
               {previewTotalPages > 1 && (
                 <div className="flex items-center justify-center gap-2 mt-2">
-                  <button onClick={() => setPreviewPage(p => Math.max(1, p - 1))} disabled={previewPage === 1} className="p-1 rounded hover:bg-muted disabled:opacity-40">
+                  <button onClick={() => setPreviewPage(p => Math.max(1, p - 1))} disabled={safePreviewPage === 1} className="p-1 rounded hover:bg-muted disabled:opacity-40">
                     <ChevronLeft size={14} />
                   </button>
-                  <span className="text-xs text-muted-foreground">{previewPage} / {previewTotalPages}</span>
-                  <button onClick={() => setPreviewPage(p => Math.min(previewTotalPages, p + 1))} disabled={previewPage === previewTotalPages} className="p-1 rounded hover:bg-muted disabled:opacity-40">
+                  <span className="text-xs text-muted-foreground font-tabular">{safePreviewPage} / {previewTotalPages}</span>
+                  <button onClick={() => setPreviewPage(p => Math.min(previewTotalPages, p + 1))} disabled={safePreviewPage === previewTotalPages} className="p-1 rounded hover:bg-muted disabled:opacity-40">
                     <ChevronRight size={14} />
                   </button>
                 </div>
@@ -1614,6 +1918,12 @@ export function WorkerManagementClient() {
   const [facilitiesCatalog, setFacilitiesCatalog] = useState<FacilityItem[]>([]);
   const [showBatchSmartAssign, setShowBatchSmartAssign] = useState(false);
   const [applyingSmartAssign, setApplyingSmartAssign] = useState(false);
+  const [batchReconcileTab, setBatchReconcileTab] = useState<'batch-checkout' | 'reconcile' | null>(() => {
+    const act = searchParams?.get('action');
+    if (act === 'batch-checkout') return 'batch-checkout';
+    if (act === 'reconcile') return 'reconcile';
+    return null;
+  });
 
   useEffect(() => {
     let active = true;
@@ -2265,6 +2575,18 @@ export function WorkerManagementClient() {
               <span>Nhập từ Excel</span>
             </button>
 
+            {/* Đối soát quân số & Check-out hàng loạt */}
+            {(isAdmin || (currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && (
+              <button
+                onClick={() => setBatchReconcileTab('batch-checkout')}
+                className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl border border-dgr/40 bg-dgrbg/60 text-dgr text-xs sm:text-sm font-bold hover:bg-dgrbg transition-colors duration-100 cursor-pointer"
+                title="Dán danh sách CCCD/Mã NV nghỉ việc để Check-out loạt hoặc đối chiếu file Nhân sự công trường"
+              >
+                <UserMinus size={15} />
+                <span>Đối soát & Check-out loạt</span>
+              </button>
+            )}
+
             {/* Nút chính: Thêm công nhân */}
             {(isAdmin || (currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && (
               <button
@@ -2355,6 +2677,13 @@ export function WorkerManagementClient() {
           applying={applyingSmartAssign}
           onApplyPlan={handleApplyBatchSmartAssign}
           onClose={() => setShowBatchSmartAssign(false)}
+        />
+      )}
+      {batchReconcileTab && (
+        <BatchCheckoutReconcileModal
+          workers={workers}
+          initialTab={batchReconcileTab}
+          onClose={() => setBatchReconcileTab(null)}
         />
       )}
       {showDeleteAll && isAdmin && <DeleteAllConfirmModal onConfirm={handleDeleteAll} onClose={() => setShowDeleteAll(false)} loading={deleteAllLoading} />}

@@ -10,6 +10,7 @@ import {
   WorkerRef,
 } from '@/lib/workerHierarchy';
 import { CheckCircle2, AlertCircle, Loader2, User, X, QrCode, Home, ScanLine, CheckCircle, Camera, AlertTriangle, Check, RefreshCw } from 'lucide-react';
+import { checkBlacklistPublic } from '@/lib/disciplineService';
 
 interface RegistrationForm {
   ma_nv: string;
@@ -698,6 +699,17 @@ export default function RegisterPage() {
     setSubmitting(true);
     setError(null);
     try {
+      // Blacklist Guard (SECURITY DEFINER RPC — returns only ban status & reason, zero PII)
+      const banCheck = await checkBlacklistPublic(form.so_cccd.trim());
+      if (banCheck.isBanned) {
+        const reasonDetail = banCheck.reason ? ` Lý do: ${banCheck.reason}.` : '';
+        setError(
+          `Số CCCD này hiện nằm trong Danh sách hạn chế nhập trú của KTX Phước Vĩnh Tây.${reasonDetail} Vui lòng liên hệ trực tiếp Ban Quản Lý KTX để được giải quyết.`
+        );
+        setSubmitting(false);
+        return;
+      }
+
       const { error: insertErr } = await supabase.from('worker_registrations').insert({
         ma_nv: form.ma_nv.trim(),
         ho_va_ten: form.ho_va_ten.trim(),

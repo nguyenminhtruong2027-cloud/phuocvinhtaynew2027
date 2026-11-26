@@ -4,9 +4,11 @@ import { Eye, EyeOff, Loader2, LogIn, Building2, ShieldCheck, KeyRound, CheckCir
 import { motion } from 'motion/react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
+import { createClient, getRememberMePreference } from '@/lib/supabase/client';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import ThemeSwitcher from '@/components/ui/ThemeSwitcher';
+
+const SAVED_EMAIL_KEY = 'ktx_saved_login_email';
 
 interface LoginForm {
   email: string;
@@ -15,18 +17,35 @@ interface LoginForm {
 
 export default function LoginClient() {
   const [form, setForm] = useState<LoginForm>({ email: '', password: '' });
+  const [rememberMe, setRememberMe] = useState(true);
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [forgotMode, setForgotMode] = useState(false);
   const [resetSent, setResetSent] = useState(false);
-  const { signIn } = useAuth();
+  const { signIn, currentUser, isTechnician, loading: authLoading } = useAuth();
   const router = useRouter();
   const supabase = createClient();
 
   useEffect(() => {
-    // Kept for client mount hydration safety
+    const savedPref = getRememberMePreference();
+    setRememberMe(savedPref);
+    if (savedPref) {
+      try {
+        const savedEmail = window.localStorage.getItem(SAVED_EMAIL_KEY);
+        if (savedEmail) {
+          setForm(prev => (prev.email ? prev : { ...prev, email: savedEmail }));
+        }
+      } catch {}
+    }
   }, []);
+
+  // If user already has an active persisted session, go straight into the app
+  useEffect(() => {
+    if (!authLoading && currentUser) {
+      router.replace(isTechnician ? '/maintenance' : '/');
+    }
+  }, [authLoading, currentUser, isTechnician, router]);
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,7 +81,15 @@ export default function LoginClient() {
     setLoading(true);
     setError('');
     try {
-      await signIn(form.email.trim(), form.password);
+      const cleanEmail = form.email.trim();
+      try {
+        if (rememberMe) {
+          window.localStorage.setItem(SAVED_EMAIL_KEY, cleanEmail);
+        } else {
+          window.localStorage.removeItem(SAVED_EMAIL_KEY);
+        }
+      } catch {}
+      await signIn(cleanEmail, form.password, rememberMe);
       router.replace('/');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -132,7 +159,7 @@ export default function LoginClient() {
 
           <div className="grid grid-cols-2 gap-3" suppressHydrationWarning>
             {[
-              { label: 'Phân quyền vai trò', value: '3 Cấp RBAC' },
+              { label: 'Phân quyền vai trò', value: '4 Cấp RBAC' },
               { label: 'Đồng bộ trực tiếp', value: 'Thời gian thực' },
               { label: 'Quản lý phòng', value: 'Sơ đồ Heatmap' },
               { label: 'Bảo mật truy cập', value: 'Auth Guard' },
@@ -240,16 +267,18 @@ export default function LoginClient() {
               )}
 
               <div suppressHydrationWarning>
-                <label className="block text-sm font-semibold text-tx mb-1.5">
+                <label htmlFor="login-email" className="block text-sm font-semibold text-tx mb-1.5">
                   Email <span className="text-dgr">*</span>
                 </label>
                 <input
+                  id="login-email"
+                  name="email"
                   type="email"
                   value={form.email}
                   onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
                   className="input-field w-full"
                   placeholder="you@ktx.com"
-                  autoComplete="email"
+                  autoComplete="username"
                   disabled={loading}
                   suppressHydrationWarning
                 />
@@ -257,7 +286,7 @@ export default function LoginClient() {
 
               <div suppressHydrationWarning>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-sm font-semibold text-tx">
+                  <label htmlFor="login-password" className="block text-sm font-semibold text-tx">
                     Mật khẩu <span className="text-dgr">*</span>
                   </label>
                   <button
@@ -270,6 +299,8 @@ export default function LoginClient() {
                 </div>
                 <div className="relative" suppressHydrationWarning>
                   <input
+                    id="login-password"
+                    name="password"
                     type={showPass ? 'text' : 'password'}
                     value={form.password}
                     onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
@@ -290,6 +321,31 @@ export default function LoginClient() {
                   </button>
                 </div>
               </div>
+
+              {/* Keep me signed in */}
+              <label
+                htmlFor="remember-me"
+                className="flex items-start gap-2.5 pt-0.5 cursor-pointer select-none group"
+              >
+                <input
+                  id="remember-me"
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={e => setRememberMe(e.target.checked)}
+                  disabled={loading}
+                  className="mt-0.5 h-4 w-4 rounded border-bdr2 text-pri focus:ring-pri2 cursor-pointer accent-blue-600"
+                />
+                <span className="text-xs leading-snug">
+                  <span className="font-semibold text-tx group-hover:text-lnk transition-colors block">
+                    Duy trì đăng nhập trên thiết bị này
+                  </span>
+                  <span className="text-[11px] text-mu block mt-0.5">
+                    {rememberMe
+                      ? 'Tự động gia hạn phiên làm việc, không bị thoát khi tắt trình duyệt hay chuyển tab.'
+                      : 'Phiên sẽ tự động đăng xuất khi đóng trình duyệt (phù hợp máy dùng chung).'}
+                  </span>
+                </span>
+              </label>
 
               <motion.button
                 whileTap={{ scale: 0.98 }}

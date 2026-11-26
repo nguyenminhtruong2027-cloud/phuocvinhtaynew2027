@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { Worker, calcSoNgay, compareKtxNames } from '@/data/workers';
-import { X, Loader2, Save, ScanLine, CheckCircle2, Camera, AlertTriangle, AlertCircle, Check, RefreshCw, Sparkles } from 'lucide-react';
+import { X, Loader2, Save, ScanLine, CheckCircle2, Camera, AlertTriangle, AlertCircle, Check, RefreshCw, Sparkles, ShieldAlert } from 'lucide-react';
 import { useKtxStructure, compareDayNames } from '@/lib/ktxStructure';
 import { fetchRoomBedAvailability, RoomBedAvailability } from '@/lib/workerHierarchy';
 import { FacilityItem, fetchFacilitiesList, formatRoomDisplay, normalizeRoomLabel } from '@/lib/facilityCapacity';
@@ -11,6 +11,8 @@ import { parseVNDateSafe } from '@/lib/vnDate';
 import { loadSavedRoomGenderMap, normalizeGender } from '@/lib/roomGender';
 import { createClient } from '@/lib/supabase/client';
 import { RoomAssignmentCandidate, suggestOptimalRooms } from '@/lib/smartRoomAssign';
+import { useAuth } from '@/context/AuthContext';
+import { fetchBlacklist, matchBlacklistInMemory, type BlacklistRecord } from '@/lib/disciplineService';
 
 interface Props {
   worker: Worker | null;
@@ -496,7 +498,20 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
   const [scanSuccess, setScanSuccess] = useState(false);
   const [confirmDuplicateCccd, setConfirmDuplicateCccd] = useState(false);
   const [confirmGenderMismatch, setConfirmGenderMismatch] = useState(false);
+  const [blacklistRecords, setBlacklistRecords] = useState<BlacklistRecord[]>([]);
+  const [confirmBlacklistOverride, setConfirmBlacklistOverride] = useState(false);
+  const { isAdmin } = useAuth();
   const isEdit = !!worker;
+
+  useEffect(() => {
+    let active = true;
+    fetchBlacklist()
+      .then(res => {
+        if (active && !res.tableMissing) setBlacklistRecords(res.data);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   const { ktxGroups, ktxNames } = useKtxStructure();
 
@@ -681,9 +696,16 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
     );
   }, [allWorkers, worker?.id, watchedCccd]);
 
+  const blacklistHit = useMemo(() => {
+    if (isEdit) return null;
+    const res = matchBlacklistInMemory(blacklistRecords, watchedCccd, watchedMaNV);
+    return res.isBanned ? (res.matchedRecord ?? null) : null;
+  }, [isEdit, blacklistRecords, watchedCccd, watchedMaNV]);
+
   useEffect(() => {
     setConfirmDuplicateCccd(false);
-  }, [watchedCccd]);
+    setConfirmBlacklistOverride(false);
+  }, [watchedCccd, watchedMaNV]);
 
   // Live room bed availability for quick-pick empty beds
   const [bedAvail, setBedAvail] = useState<RoomBedAvailability | null>(null);
@@ -772,6 +794,11 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
   }, [watchedKtx, watchedDay, watchedPhong, watchedGioiTinh]);
 
   const submitBlockedReason = useMemo(() => {
+    if (blacklistHit && (!isAdmin || !confirmBlacklistOverride)) {
+      return isAdmin
+        ? 'Công nhân thuộc Danh sách Đen — cần tick xác nhận ngoại lệ của Quản trị viên'
+        : 'Công nhân thuộc Danh sách Đen — Chuyên viên không được phép thêm vào KTX';
+    }
     if (invalidDateOrder) return 'Ngày ra KTX không thể nhỏ hơn Ngày vào KTX';
     if (isMaintenanceBed) return `Giường ${normalizeBedLabel(watchedGiuong)} đang bảo trì, hãy chọn giường khác`;
     if (isOccupiedBedConflict) {
@@ -783,6 +810,9 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
     if (roomGenderWarning && !confirmGenderMismatch) return 'Cần tick xác nhận khác giới tính phòng trước khi lưu';
     return null;
   }, [
+    blacklistHit,
+    isAdmin,
+    confirmBlacklistOverride,
     invalidDateOrder,
     isMaintenanceBed,
     isOccupiedBedConflict,
@@ -856,6 +886,37 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
                   <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-okbg border border-bdr2 rounded-lg text-xs text-ok">
                     <CheckCircle2 size={13} />
                     Đã tự động điền thông tin từ CCCD
+                  </div>
+                )}
+                {blacklistHit && (
+                  <div className="mb-3 px-3.5 py-3 tint-dgr border border-dgr rounded-xl text-xs space-y-2">
+                    <div className="flex items-start gap-2">
+                      <ShieldAlert size={15} className="text-dgr shrink-0 mt-0.5" />
+                      <div className="space-y-0.5">
+                        <p className="font-extrabold text-dgr uppercase">
+                          CẢNH BÁO AN NINH — THUỘC DANH SÁCH ĐEN (BLACKLIST)
+                        </p>
+                        <p className="text-tx font-semibold">
+                          {blacklistHit.ho_va_ten} · CCCD: <span className="font-mono">{blacklistHit.cccd}</span>
+                        </p>
+                        <p className="text-dgr">Lý do cấm: {blacklistHit.reason}</p>
+                      </div>
+                    </div>
+                    {isAdmin ? (
+                      <label className="flex items-center gap-2 pt-2 border-t border-dgr/30 cursor-pointer select-none text-tx font-semibold">
+                        <input
+                          type="checkbox"
+                          checked={confirmBlacklistOverride}
+                          onChange={e => setConfirmBlacklistOverride(e.target.checked)}
+                          className="w-4 h-4 accent-rose-600 rounded cursor-pointer"
+                        />
+                        <span>Quản trị viên xác nhận ngoại lệ cho phép thêm lại công nhân này</span>
+                      </label>
+                    ) : (
+                      <p className="pt-1.5 border-t border-dgr/30 text-[11px] font-bold text-dgr">
+                        Chuyên viên không được phép xếp phòng cho đối tượng thuộc Danh sách Đen.
+                      </p>
+                    )}
                   </div>
                 )}
                 {duplicateAlerts.length > 0 && (

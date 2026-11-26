@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
+import { useAuth } from '@/context/AuthContext';
 import { useWorkers } from '@/context/WorkerContext';
 import { getUniqueKTX, getUniqueBuildings, getUniqueRooms, countUniqueBuildings, aggregateKtxOccupancy, DEFAULT_ROOM_CAPACITY, naturalSortCompare, compareKtxNames } from '@/data/workers';
 import { buildRoomCapacityMapFromFacilities, fetchFacilitiesList, FacilityItem, getRoomCapacity, RoomCapacityMap, normalizeRoomLabel, formatRoomDisplay } from '@/lib/facilityCapacity';
@@ -11,7 +12,7 @@ import {
   ChevronDown, Search, X, Download, UserPlus, AlertTriangle,
   TrendingUp, TrendingDown, XCircle, GitBranch, HardHat,
   VenusAndMars, Sparkles, Building2, Layers, UserCheck, CheckCircle, ArrowRight, Activity,
-  Wrench, Printer, FileText, ClipboardCheck,
+  Wrench, Printer, FileText, ClipboardCheck, ShieldAlert,
 } from 'lucide-react';
 import { CraftIconBadge, type CraftTone } from '@/components/ui/CraftIcon';
 import { AnimatedNumber, SlidingTabs, StaggerGrid, StaggerItem } from '@/components/ui/MotionPrimitives';
@@ -24,6 +25,7 @@ import OperationalReadinessCard from './components/OperationalReadinessCard';
 import MaintenanceTrackerModal, { MaintenanceBedItem } from './components/MaintenanceTrackerModal';
 import DailyBriefingModal from './components/DailyBriefingModal';
 import BulkGenderAndPrintModal, { BulkRoomDescriptor } from './components/BulkGenderAndPrintModal';
+import RiskCommandRadar from './components/RiskCommandRadar';
 import { SpecialistWithDuty } from '@/lib/dutyRoster';
 import {
   getRoomGenderInfo,
@@ -46,6 +48,17 @@ import {
   getTicketSlaStatus,
   type MaintenanceTicket,
 } from '@/lib/maintenanceTickets';
+import {
+  fetchBlacklist,
+  fetchDisciplines,
+  type BlacklistRecord,
+  type DisciplineRecord,
+} from '@/lib/disciplineService';
+import { computeOperationalRisks } from '@/lib/riskRadar';
+import {
+  printExecutiveReportA4,
+  type ExecutiveReportBuildingRow,
+} from '@/lib/executiveReportPrint';
 
 const RoomDrawer = dynamic(() => import('./components/RoomDrawer'), { ssr: false });
 const TopUnitsRankingCard = dynamic(() => import('./components/TopUnitsRankingCard'), { ssr: false });
@@ -640,6 +653,7 @@ function BlockTitle({
 
 // ─── Main Executive Dashboard Page ─────────────────────────────────────────
 export default function OccupancyDashboardPage() {
+  const { currentUser } = useAuth();
   const { workers, loading, addWorker } = useWorkers();
   const { ktxNames } = useKtxStructure();
   const router = useRouter();
@@ -654,6 +668,9 @@ export default function OccupancyDashboardPage() {
   const [roomGenderMap, setRoomGenderMap] = useState<Record<string, 'male' | 'female' | 'auto'>>({});
   const [capacities, setCapacities] = useState<RoomCapacityMap>({});
   const [activeMaintenanceTickets, setActiveMaintenanceTickets] = useState<MaintenanceTicket[]>([]);
+  const [allMaintenanceTickets, setAllMaintenanceTickets] = useState<MaintenanceTicket[]>([]);
+  const [disciplineRecords, setDisciplineRecords] = useState<DisciplineRecord[]>([]);
+  const [blacklistRecords, setBlacklistRecords] = useState<BlacklistRecord[]>([]);
   const [facilitiesList, setFacilitiesList] = useState<FacilityItem[]>([]);
   const [roomFilterMode, setRoomFilterMode] = useState<'all' | 'overloaded' | 'empty'>('all');
   const [showOverloadedModal, setShowOverloadedModal] = useState(false);
@@ -664,6 +681,7 @@ export default function OccupancyDashboardPage() {
   const [showMaintenanceModal, setShowMaintenanceModal] = useState(false);
   const [showBriefingModal, setShowBriefingModal] = useState(false);
   const [bulkModalMode, setBulkModalMode] = useState<'gender' | 'print' | null>(null);
+  const [dashboardTab, setDashboardTab] = useState<'overview' | 'heatmap' | 'analytics' | 'risk'>('overview');
   const [maintenanceBeds, setMaintenanceBeds] = useState<MaintenanceBedItem[]>([]);
   const [pendingQrSummary, setPendingQrSummary] = useState<{ registrations: number; checkouts: number }>({
     registrations: 0,
@@ -748,11 +766,11 @@ export default function OccupancyDashboardPage() {
     };
   }, []);
 
-  // Load maintenance beds + active QR maintenance tickets + pending QR counts
+  // Load maintenance beds + QR maintenance tickets + pending QR + discipline/blacklist
   const reloadOperationalSupportData = useCallback(async () => {
     try {
       const supabase = createClient();
-      const [bedsRes, qrRes, ticketsRes] = await Promise.all([
+      const [bedsRes, qrRes, allTicketsRes, discRes, blRes] = await Promise.all([
         supabase
           .from('beds')
           .select('id, ktx, day, phong_so, giuong')
@@ -761,8 +779,16 @@ export default function OccupancyDashboardPage() {
           .from('worker_registrations')
           .select('id, ghi_chu')
           .eq('status', 'pending'),
-        fetchMaintenanceTickets({ activeOnly: true }).catch(() => ({
+        fetchMaintenanceTickets({ activeOnly: false }).catch(() => ({
           tickets: [] as MaintenanceTicket[],
+          tableMissing: true,
+        })),
+        fetchDisciplines().catch(() => ({
+          data: [] as DisciplineRecord[],
+          tableMissing: true,
+        })),
+        fetchBlacklist().catch(() => ({
+          data: [] as BlacklistRecord[],
           tableMissing: true,
         })),
       ]);
@@ -778,8 +804,17 @@ export default function OccupancyDashboardPage() {
         }
         setPendingQrSummary({ registrations: reg, checkouts: chk });
       }
-      if (!ticketsRes.tableMissing) {
-        setActiveMaintenanceTickets(ticketsRes.tickets);
+      if (!allTicketsRes.tableMissing) {
+        setAllMaintenanceTickets(allTicketsRes.tickets);
+        setActiveMaintenanceTickets(
+          allTicketsRes.tickets.filter(t => t.status === 'open' || t.status === 'in_progress')
+        );
+      }
+      if (!discRes.tableMissing) {
+        setDisciplineRecords(discRes.data);
+      }
+      if (!blRes.tableMissing) {
+        setBlacklistRecords(blRes.data);
       }
     } catch {
       // non-blocking
@@ -813,6 +848,147 @@ export default function OccupancyDashboardPage() {
     const getCap = (k: string, b: string, r: string) => getRoomCapacity(capacities, k, b, r) || DEFAULT_ROOM_CAPACITY;
     return computeSystemMetrics(workers, roomGenderMap, selectedKTX, ktxNames, getCap, facilitiesList);
   }, [workers, roomGenderMap, selectedKTX, ktxNames, capacities, facilitiesList]);
+
+  // ── Khối E: Operational Risk Command Radar ───────────────────────────────
+  const riskReport = useMemo(() => {
+    return computeOperationalRisks({
+      workers,
+      facilities: facilitiesList,
+      capacities,
+      roomGenderMap,
+      tickets: allMaintenanceTickets,
+      disciplines: disciplineRecords,
+      blacklist: blacklistRecords,
+      ktxFilter: selectedKTX,
+    });
+  }, [
+    workers,
+    facilitiesList,
+    capacities,
+    roomGenderMap,
+    allMaintenanceTickets,
+    disciplineRecords,
+    blacklistRecords,
+    selectedKTX,
+  ]);
+
+  const handlePrintExecutiveA4 = useCallback(() => {
+    const scopeFacilities = (facilitiesList || []).filter(
+      f =>
+        (f.room_type || 'accommodation') === 'accommodation' &&
+        f.is_visible !== false &&
+        (selectedKTX === 'all' || f.ktx === selectedKTX)
+    );
+    const scopeWorkers = (workers || []).filter(w => {
+      if (w.ngayRaKTX || w.ghiChu?.includes('[Đã Check-out') || w.ghiChu?.includes('[CHECKOUT]')) return false;
+      if (selectedKTX !== 'all' && w.ktx !== selectedKTX) return false;
+      return true;
+    });
+
+    // Group by (ktx, day)
+    const dayMap = new Map<
+      string,
+      {
+        ktx: string;
+        day: string;
+        roomSet: Set<string>;
+        occupiedRooms: Set<string>;
+        capacity: number;
+        occupied: number;
+        male: number;
+        female: number;
+      }
+    >();
+
+    scopeFacilities.forEach(f => {
+      const normR = normalizeRoomLabel(f.phong_khu_vuc);
+      if (!normR) return;
+      const key = `${f.ktx}||${f.day}`;
+      const cur = dayMap.get(key) || {
+        ktx: f.ktx,
+        day: f.day,
+        roomSet: new Set<string>(),
+        occupiedRooms: new Set<string>(),
+        capacity: 0,
+        occupied: 0,
+        male: 0,
+        female: 0,
+      };
+      if (!cur.roomSet.has(normR)) {
+        cur.roomSet.add(normR);
+        cur.capacity += getRoomCapacity(capacities, f.ktx, f.day, normR) || DEFAULT_ROOM_CAPACITY;
+      }
+      dayMap.set(key, cur);
+    });
+
+    scopeWorkers.forEach(w => {
+      if (!w.ktx || !w.day) return;
+      const key = `${w.ktx}||${w.day}`;
+      const cur = dayMap.get(key) || {
+        ktx: w.ktx,
+        day: w.day,
+        roomSet: new Set<string>(),
+        occupiedRooms: new Set<string>(),
+        capacity: 0,
+        occupied: 0,
+        male: 0,
+        female: 0,
+      };
+      const normR = normalizeRoomLabel(w.phongSo);
+      if (normR) {
+        if (!cur.roomSet.has(normR)) {
+          cur.roomSet.add(normR);
+          cur.capacity += getRoomCapacity(capacities, w.ktx, w.day, normR) || DEFAULT_ROOM_CAPACITY;
+        }
+        cur.occupiedRooms.add(normR);
+      }
+      cur.occupied++;
+      const g = normalizeGender(w.gioiTinh);
+      if (g === 'nu') cur.female++;
+      else cur.male++;
+      dayMap.set(key, cur);
+    });
+
+    const buildingRows: ExecutiveReportBuildingRow[] = Array.from(dayMap.values())
+      .sort((a, b) => naturalSortCompare(`${a.ktx} ${a.day}`, `${b.ktx} ${b.day}`))
+      .map(d => {
+        const blockKey = `${d.ktx} - ${d.day}`.toLowerCase();
+        const staff = blockAssignments.find(a => a.blockKey.toLowerCase() === blockKey)?.staffName;
+        return {
+          day: selectedKTX === 'all' ? `${d.ktx} · ${d.day}` : d.day,
+          rooms: d.roomSet.size,
+          emptyRooms: Math.max(0, d.roomSet.size - d.occupiedRooms.size),
+          occupied: d.occupied,
+          capacity: d.capacity,
+          male: d.male,
+          female: d.female,
+          staffName: staff,
+        };
+      });
+
+    printExecutiveReportA4({
+      ktxLabel: selectedKTX === 'all' ? 'Toàn khu KTX Phước Vĩnh Tây' : selectedKTX,
+      actorName: currentUser?.name || currentUser?.email || 'Ban Quản Lý KTX',
+      workers: scopeWorkers,
+      buildingRows,
+      todayEntered: todayStats.entered,
+      todayLeft: todayStats.left,
+      tickets: allMaintenanceTickets,
+      riskReport,
+    });
+  }, [
+    facilitiesList,
+    workers,
+    selectedKTX,
+    capacities,
+    blockAssignments,
+    currentUser?.name,
+    currentUser?.email,
+    todayStats.entered,
+    todayStats.left,
+    allMaintenanceTickets,
+    riskReport,
+  ]);
 
   // Dynamically retrieved KTX list across facilities + active workers (e.g. KTX 1, KTX 2, KTX 3, KTX 4)
   const allKTX = systemMetrics.activeKtxList;
@@ -1512,116 +1688,170 @@ export default function OccupancyDashboardPage() {
       <div className="min-h-screen bg-transparent text-tx transition-colors duration-200">
         <div className="px-2.5 sm:px-6 lg:px-8 xl:px-10 py-3 sm:py-5 max-w-screen-2xl mx-auto space-y-4 sm:space-y-5 w-full overflow-hidden">
 
-          {/* ── 1. Compact Header & Global Search Bar ── */}
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 sm:gap-3 pb-3.5 border-b border-bdr w-full">
-            {/* Title Section */}
-            <div className="flex items-center gap-3 min-w-0">
-              <CraftIconBadge icon={Building2} badgeIcon={Sparkles} tone="blue" size="md" />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2.5 flex-wrap">
-                  <h1 className="text-base sm:text-xl font-extrabold text-tx tracking-tight whitespace-nowrap">
-                    KÝ TÚC XÁ PHƯỚC VĨNH TÂY
+          {/* ── 1. Sticky Executive Command Header ── */}
+          <div className="lg:sticky lg:top-0 lg:z-20 -mx-2.5 sm:-mx-6 lg:-mx-8 xl:-mx-10 px-2.5 sm:px-6 lg:px-8 xl:px-10 pt-2 pb-3 bg-page/95 border-b border-bdr space-y-3">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 sm:gap-3 w-full">
+              {/* Title Section */}
+              <div className="flex items-center gap-3 min-w-0 shrink-0">
+                <CraftIconBadge icon={Building2} tone="blue" size="md" />
+                <div className="min-w-0">
+                  <h1 className="text-base sm:text-lg font-extrabold text-tx tracking-tight whitespace-nowrap leading-tight">
+                    Trung Tâm Điều Hành KTX
                   </h1>
-                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-ok whitespace-nowrap">
-                    <Radio size={12} />
-                    <span>Thời gian thực</span>
-                  </span>
+                  <p className="text-[11px] text-mu font-medium whitespace-nowrap truncate">
+                    Phước Vĩnh Tây · {selectedKTX === 'all' ? `${totalKTXAll} khu KTX` : selectedKTX} · {kpiWorkers.toLocaleString('vi-VN')} công nhân
+                  </p>
                 </div>
+              </div>
+
+              {/* Global Search Bar */}
+              <div className="flex-1 max-w-lg lg:mx-2">
+                <GlobalSearchBar
+                  onSelectWorker={(id) => {
+                    const w = workers.find(x => x.id === id);
+                    if (w?.ktx && w?.day && w?.phongSo) {
+                      setDrawerRoom({ ktx: w.ktx, building: w.day, room: w.phongSo });
+                    }
+                  }}
+                />
+              </div>
+
+              {/* Right Controls: KTX Filter + Primary CTA */}
+              <div className="flex items-center gap-2 flex-wrap shrink-0">
+                {!isEmpty && allKTX.length > 0 && (
+                  <div className="relative">
+                    <select
+                      value={selectedKTX}
+                      onChange={e => { setSelectedKTX(e.target.value); setSelectedBuilding(null); }}
+                      aria-label="Lọc theo KTX"
+                      className="appearance-none bg-surf border border-bdr2 rounded-xl pl-3 pr-8 py-2 text-xs font-bold text-tx shadow-sm focus:outline-none focus:ring-2 focus:ring-pri2/50 cursor-pointer min-w-[124px]"
+                    >
+                      <option value="all">Tất cả KTX</option>
+                      {allKTX.map(ktx => (
+                        <option key={ktx} value={ktx}>{ktx}</option>
+                      ))}
+                    </select>
+                    <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-mu pointer-events-none" />
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setShowQuickAdd(true)}
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl btn-glow-primary text-xs font-bold cursor-pointer active:scale-[0.98] whitespace-nowrap shrink-0"
+                >
+                  <UserPlus size={15} />
+                  <span>Xếp phòng nhanh</span>
+                  {missingData > 0 && (
+                    <span className="bg-white/20 text-white text-[11px] font-bold rounded-md px-1.5 py-0.5 leading-none font-tabular">
+                      {missingData}
+                    </span>
+                  )}
+                </button>
               </div>
             </div>
 
-            {/* Long Search Bar in Header */}
-            <div className="flex-1 max-w-xl lg:mx-3">
-              <GlobalSearchBar
-                onSelectWorker={(id) => {
-                  const w = workers.find(x => x.id === id);
-                  if (w?.ktx && w?.day && w?.phongSo) {
-                    setDrawerRoom({ ktx: w.ktx, building: w.day, room: w.phongSo });
-                  }
-                }}
+            {/* Row 2: 3-Tab Executive Switcher + Compact Operational Actions */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5">
+              <SlidingTabs
+                layoutId="dashboard-main-tabs"
+                value={dashboardTab}
+                onChange={setDashboardTab}
+                tabs={[
+                  {
+                    id: 'overview',
+                    label: 'Điều hành nhanh',
+                    count: totalMaintenanceCount > 0 ? totalMaintenanceCount : undefined,
+                    tone: urgentTicketsCount > 0 || overdueSlaTicketsCount > 0 ? 'danger' : 'default',
+                  },
+                  {
+                    id: 'heatmap',
+                    label: 'Sơ đồ Heatmap',
+                    count: kpiRooms,
+                    tone: overloadedRooms > 0 ? 'danger' : 'default',
+                  },
+                  {
+                    id: 'analytics',
+                    label: 'Phân tích & Cơ cấu',
+                  },
+                  {
+                    id: 'risk',
+                    label: 'Radar Rủi ro',
+                    icon: ShieldAlert,
+                    count:
+                      riskReport.counts.critical + riskReport.counts.high > 0
+                        ? riskReport.counts.critical + riskReport.counts.high
+                        : undefined,
+                    tone: riskReport.counts.critical > 0 ? 'danger' : 'default',
+                  },
+                ]}
               />
-            </div>
 
-            {/* KTX Selection Filter */}
-            <div className="flex items-center gap-2.5 flex-wrap">
-              {!isEmpty && allKTX.length > 0 && (
-                <div className="relative">
-                  <select
-                    value={selectedKTX}
-                    onChange={e => { setSelectedKTX(e.target.value); setSelectedBuilding(null); }}
-                    className="appearance-none bg-surf border border-bdr2 rounded-xl pl-3.5 pr-8 py-2 text-xs font-bold text-tx shadow-sm focus:outline-none focus:ring-2 focus:ring-pri2/50 cursor-pointer min-w-[130px]"
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handlePrintExecutiveA4}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-pri2/40 bg-pri/10 text-pri2 hover:bg-pri/20 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  title="Xuất & In Báo cáo Lãnh đạo Trình ký khổ A4 chuẩn văn bản hành chính"
+                >
+                  <Printer size={14} />
+                  <span>Báo cáo A4</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowBriefingModal(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-bdr2 bg-bdg text-lnk hover:opacity-90 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  title="Tạo bản tin giao ban cuối ngày gửi Zalo Ban Chỉ Huy hoặc in PDF 1 trang"
+                >
+                  <FileText size={14} />
+                  <span>Giao ban</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExportReport}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-bdr2 bg-surf text-tx hover:bg-act text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  title="Xuất báo cáo ngày ra Excel"
+                >
+                  <Download size={14} className="text-lnk" />
+                  <span>Xuất Excel</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => router.push('/worker-management')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-bdr2 bg-surf text-tx hover:bg-act text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  title="Đi tới Quản lý Công nhân & Import Excel"
+                >
+                  <FileSpreadsheet size={14} className="text-ok" />
+                  <span>Import</span>
+                </button>
+
+                {!showReadinessCard && dashboardTab === 'overview' && (
+                  <button
+                    type="button"
+                    onClick={() => toggleReadinessCard(true)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-bdr bg-surf text-mu hover:text-tx hover:bg-act text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
                   >
-                    <option value="all">Tất cả KTX</option>
-                    {allKTX.map(ktx => (
-                      <option key={ktx} value={ktx}>{ktx}</option>
-                    ))}
-                  </select>
-                  <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-mu pointer-events-none" />
-                </div>
-              )}
+                    <ClipboardCheck size={14} />
+                    <span>Bảng kiểm</span>
+                  </button>
+                )}
+
+                {loading && (
+                  <span className="text-xs text-lnk font-medium inline-flex items-center gap-1.5 ml-1">
+                    <Activity size={13} className="animate-spin text-pri2" />
+                    <span className="hidden sm:inline">Đồng bộ...</span>
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* ── 2. Unified Action Buttons Bar ── */}
-          <div className="flex flex-col sm:flex-row flex-wrap items-center gap-2.5 sm:gap-3 w-full">
-            <button
-              onClick={() => setShowQuickAdd(true)}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl btn-glow-primary text-xs sm:text-sm font-semibold cursor-pointer active:scale-[0.98]"
-            >
-              <UserPlus size={16} />
-              <span>Xếp phòng nhanh</span>
-              {missingData > 0 && (
-                <span className="bg-white/20 text-white text-xs font-bold rounded-full px-2 py-0.5 leading-none font-tabular">
-                  {missingData}
-                </span>
-              )}
-            </button>
-
-            <button
-              onClick={() => router.push('/worker-management')}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-bdr2 bg-surf text-tx hover:bg-act hover:border-pri2/40 text-xs sm:text-sm font-semibold shadow-sm transition-colors duration-100 active:scale-[0.98] cursor-pointer"
-            >
-              <FileSpreadsheet size={16} className="text-ok" />
-              <span>Import Excel</span>
-            </button>
-
-            <button
-              onClick={handleExportReport}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-bdr2 bg-surf text-tx hover:bg-act hover:border-pri2/40 text-xs sm:text-sm font-semibold shadow-sm transition-colors duration-100 active:scale-[0.98] cursor-pointer"
-            >
-              <Download size={16} className="text-lnk" />
-              <span>Xuất Báo Cáo Ngày</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setShowBriefingModal(true)}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-bdr2 bg-bdg text-lnk hover:opacity-90 text-xs sm:text-sm font-bold shadow-sm transition-colors duration-100 active:scale-[0.98] cursor-pointer"
-              title="Tạo bản tin giao ban cuối ngày gửi Zalo Ban Chỉ Huy hoặc in PDF 1 trang"
-            >
-              <FileText size={16} />
-              <span>Bản tin Giao ban</span>
-            </button>
-
-            {!showReadinessCard && (
-              <button
-                type="button"
-                onClick={() => toggleReadinessCard(true)}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-bdr bg-surf text-mu hover:text-tx hover:bg-act text-xs font-semibold transition-colors cursor-pointer"
-              >
-                <ClipboardCheck size={15} />
-                <span>Bảng kiểm vận hành</span>
-              </button>
-            )}
-
-            {loading && (
-              <span className="text-xs text-lnk font-medium flex items-center gap-1.5 sm:ml-auto">
-                <Activity size={13} className="animate-spin text-pri2" />
-                Đang đồng bộ dữ liệu...
-              </span>
-            )}
-          </div>
-
+          {/* ══════════════════ TAB 1: ĐIỀU HÀNH NHANH (OVERVIEW) ══════════════════ */}
+          {dashboardTab === 'overview' && (
+          <>
           {/* ── 3. Top 3 Unified Stats Cards (Balanced 3-Column Grid) ── */}
           <StaggerGrid className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
             <StaggerItem>
@@ -1751,7 +1981,10 @@ export default function OccupancyDashboardPage() {
                   tone="slate"
                   label="Phòng Trống (0 người)"
                   value={`${systemMetrics.emptyRooms} phòng`}
-                  onClick={() => setRoomFilterMode(prev => prev === 'empty' ? 'all' : 'empty')}
+                  onClick={() => {
+                    setRoomFilterMode('empty');
+                    setDashboardTab('heatmap');
+                  }}
                 />
                 <ExecutiveAlertCard
                   icon={AlertTriangle}
@@ -1761,6 +1994,7 @@ export default function OccupancyDashboardPage() {
                   onClick={() => {
                     setShowOverloadedModal(true);
                     setRoomFilterMode('overloaded');
+                    setDashboardTab('heatmap');
                   }}
                 />
                 <ExecutiveAlertCard
@@ -1802,6 +2036,48 @@ export default function OccupancyDashboardPage() {
             </div>
           </div>
 
+          {/* Quick Jump Strip to Heatmap & Analytics */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <button
+              type="button"
+              onClick={() => setDashboardTab('heatmap')}
+              className="surface-elevated rounded-2xl p-4 flex items-center justify-between gap-4 text-left hover:-translate-y-0.5 transition-transform cursor-pointer group"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <CraftIconBadge icon={LayoutGrid} tone="blue" size="md" interactive={false} />
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-tx">Mở Sơ Đồ Phòng Trực Quan (Heatmap)</p>
+                  <p className="text-xs text-mu mt-0.5 truncate">
+                    {kpiRooms} phòng · {systemMetrics.emptyRooms} trống · {overloadedRooms} quá tải · Đổi Nam/Nữ & in cửa phòng
+                  </p>
+                </div>
+              </div>
+              <ArrowRight size={17} className="text-mu group-hover:text-lnk group-hover:translate-x-0.5 transition-all shrink-0" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDashboardTab('analytics')}
+              className="surface-elevated rounded-2xl p-4 flex items-center justify-between gap-4 text-left hover:-translate-y-0.5 transition-transform cursor-pointer group"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <CraftIconBadge icon={HardHat} tone="amber" size="md" interactive={false} />
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-tx">Xem Phân Tích Giới Tính, Nhà Thầu & Lịch Sử Vào</p>
+                  <p className="text-xs text-mu mt-0.5 truncate">
+                    Nam {genderStats.male.toLocaleString('vi-VN')} · Nữ {genderStats.female.toLocaleString('vi-VN')} · {contractorStats.length} nhóm nhà thầu chính
+                  </p>
+                </div>
+              </div>
+              <ArrowRight size={17} className="text-mu group-hover:text-lnk group-hover:translate-x-0.5 transition-all shrink-0" />
+            </button>
+          </div>
+          </>
+          )}
+
+          {/* ══════════════════ TAB 3: PHÂN TÍCH & CƠ CẤU (ANALYTICS) ══════════════════ */}
+          {dashboardTab === 'analytics' && (
+          <>
           {/* ── 5. Detailed Statistics: Gender & Contractors ── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             {/* Gender Stats */}
@@ -1994,7 +2270,23 @@ export default function OccupancyDashboardPage() {
             </div>
           </div>
 
-          {/* ── 6. Heatmap Room Grid ── */}
+          {/* ── 7. Top Units / Platoons Ranking + Recent Entries Feed (50/50) ── */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+            <TopUnitsRankingCard
+              workers={filteredWorkers}
+              selectedKTX={selectedKTX}
+            />
+            <RecentEntriesFeed
+              workers={filteredWorkers}
+              selectedKTX={selectedKTX}
+              onSelectRoom={handleRoomClick}
+            />
+          </div>
+          </>
+          )}
+
+          {/* ══════════════════ TAB 2: SƠ ĐỒ HEATMAP (LAZY MOUNTED) ══════════════════ */}
+          {dashboardTab === 'heatmap' && (
           <div className="surface-elevated rounded-2xl p-5 sm:p-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
               <div className="flex items-center gap-3">
@@ -2334,19 +2626,15 @@ export default function OccupancyDashboardPage() {
               </div>
             )}
           </div>
+          )}
 
-          {/* ── 7. Top Units / Platoons Ranking + Recent Entries Feed (50/50) ── */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
-            <TopUnitsRankingCard
-              workers={filteredWorkers}
-              selectedKTX={selectedKTX}
+          {/* ══════════════════ TAB 4: RADAR RỦI RO ĐIỀU HÀNH (KHỐI E) ══════════════════ */}
+          {dashboardTab === 'risk' && (
+            <RiskCommandRadar
+              report={riskReport}
+              onPrintExecutiveA4={handlePrintExecutiveA4}
             />
-            <RecentEntriesFeed
-              workers={filteredWorkers}
-              selectedKTX={selectedKTX}
-              onSelectRoom={handleRoomClick}
-            />
-          </div>
+          )}
 
         </div>
 

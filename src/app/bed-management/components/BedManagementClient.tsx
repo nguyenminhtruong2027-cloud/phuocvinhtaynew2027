@@ -6,7 +6,8 @@ import {
   BedDouble, RefreshCw, Search, X, User, UserCheck, UserX, Box,
   ArrowRightLeft, Loader2, Building2, Phone, Briefcase, VenusAndMars,
   AlertCircle, LayoutGrid, Table2, BarChart3, Wrench, DoorOpen, Calendar,
-  ExternalLink, UserPlus, CheckCircle2, Printer, Lock, Download,
+  ExternalLink, UserPlus, CheckCircle2, Printer, Lock, Download, Minimize2,
+  BookmarkCheck, ArrowLeftRight, GripVertical, Move, Trash2, CalendarClock,
 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -15,19 +16,32 @@ import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
 import { useWorkers } from '@/context/WorkerContext';
 import { compareKtxNames, DEFAULT_ROOM_CAPACITY } from '@/data/workers';
-import { fetchRoomCapacities, getRoomCapacity, RoomCapacityMap, formatRoomDisplay, normalizeRoomLabel, extractRoomNumber, invalidateFacilitiesCache } from '@/lib/facilityCapacity';
+import { fetchRoomCapacities, fetchFacilitiesList, FacilityItem, getRoomCapacity, RoomCapacityMap, formatRoomDisplay, normalizeRoomLabel, extractRoomNumber, invalidateFacilitiesCache } from '@/lib/facilityCapacity';
 import { reconcileBedsWithWorkers, releaseBedsForWorkers, releaseBedByLocation, normalizeBedLabel, deduplicateBedRows } from '@/lib/bedSync';
 import { preserveDeletedWorkerEntries } from '@/lib/workerFluctuation';
 import { verifyWorkerDeletionIntegrity, invalidateDeletedTombstoneCache } from '@/lib/workerDeletionIntegrity';
 import { invalidateWorkerHierarchyCache } from '@/lib/workerHierarchy';
 import { invalidateKtxStructureCache } from '@/lib/ktxStructure';
 import { exportToExcel } from '@/lib/exportExcel';
+import {
+  BedReservation,
+  BedReservationSlotInput,
+  buildReservationSlotKey,
+  cancelBedReservation,
+  fetchActiveReservations,
+  fulfillReservationForBed,
+  isReservationOverdue,
+} from '@/lib/bedReservations';
 import BedQrPrintModal from './BedQrPrintModal';
 import BedTransferModal from './BedTransferModal';
+import RoomConsolidationModal from './RoomConsolidationModal';
+import BedSwapModal from './BedSwapModal';
+import BedReserveModal from './BedReserveModal';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { SlidingTabs } from '@/components/ui/MotionPrimitives';
 
 type BedStatus = 'empty' | 'occupied' | 'maintenance';
+type BedFilterStatus = 'all' | BedStatus | 'reserved';
 type ViewMode = 'grid' | 'table' | 'analytics';
 
 interface BedRow {
@@ -69,18 +83,33 @@ function BedHoverSlot({
   className,
   onClick,
   renderTooltip,
+  draggable,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
   children,
 }: {
   enabled: boolean;
   className: string;
   onClick: () => void;
   renderTooltip?: () => React.ReactNode;
+  draggable?: boolean;
+  onDragStart?: (e: React.DragEvent<HTMLButtonElement>) => void;
+  onDragOver?: (e: React.DragEvent<HTMLButtonElement>) => void;
+  onDragLeave?: (e: React.DragEvent<HTMLButtonElement>) => void;
+  onDrop?: (e: React.DragEvent<HTMLButtonElement>) => void;
   children: React.ReactNode;
 }) {
   const [hovered, setHovered] = useState(false);
   return (
     <button
       type="button"
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
       onMouseEnter={enabled ? () => setHovered(true) : undefined}
       onMouseLeave={enabled ? () => setHovered(false) : undefined}
       onClick={onClick}
@@ -173,6 +202,7 @@ export default function BedManagementClient() {
     [contextWorkers]
   );
   const [capacities, setCapacities] = useState<RoomCapacityMap>({});
+  const [facilitiesList, setFacilitiesList] = useState<FacilityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [actionError, setActionError] = useState('');
@@ -181,9 +211,9 @@ export default function BedManagementClient() {
     const v = searchParams?.get('view');
     return v === 'table' || v === 'analytics' || v === 'grid' ? v : 'grid';
   })();
-  const initialStatus = ((): 'all' | BedStatus => {
+  const initialStatus = ((): BedFilterStatus => {
     const s = searchParams?.get('status');
-    return s === 'occupied' || s === 'empty' || s === 'maintenance' ? s : 'all';
+    return s === 'occupied' || s === 'empty' || s === 'maintenance' || s === 'reserved' ? s : 'all';
   })();
 
   const [view, setView] = useState<ViewMode>(initialView);
@@ -192,7 +222,7 @@ export default function BedManagementClient() {
   const [filterKtx, setFilterKtx] = useState(() => searchParams?.get('ktx') || '');
   const [filterDay, setFilterDay] = useState(() => searchParams?.get('day') || '');
   const [filterRoom, setFilterRoom] = useState(() => searchParams?.get('room') || '');
-  const [filterStatus, setFilterStatus] = useState<'all' | BedStatus>(initialStatus);
+  const [filterStatus, setFilterStatus] = useState<BedFilterStatus>(initialStatus);
 
   // Sync active filters back into URL cleanly without re-navigation
   useEffect(() => {
@@ -220,6 +250,36 @@ export default function BedManagementClient() {
   const [busy, setBusy] = useState(false);
   const [syncingBeds, setSyncingBeds] = useState(false);
   const [showQrPrint, setShowQrPrint] = useState(false);
+  const [showConsolidationModal, setShowConsolidationModal] = useState(
+    () => searchParams?.get('action') === 'consolidate'
+  );
+  // Group 3: Bed Reservations, Global Swap Modal, and Drag & Drop Mode
+  const [reservations, setReservations] = useState<BedReservation[]>([]);
+  const [reservationsMissingTable, setReservationsMissingTable] = useState(false);
+  const [reserveModalState, setReserveModalState] = useState<{
+    open: boolean;
+    mode: 'create' | 'manage';
+    preselected: BedReservationSlotInput[];
+  }>(() => ({
+    open: searchParams?.get('action') === 'reserve',
+    mode: 'create',
+    preselected: [],
+  }));
+  const [globalSwapState, setGlobalSwapState] = useState<{
+    open: boolean;
+    workerAId?: string;
+    workerBId?: string;
+  }>(() => ({
+    open: searchParams?.get('action') === 'swap',
+  }));
+  const [dragMode, setDragMode] = useState(false);
+  const [dragOverBedId, setDragOverBedId] = useState<string | null>(null);
+  const [pendingDropMove, setPendingDropMove] = useState<{
+    worker: WorkerLite;
+    fromBed?: BedRow | null;
+    targetBed: BedRow;
+    targetReservation?: BedReservation | null;
+  } | null>(null);
 
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
   if (!supabaseRef.current) supabaseRef.current = createClient();
@@ -285,16 +345,28 @@ export default function BedManagementClient() {
 
   const loadCapacities = useCallback(async () => {
     try {
-      setCapacities(await fetchRoomCapacities());
+      const [capMap, facList] = await Promise.all([
+        fetchRoomCapacities(),
+        fetchFacilitiesList(false).catch(() => [] as FacilityItem[]),
+      ]);
+      setCapacities(capMap);
+      setFacilitiesList(facList);
     } catch (err) {
       console.warn('[bed-management] load capacities failed:', err);
     }
   }, []);
 
+  const loadReservations = useCallback(async () => {
+    const res = await fetchActiveReservations(supabase);
+    setReservations(res.data);
+    setReservationsMissingTable(res.missingTable);
+  }, [supabase]);
+
   useEffect(() => {
     loadBeds();
     loadCapacities();
-  }, [loadBeds, loadCapacities]);
+    loadReservations();
+  }, [loadBeds, loadCapacities, loadReservations]);
 
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null;
@@ -400,6 +472,22 @@ export default function BedManagementClient() {
     [capacities]
   );
 
+  const reservationBySlotKey = useMemo(() => {
+    const map = new Map<string, BedReservation>();
+    for (const r of reservations) {
+      map.set(buildReservationSlotKey(r.ktx, r.day, r.phong_so, r.giuong), r);
+    }
+    return map;
+  }, [reservations]);
+
+  const getReservationForBed = useCallback(
+    (bed?: BedRow | null): BedReservation | null => {
+      if (!bed || bed.status !== 'empty') return null;
+      return reservationBySlotKey.get(buildReservationSlotKey(bed.ktx, bed.day, bed.phong_so, bed.giuong)) ?? null;
+    },
+    [reservationBySlotKey]
+  );
+
   const bedsFiltered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return (beds || []).filter(b => {
@@ -412,16 +500,23 @@ export default function BedManagementClient() {
       if (filterKtx && ktx !== filterKtx.trim()) return false;
       if (filterDay && day !== filterDay.trim()) return false;
       if (filterRoom && room !== filterRoom.trim()) return false;
-      if (filterStatus !== 'all' && b?.status !== filterStatus) return false;
+      const resv = getReservationForBed(b);
+      if (filterStatus === 'reserved') {
+        if (!resv) return false;
+      } else if (filterStatus === 'empty') {
+        if (b?.status !== 'empty' || Boolean(resv)) return false;
+      } else if (filterStatus !== 'all' && b?.status !== filterStatus) {
+        return false;
+      }
       if (!q) return true;
       const w = b?.worker_id ? workerById.get(b.worker_id) : null;
       const haystack = [
         b?.ktx, b?.day, b?.phong_so, b?.giuong, b?.ho_va_ten, b?.ma_nv,
-        w?.donVi, w?.soDienThoai,
+        w?.donVi, w?.soDienThoai, resv?.group_name,
       ].map(v => String(v ?? '').toLowerCase());
       return haystack.some(v => v.includes(q)) || `g${bedNo.toLowerCase().replace(/[^0-9a-z]/g, '')}`.includes(q);
     });
-  }, [beds, filterKtx, filterDay, filterRoom, filterStatus, searchQuery, workerById]);
+  }, [beds, filterKtx, filterDay, filterRoom, filterStatus, searchQuery, workerById, getReservationForBed]);
 
   const ktxList = useMemo(
     () =>
@@ -540,7 +635,11 @@ export default function BedManagementClient() {
   }, [bedsFiltered, roomCap, getWorkerForBed]);
 
   const occupiedCount = useMemo(() => bedsFiltered.filter(b => b?.status === 'occupied').length, [bedsFiltered]);
-  const emptyCount = useMemo(() => bedsFiltered.filter(b => b?.status === 'empty').length, [bedsFiltered]);
+  const reservedCount = useMemo(() => bedsFiltered.filter(b => Boolean(getReservationForBed(b))).length, [bedsFiltered, getReservationForBed]);
+  const emptyCount = useMemo(
+    () => bedsFiltered.filter(b => b?.status === 'empty' && !getReservationForBed(b)).length,
+    [bedsFiltered, getReservationForBed]
+  );
   const maintenanceCount = useMemo(() => bedsFiltered.filter(b => b?.status === 'maintenance').length, [bedsFiltered]);
   const totalCapInView = useMemo(
     () => (bedsFiltered.length > 0 ? Math.max(bedsFiltered.length, 1) : 0),
@@ -675,6 +774,11 @@ export default function BedManagementClient() {
         } catch (err) {
           console.warn('[bed-management] direct bed occupy warning:', err);
         }
+        await fulfillReservationForBed(
+          { ktx: assignTarget.ktx, day: assignTarget.day, phong_so: assignTarget.phong_so, giuong: assignTarget.giuong },
+          worker.id,
+          supabase
+        );
         const actor = currentUser?.name || currentUser?.email || 'Admin';
         addLog(
           actor,
@@ -684,11 +788,77 @@ export default function BedManagementClient() {
         toast.success(`Đã gán ${worker.hoVaTen} vào G${assignTarget.giuong} (Phòng ${assignTarget.phong_so})`);
         setAssignTarget(null);
         setCandidateSearch('');
+        loadReservations();
         refreshWorkers();
       }
     },
-    [assignTarget, canWriteBed, isAdmin, canWriteBlock, applyWorkerBed, supabase, currentUser, addLog, loadBeds, refreshWorkers]
+    [assignTarget, canWriteBed, isAdmin, canWriteBlock, applyWorkerBed, supabase, currentUser, addLog, loadBeds, loadReservations, refreshWorkers]
   );
+
+  // Drag & Drop execution helper (move worker from unassigned or another bed into an empty bed)
+  const handleConfirmDropMove = useCallback(async () => {
+    if (!pendingDropMove) return;
+    const { worker, targetBed } = pendingDropMove;
+    if (!canWriteBed(targetBed)) {
+      toast.error(`Bạn không có quyền xếp giường tại ${targetBed.ktx} - ${targetBed.day}.`);
+      setPendingDropMove(null);
+      return;
+    }
+    const ok = await applyWorkerBed(worker.id, {
+      ktx: targetBed.ktx,
+      day: targetBed.day,
+      phong_so: targetBed.phong_so,
+      giuong: targetBed.giuong,
+    });
+    if (ok) {
+      setBeds(prev =>
+        prev.map(b => {
+          if (b.id === targetBed.id) {
+            return {
+              ...b,
+              status: 'occupied',
+              worker_id: worker.id,
+              ma_nv: worker.maNV || null,
+              ho_va_ten: worker.hoVaTen || null,
+            };
+          }
+          if (b.worker_id === worker.id) {
+            return { ...b, status: 'empty', worker_id: null, ma_nv: null, ho_va_ten: null };
+          }
+          return b;
+        })
+      );
+      try {
+        await releaseBedsForWorkers(supabase, [worker.id]);
+        await supabase
+          .from('beds')
+          .update({
+            status: 'occupied',
+            worker_id: worker.id,
+            ma_nv: worker.maNV || null,
+            ho_va_ten: worker.hoVaTen || null,
+          })
+          .eq('id', targetBed.id);
+        await fulfillReservationForBed(
+          { ktx: targetBed.ktx, day: targetBed.day, phong_so: targetBed.phong_so, giuong: targetBed.giuong },
+          worker.id,
+          supabase
+        );
+      } catch (err) {
+        console.warn('[bed-management] drag-drop bed sync warning:', err);
+      }
+      const actor = currentUser?.name || currentUser?.email || 'Admin';
+      addLog(
+        actor,
+        'BED_REASSIGN',
+        `Kéo-thả xếp giường: ${worker.hoVaTen} → ${targetBed.ktx} · ${targetBed.day} · P${targetBed.phong_so} · G${targetBed.giuong}`
+      );
+      toast.success(`Đã chuyển ${worker.hoVaTen} → ${targetBed.day} · ${formatRoomDisplay(targetBed.phong_so)} · G${targetBed.giuong}`);
+      setPendingDropMove(null);
+      loadReservations();
+      refreshWorkers();
+    }
+  }, [pendingDropMove, canWriteBed, applyWorkerBed, supabase, currentUser, addLog, loadReservations, refreshWorkers]);
 
   // 1-Click Atomic Swap between two occupied beds (A <-> B)
   const handleSwapBeds = useCallback(
@@ -1459,6 +1629,62 @@ export default function BedManagementClient() {
               { id: 'analytics', label: 'Lấp Đầy', icon: BarChart3 },
             ]}
           />
+          <button
+            type="button"
+            onClick={() => setGlobalSwapState({ open: true })}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-bdr2 bg-surf text-tx hover:bg-act text-sm font-bold transition-colors disabled:opacity-60 cursor-pointer"
+            title="Hoán đổi trực tiếp giường của 2 công nhân bất kỳ (A ⇄ B)"
+          >
+            <ArrowLeftRight size={14} className="text-lnk" />
+            <span>Hoán đổi giường</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setReserveModalState({ open: true, mode: reservations.length > 0 ? 'manage' : 'create', preselected: [] })}
+            disabled={loading}
+            className="relative flex items-center gap-1.5 px-3 py-2 rounded-lg border border-purple-500/40 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 text-sm font-bold transition-colors disabled:opacity-60 cursor-pointer"
+            title="Đặt giữ chỗ giường trống cho đoàn công nhân sắp vào KTX"
+          >
+            <BookmarkCheck size={14} />
+            <span>Giữ chỗ đoàn</span>
+            {reservations.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-purple-600 text-white text-[10px] font-mono font-bold">
+                {reservations.length}
+              </span>
+            )}
+          </button>
+          {view === 'grid' && (
+            <button
+              type="button"
+              onClick={() => {
+                setDragMode(prev => {
+                  const next = !prev;
+                  if (next) toast.info('Đã bật chế độ Kéo–Thả: kéo công nhân vào giường trống để chuyển, hoặc thả lên người khác để hoán đổi!');
+                  return next;
+                });
+              }}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-bold transition-colors cursor-pointer ${
+                dragMode
+                  ? 'bg-pri text-white border-pri shadow-sm'
+                  : 'border-bdr2 bg-surf text-tx hover:bg-act'
+              }`}
+              title="Bật chế độ kéo–thả trực quan trên sơ đồ giường"
+            >
+              <Move size={14} />
+              <span>{dragMode ? 'Đang Kéo–Thả' : 'Kéo–Thả'}</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowConsolidationModal(true)}
+            disabled={loading}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-pri2/40 bg-pri/10 text-pri2 hover:bg-pri/20 text-sm font-bold transition-colors disabled:opacity-60 cursor-pointer"
+            title="Phân tích và gom các phòng thưa người cùng giới tính để giải phóng phòng trống nguyên căn"
+          >
+            <Minimize2 size={14} />
+            <span>Dồn phòng thông minh</span>
+          </button>
           {isAdmin && (
             <button
               onClick={handleSyncBeds}
@@ -1486,7 +1712,7 @@ export default function BedManagementClient() {
             <Printer size={14} /> Xuất Danh Sách QR
           </button>
           <button
-            onClick={() => { loadBeds(); loadWorkers(); loadCapacities(); }}
+            onClick={() => { loadBeds(); loadWorkers(); loadCapacities(); loadReservations(); }}
             disabled={refreshing || loading}
             className="flex items-center gap-2 px-3 py-2 border border-border rounded-lg text-sm text-muted-foreground hover:bg-muted transition-colors disabled:opacity-60"
           >
@@ -1558,12 +1784,13 @@ export default function BedManagementClient() {
             <label className="text-[11px] font-bold text-mu uppercase tracking-wider">Trạng thái</label>
             <select
               value={filterStatus}
-              onChange={e => setFilterStatus(e.target.value as 'all' | BedStatus)}
+              onChange={e => setFilterStatus(e.target.value as BedFilterStatus)}
               className="bg-surf border border-bdr text-tx rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 min-w-[130px] cursor-pointer"
             >
               <option value="all">Tất cả trạng thái</option>
               <option value="occupied">Đã ở</option>
               <option value="empty">Còn trống</option>
+              <option value="reserved">Đã giữ chỗ ({reservations.length})</option>
               <option value="maintenance">Đang bảo trì</option>
             </select>
           </div>
@@ -1574,7 +1801,7 @@ export default function BedManagementClient() {
               <input
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Tên công nhân, mã NV, số giường (G1), đơn vị…"
+                placeholder="Tên công nhân, mã NV, số giường (G1), tên đoàn giữ chỗ…"
                 className="w-full bg-surf border border-bdr text-tx placeholder-mu rounded-xl pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pri2/50"
               />
               {searchQuery && (
@@ -1590,11 +1817,12 @@ export default function BedManagementClient() {
         </div>
 
         {/* Stats strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
           {[
             { label: 'Tổng giường', value: bedsFiltered.length, color: 'text-tx' },
             { label: 'Đã ở', value: occupiedCount, color: 'text-ok' },
-            { label: 'Trống', value: emptyCount, color: 'text-lnk' },
+            { label: 'Trống khả dụng', value: emptyCount, color: 'text-lnk' },
+            { label: 'Giữ chỗ đoàn', value: reservedCount, color: 'text-purple-400' },
             { label: 'Bảo trì', value: maintenanceCount, color: 'text-wn' },
             { label: 'Tỷ lệ lấp đầy', value: `${fillRateInView}%`, color: 'text-lnk' },
           ].map(s => (
@@ -1629,6 +1857,12 @@ export default function BedManagementClient() {
             Còn trống
           </span>
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-tx">
+            <span className="w-4 h-3.5 rounded border border-purple-500/70 bg-purple-500/15 relative overflow-hidden inline-block">
+              <span className="absolute inset-x-0 top-0 h-1 bg-purple-500" />
+            </span>
+            Giữ chỗ đoàn
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-tx">
             <span className="w-4 h-3.5 rounded border border-wn/70 tint-wn relative overflow-hidden inline-block">
               <span className="absolute inset-x-0 top-0 h-1 bg-wn" />
             </span>
@@ -1639,6 +1873,65 @@ export default function BedManagementClient() {
           </span>
         </div>
       </div>
+
+      {/* Drag & Drop Helper Tray (visible only when dragMode is ON in grid view) */}
+      {dragMode && view === 'grid' && (
+        <div className="rounded-2xl border border-pri2/45 bg-bdg/45 p-3.5 space-y-2.5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-extrabold text-lnk">
+              <Move size={15} />
+              <span>Chế độ Kéo–Thả đang BẬT</span>
+              <span className="font-normal text-mu">
+                — Kéo thẻ công nhân bên dưới (hoặc giường đang ở) thả vào giường trống để chuyển; thả đè lên giường khác để hoán đổi A ⇄ B
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDragMode(false)}
+              className="px-2.5 py-1 rounded-lg bg-surf border border-bdr2 text-xs font-bold text-tx hover:bg-act cursor-pointer"
+            >
+              Tắt Kéo–Thả
+            </button>
+          </div>
+          {(() => {
+            const unassigned = (workers || []).filter(w => w?.id && !occupiedIds.has(w.id)).slice(0, 30);
+            if (unassigned.length === 0) {
+              return (
+                <p className="text-xs text-mu">
+                  Hiện không có công nhân chưa xếp giường. Anh vẫn có thể kéo trực tiếp các giường đang ở bên dưới để đổi phòng hoặc hoán đổi!
+                </p>
+              );
+            }
+            return (
+              <div className="space-y-1.5">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-mu">
+                  Công nhân chưa xếp giường ({(workers || []).filter(w => w?.id && !occupiedIds.has(w.id)).length}) — Kéo thả vào ô giường trống:
+                </p>
+                <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
+                  {unassigned.map(w => (
+                    <div
+                      key={w.id}
+                      draggable
+                      onDragStart={e => {
+                        e.dataTransfer.setData(
+                          'application/json',
+                          JSON.stringify({ type: 'unassigned', workerId: w.id })
+                        );
+                        e.dataTransfer.effectAllowed = 'move';
+                      }}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surf border border-pri2/40 text-xs font-semibold text-tx cursor-grab active:cursor-grabbing hover:border-pri2 shadow-xs"
+                    >
+                      <GripVertical size={12} className="text-mu shrink-0" />
+                      <span>{w.hoVaTen}</span>
+                      {w.gioiTinh && <span className="text-[10px] text-mu">({w.gioiTinh})</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-4">
@@ -1751,16 +2044,103 @@ export default function BedManagementClient() {
                             const worker = getWorkerForBed(bed);
                             const occupied = bed?.status === 'occupied';
                             const maintenance = bed?.status === 'maintenance';
+                            const reservation = getReservationForBed(bed);
+                            const isReserved = Boolean(reservation);
+                            const isResvOverdue = reservation ? isReservationOverdue(reservation) : false;
                             const female = occupied && isFemale(worker);
                             const unit = worker?.donVi || '';
                             const bedLabel = bed?.giuong ? formatGiuongTag(bed.giuong) : 'G?';
+                            const isDragTarget = dragOverBedId === bed.id;
+                            const canDragThis = dragMode && occupied && canWriteBed(bed) && Boolean(bed.worker_id || worker?.id);
+
+                            const tileStyle = isReserved
+                              ? isResvOverdue
+                                ? 'bg-dgrbg/25 border border-dgr/60 hover:border-dgr'
+                                : 'bg-purple-500/10 border border-purple-500/55 hover:border-purple-400'
+                              : bedCellClasses(bed?.status ?? 'empty', female);
+
+                            const headboardStyle = isReserved
+                              ? isResvOverdue
+                                ? 'bg-dgr'
+                                : 'bg-purple-500'
+                              : bedHeadboardClass(bed?.status ?? 'empty', female);
+
                             return (
                               <BedHoverSlot
                                 key={bed?.id}
-                                enabled={occupied}
+                                enabled={occupied && !dragMode}
+                                draggable={canDragThis}
+                                onDragStart={
+                                  canDragThis
+                                    ? e => {
+                                        const wid = bed.worker_id || worker?.id || '';
+                                        e.dataTransfer.setData(
+                                          'application/json',
+                                          JSON.stringify({ type: 'bed', bedId: bed.id, workerId: wid })
+                                        );
+                                        e.dataTransfer.effectAllowed = 'move';
+                                      }
+                                    : undefined
+                                }
+                                onDragOver={
+                                  dragMode && !maintenance
+                                    ? e => {
+                                        e.preventDefault();
+                                        e.dataTransfer.dropEffect = 'move';
+                                        if (dragOverBedId !== bed.id) setDragOverBedId(bed.id);
+                                      }
+                                    : undefined
+                                }
+                                onDragLeave={
+                                  dragMode
+                                    ? () => {
+                                        if (dragOverBedId === bed.id) setDragOverBedId(null);
+                                      }
+                                    : undefined
+                                }
+                                onDrop={
+                                  dragMode && !maintenance
+                                    ? e => {
+                                        e.preventDefault();
+                                        setDragOverBedId(null);
+                                        try {
+                                          const raw = e.dataTransfer.getData('application/json');
+                                          if (!raw) return;
+                                          const payload = JSON.parse(raw) as { type: 'bed' | 'unassigned'; bedId?: string; workerId?: string };
+                                          if (!payload.workerId) return;
+                                          const draggedWorker = workerById.get(payload.workerId);
+                                          if (!draggedWorker) return;
+
+                                          if (occupied) {
+                                            const targetWid = bed.worker_id || worker?.id;
+                                            if (targetWid && targetWid !== draggedWorker.id) {
+                                              setGlobalSwapState({
+                                                open: true,
+                                                workerAId: draggedWorker.id,
+                                                workerBId: targetWid,
+                                              });
+                                            }
+                                            return;
+                                          }
+
+                                          // Empty (or reserved) bed target
+                                          const fromBed = payload.bedId ? beds.find(b => b.id === payload.bedId) || null : null;
+                                          if (fromBed && fromBed.id === bed.id) return;
+                                          setPendingDropMove({
+                                            worker: draggedWorker,
+                                            fromBed,
+                                            targetBed: bed,
+                                            targetReservation: reservation,
+                                          });
+                                        } catch {
+                                          // Ignore malformed drag data
+                                        }
+                                      }
+                                    : undefined
+                                }
                                 renderTooltip={occupied ? () => <BedTooltip bed={bed} worker={worker} /> : undefined}
                                 onClick={() => {
-                                  if (occupied || maintenance) {
+                                  if (occupied || maintenance || isReserved) {
                                     setDrawerBed(bed);
                                   } else {
                                     if (!canWriteBed(bed)) {
@@ -1771,19 +2151,48 @@ export default function BedManagementClient() {
                                     setCandidateSearch('');
                                   }
                                 }}
-                                className={`relative text-left rounded-xl p-2.5 pt-3 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-pri2 overflow-visible ${bedCellClasses(bed?.status ?? 'empty', female)}`}
+                                className={`relative text-left rounded-xl p-2.5 pt-3 transition-all focus:outline-none focus:ring-2 focus:ring-pri2 overflow-visible ${tileStyle} ${
+                                  canDragThis ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+                                } ${isDragTarget ? 'ring-2 ring-pri scale-[1.02] shadow-lg' : ''}`}
                               >
                                 {/* Đầu giường trực quan (Headboard accent strip — không clipping Tooltip) */}
                                 <span
                                   aria-hidden="true"
-                                  className={`pointer-events-none absolute inset-x-0 top-0 h-[3.5px] rounded-t-[11px] ${bedHeadboardClass(bed?.status ?? 'empty', female)}`}
+                                  className={`pointer-events-none absolute inset-x-0 top-0 h-[3.5px] rounded-t-[11px] ${headboardStyle}`}
                                 />
                                 <div className="flex items-center justify-between gap-1.5 mb-1.5">
                                   <span className="inline-flex items-center gap-1 text-xs font-mono font-tabular font-bold text-tx">
-                                    <BedDouble size={12} className={occupied ? (female ? 'text-pink-tone' : 'text-lnk') : maintenance ? 'text-wn' : 'text-ok'} />
+                                    {canDragThis && <GripVertical size={11} className="text-mu -ml-0.5" />}
+                                    <BedDouble
+                                      size={12}
+                                      className={
+                                        occupied
+                                          ? female
+                                            ? 'text-pink-tone'
+                                            : 'text-lnk'
+                                          : isReserved
+                                          ? isResvOverdue
+                                            ? 'text-dgr'
+                                            : 'text-purple-400'
+                                          : maintenance
+                                          ? 'text-wn'
+                                          : 'text-ok'
+                                      }
+                                    />
                                     {bedLabel}
                                   </span>
-                                  {statusBadge(bed?.status ?? 'empty', female)}
+                                  {isReserved ? (
+                                    <span
+                                      className={`inline-flex items-center gap-0.5 text-[10px] font-bold ${
+                                        isResvOverdue ? 'text-dgr' : 'text-purple-400'
+                                      }`}
+                                    >
+                                      <BookmarkCheck size={10} />
+                                      {isResvOverdue ? 'Quá hạn giữ' : 'Giữ chỗ'}
+                                    </span>
+                                  ) : (
+                                    statusBadge(bed?.status ?? 'empty', female)
+                                  )}
                                 </div>
                                 {occupied ? (
                                   <div className="space-y-0.5 min-w-0">
@@ -1800,10 +2209,22 @@ export default function BedManagementClient() {
                                       )}
                                     </p>
                                   </div>
+                                ) : isReserved && reservation ? (
+                                  <div className="space-y-0.5 min-w-0">
+                                    <p className="text-xs font-bold text-tx truncate" title={reservation.group_name}>
+                                      {reservation.group_name}
+                                    </p>
+                                    <p className="text-[10px] font-mono text-mu flex items-center gap-1">
+                                      <CalendarClock size={10} className="shrink-0" />
+                                      <span>Dự kiến: {reservation.expected_date}</span>
+                                    </p>
+                                  </div>
                                 ) : maintenance ? (
                                   <p className="text-xs font-semibold text-wn">Đang kiểm tra / sửa</p>
                                 ) : (
-                                  <p className="text-[11px] font-medium text-mu">Bấm để gán công nhân…</p>
+                                  <p className="text-[11px] font-medium text-mu">
+                                    {dragMode ? 'Thả công nhân vào đây…' : 'Bấm để gán công nhân…'}
+                                  </p>
                                 )}
                               </BedHoverSlot>
                             );
@@ -2158,6 +2579,66 @@ export default function BedManagementClient() {
                     </>
                     );
                   })()}
+                  {drawerBed?.status === 'empty' && (() => {
+                    const resv = getReservationForBed(drawerBed);
+                    if (!resv) return null;
+                    const overdue = isReservationOverdue(resv);
+                    return (
+                      <div className={`rounded-xl border p-3.5 space-y-2.5 ${overdue ? 'border-dgr/50 bg-dgrbg/25' : 'border-purple-500/40 bg-purple-500/10'}`}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={`text-xs font-extrabold uppercase tracking-wider flex items-center gap-1.5 ${overdue ? 'text-dgr' : 'text-purple-400'}`}>
+                            <BookmarkCheck size={14} /> {overdue ? 'Giữ chỗ đã quá hạn' : 'Đang giữ chỗ cho đoàn'}
+                          </span>
+                          <span className="text-[11px] font-mono text-tx font-bold">{resv.expected_date}</span>
+                        </div>
+                        <div className="text-sm font-extrabold text-tx">{resv.group_name}</div>
+                        {resv.note && <p className="text-xs text-mu">{resv.note}</p>}
+                        {canWriteBed(drawerBed) && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const target = drawerBed;
+                                setDrawerBed(null);
+                                setAssignTarget(target);
+                                setCandidateSearch('');
+                              }}
+                              className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-pri hover:opacity-90 text-white text-xs font-bold cursor-pointer"
+                            >
+                              <UserPlus size={13} /> Gán người vào giường
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={async () => {
+                                setBusy(true);
+                                try {
+                                  const out = await cancelBedReservation(resv.id, supabase);
+                                  if (!out.ok) {
+                                    toast.error(out.error || 'Không thể hủy giữ chỗ.');
+                                  } else {
+                                    addLog(
+                                      currentUser?.email || currentUser?.name || 'Admin',
+                                      'CANCEL_RESERVE_BED',
+                                      `Hủy giữ chỗ giường ${drawerBed.day} · P${drawerBed.phong_so} · G${drawerBed.giuong} (${resv.group_name})`
+                                    );
+                                    toast.success('Đã hủy giữ chỗ giường.');
+                                    await loadReservations();
+                                    setDrawerBed(null);
+                                  }
+                                } finally {
+                                  setBusy(false);
+                                }
+                              }}
+                              className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-dgrbg hover:bg-dgr text-dgr hover:text-white border border-dgr/35 text-xs font-bold transition-colors cursor-pointer"
+                            >
+                              <Trash2 size={13} /> Hủy giữ chỗ
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {drawerBed?.status === 'maintenance' && canWriteBed(drawerBed) && (
                     <button
                       type="button"
@@ -2274,6 +2755,137 @@ export default function BedManagementClient() {
           : null}
         onTransferred={() => { setDrawerBed(null); loadBeds(true); refreshWorkers(); }}
       />
+
+      {/* ─── Smart Room Defragmentation / Consolidation Engine Modal ─── */}
+      {showConsolidationModal && (
+        <RoomConsolidationModal
+          onClose={() => setShowConsolidationModal(false)}
+          facilities={facilitiesList}
+          capacities={capacities}
+          ktxList={ktxList}
+          defaultKtx={filterKtx || ktxList[0] || ''}
+          onExecuted={async () => {
+            await loadBeds(true);
+            await refreshWorkers();
+          }}
+        />
+      )}
+
+      {/* ─── Global 1-Click Bed Swap Modal (A ⇄ B) ─── */}
+      {globalSwapState.open && (
+        <BedSwapModal
+          occupiedWorkers={(beds || [])
+            .filter(b => b.status === 'occupied' && Boolean(b.worker_id || getWorkerForBed(b)?.id))
+            .map(b => {
+              const w = getWorkerForBed(b);
+              return {
+                id: b.worker_id || w?.id || '',
+                hoVaTen: b.ho_va_ten || w?.hoVaTen || '(Chưa rõ)',
+                maNV: b.ma_nv || w?.maNV || '',
+                cccd: w?.cccd || '',
+                gioiTinh: w?.gioiTinh || '',
+                donVi: w?.donVi || '',
+                ktx: b.ktx,
+                day: b.day,
+                phongSo: b.phong_so,
+                giuong: b.giuong,
+              };
+            })
+            .filter(item => Boolean(item.id))}
+          initialWorkerAId={globalSwapState.workerAId}
+          initialWorkerBId={globalSwapState.workerBId}
+          onClose={() => setGlobalSwapState({ open: false })}
+          onSwapped={async () => {
+            await loadBeds(true);
+            await refreshWorkers();
+          }}
+        />
+      )}
+
+      {/* ─── Bed Reservation Modal (Giữ chỗ đoàn sắp vào) ─── */}
+      {reserveModalState.open && (
+        <BedReserveModal
+          emptyBeds={(beds || [])
+            .filter(b => b.status === 'empty')
+            .map(b => ({
+              id: b.id,
+              ktx: b.ktx,
+              day: b.day,
+              phong_so: b.phong_so,
+              giuong: b.giuong,
+            }))}
+          activeReservations={reservations}
+          missingTable={reservationsMissingTable}
+          initialMode={reserveModalState.mode}
+          preselectedSlots={reserveModalState.preselected}
+          onClose={() => setReserveModalState({ open: false, mode: 'create', preselected: [] })}
+          onUpdated={async () => {
+            await loadReservations();
+          }}
+        />
+      )}
+
+      {/* ─── Drag & Drop Move Confirmation Dialog ─── */}
+      {pendingDropMove && (
+        <div
+          className="fixed inset-0 z-50 modal-backdrop-scrim fade-in flex items-center justify-center p-4"
+          onClick={() => setPendingDropMove(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-surf border border-bdr2 shadow-2xl overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-bdr bg-side flex items-center justify-between gap-2">
+              <h3 className="text-sm font-extrabold text-tx flex items-center gap-2">
+                <Move size={15} className="text-lnk" /> Xác nhận Kéo–Thả xếp giường
+              </h3>
+              <button
+                type="button"
+                onClick={() => setPendingDropMove(null)}
+                className="p-1.5 rounded-lg text-mu hover:text-tx hover:bg-act cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-5 space-y-3 text-xs">
+              <div className="rounded-xl bg-page border border-bdr p-3 space-y-1">
+                <div className="text-sm font-extrabold text-tx">{pendingDropMove.worker.hoVaTen}</div>
+                <div className="text-mu">
+                  {pendingDropMove.fromBed
+                    ? `Từ: ${pendingDropMove.fromBed.day} · ${formatRoomDisplay(pendingDropMove.fromBed.phong_so)} · G${pendingDropMove.fromBed.giuong}`
+                    : 'Từ: Danh sách chưa xếp giường'}
+                </div>
+                <div className="text-ok font-bold">
+                  Đến: {pendingDropMove.targetBed.day} · {formatRoomDisplay(pendingDropMove.targetBed.phong_so)} · G{pendingDropMove.targetBed.giuong}
+                </div>
+              </div>
+              {pendingDropMove.targetReservation && (
+                <div className="rounded-xl tint-wn border border-wn/40 p-3 text-wn font-semibold">
+                  Lưu ý: Giường này đang được giữ chỗ cho đoàn &ldquo;{pendingDropMove.targetReservation.group_name}&rdquo; (dự kiến {pendingDropMove.targetReservation.expected_date}). Nếu xác nhận xếp vào, suất giữ chỗ sẽ tự động hoàn tất.
+                </div>
+              )}
+            </div>
+            <div className="px-5 py-3 border-t border-bdr bg-side flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingDropMove(null)}
+                className="px-3.5 py-2 rounded-xl bg-act border border-bdr text-xs font-semibold text-mu hover:text-tx cursor-pointer"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={handleConfirmDropMove}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-pri text-white text-xs font-bold cursor-pointer disabled:opacity-50"
+              >
+                {busy ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                <span>Xác nhận chuyển</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

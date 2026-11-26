@@ -43,12 +43,21 @@ export const AUDIT_ACTION_META: Record<AuditAction, AuditActionMeta> = {
   MAINTENANCE_TICKET_UPDATE: { action: 'MAINTENANCE_TICKET_UPDATE', labelVi: 'Tiếp nhận / cập nhật phiếu bảo trì', shortVi: 'Cập nhật BT', category: 'facility', severity: 'normal' },
   MAINTENANCE_TICKET_RESOLVE: { action: 'MAINTENANCE_TICKET_RESOLVE', labelVi: 'Hoàn thành sửa chữa', shortVi: 'Hoàn thành BT', category: 'facility', severity: 'normal' },
   MAINTENANCE_TICKET_DELETE: { action: 'MAINTENANCE_TICKET_DELETE', labelVi: 'Xóa bản ghi phiếu bảo trì', shortVi: 'Xóa phiếu BT', category: 'facility', severity: 'warning' },
+  SYSTEM_BACKUP: { action: 'SYSTEM_BACKUP', labelVi: 'Sao lưu toàn hệ thống', shortVi: 'Sao lưu HT', category: 'account', severity: 'warning' },
+  DISCIPLINE_CREATE: { action: 'DISCIPLINE_CREATE', labelVi: 'Lập biên bản vi phạm KTX', shortVi: 'Biên bản VP', category: 'sensitive', severity: 'warning' },
+  BLACKLIST_ADD: { action: 'BLACKLIST_ADD', labelVi: 'Đưa vào Danh sách Đen', shortVi: 'Blacklist', category: 'sensitive', severity: 'critical' },
+  BLACKLIST_REVOKE: { action: 'BLACKLIST_REVOKE', labelVi: 'Gỡ khỏi Danh sách Đen', shortVi: 'Gỡ Blacklist', category: 'sensitive', severity: 'warning' },
+  ROOM_CONSOLIDATION: { action: 'ROOM_CONSOLIDATION', labelVi: 'Thực thi Dồn phòng thông minh', shortVi: 'Dồn phòng', category: 'bed', severity: 'warning' },
+  BATCH_CHECKOUT: { action: 'BATCH_CHECKOUT', labelVi: 'Check-out hàng loạt / Đối soát', shortVi: 'Check-out loạt', category: 'sensitive', severity: 'critical' },
+  SWAP_BEDS: { action: 'SWAP_BEDS', labelVi: 'Hoán đổi giường 2 công nhân', shortVi: 'Hoán đổi giường', category: 'bed', severity: 'warning' },
+  RESERVE_BED: { action: 'RESERVE_BED', labelVi: 'Đặt giữ chỗ giường cho đoàn', shortVi: 'Giữ chỗ giường', category: 'bed', severity: 'normal' },
+  CANCEL_RESERVE_BED: { action: 'CANCEL_RESERVE_BED', labelVi: 'Hủy giữ chỗ giường', shortVi: 'Hủy giữ chỗ', category: 'bed', severity: 'normal' },
 };
 
 export const CATEGORY_ACTIONS: Record<Exclude<AuditCategory, 'all' | 'anomaly'>, AuditAction[]> = {
-  sensitive: ['DELETE', 'Xóa', 'CHECKOUT_REQUEST', 'CHECKOUT_APPROVED', 'WORKER_HARD_DELETE'],
+  sensitive: ['DELETE', 'Xóa', 'CHECKOUT_REQUEST', 'CHECKOUT_APPROVED', 'BATCH_CHECKOUT', 'WORKER_HARD_DELETE', 'DISCIPLINE_CREATE', 'BLACKLIST_ADD', 'BLACKLIST_REVOKE'],
   qr: ['APPROVE_REGISTRATION', 'BED_INSPECT_CONFIRM', 'ATTENDANCE_SESSION', 'ATTENDANCE_UPDATE', 'CREATE', 'Thêm', 'IMPORT', 'Import'],
-  bed: ['BED_REASSIGN', 'Chuyển phòng', 'UPDATE', 'Sửa', 'Đổi trạng thái tạm trú'],
+  bed: ['BED_REASSIGN', 'SWAP_BEDS', 'RESERVE_BED', 'CANCEL_RESERVE_BED', 'Chuyển phòng', 'UPDATE', 'Sửa', 'Đổi trạng thái tạm trú', 'ROOM_CONSOLIDATION'],
   facility: [
     'FACILITY_CREATE',
     'FACILITY_UPDATE',
@@ -58,7 +67,7 @@ export const CATEGORY_ACTIONS: Record<Exclude<AuditCategory, 'all' | 'anomaly'>,
     'MAINTENANCE_TICKET_RESOLVE',
     'MAINTENANCE_TICKET_DELETE',
   ],
-  account: ['USER_PASSWORD_RESET', 'AUDIT_ARCHIVE_PURGE'],
+  account: ['USER_PASSWORD_RESET', 'AUDIT_ARCHIVE_PURGE', 'SYSTEM_BACKUP'],
 };
 
 export function getActionMeta(action: string): AuditActionMeta {

@@ -3,8 +3,8 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  LayoutDashboard, Users, ChevronLeft, ChevronRight, LogOut, BarChart2,
-  ClipboardList, UserCog, RefreshCw, Building2, QrCode, Menu, X, BedDouble, ShieldCheck, Search, Box, Wrench
+  LayoutDashboard, Users, Users2, ChevronLeft, ChevronRight, LogOut, BarChart2,
+  ClipboardList, UserCog, RefreshCw, Building2, QrCode, Menu, X, BedDouble, ShieldCheck, ShieldAlert, Search, Box, Wrench
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useWorkers } from '@/context/WorkerContext';
@@ -29,10 +29,12 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'nav-dashboard', label: 'Tổng Quan', href: '/', icon: LayoutDashboard, group: 'main' },
   { id: 'nav-report', label: 'Báo Cáo Biến Động', href: '/report-dashboard', icon: BarChart2, group: 'main' },
   { id: 'nav-workers', label: 'Quản Lý Công Nhân', href: '/worker-management', icon: Users, dynamicBadge: true, group: 'main' },
+  { id: 'nav-teams', label: 'Quản Lý Tổ Đội', href: '/teams', icon: Users2, group: 'main' },
   { id: 'nav-facilities', label: 'Cơ Sở Vật Chất', href: '/facilities', icon: Building2, group: 'main' },
   { id: 'nav-beds', label: 'Quản Lý Giường', href: '/bed-management', icon: BedDouble, group: 'main' },
   { id: 'nav-ktx-3d', label: 'Bản Đồ 3D KTX', href: '/ktx-3d', icon: Box, group: 'main' },
   { id: 'nav-maintenance', label: 'Kỹ Thuật & Bảo Trì', href: '/maintenance', icon: Wrench, group: 'main' },
+  { id: 'nav-security', label: 'An Ninh & Kỷ Luật', href: '/security', icon: ShieldAlert, group: 'main' },
   { id: 'nav-qr', label: 'QR Portal', href: '/qr-portal', icon: QrCode, group: 'main' },
   { id: 'nav-user-mgmt', label: 'Quản Lý Tài Khoản', href: '/user-management', icon: UserCog, adminOnly: true, group: 'admin' },
   { id: 'nav-audit', label: 'Nhật Ký Hệ Thống', href: '/audit-log', icon: ClipboardList, adminOnly: true, group: 'admin' },
@@ -437,16 +439,22 @@ export default function Sidebar() {
         {/* User Card + Collapse Toggle */}
         <div className="border-t border-bdr p-3 bg-surf/60">
           {!collapsed && (
-            <div className="w-full p-2.5 rounded-xl bg-act border border-bdr2 flex items-center gap-3 mb-2 shadow-sm" style={{ boxShadow: 'inset 0 1px 0 var(--specular)' }}>
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-sm ${avatarColor}`}>
-                {avatarInitial}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-tx truncate">{displayName}</p>
-                <p className="text-[11px] text-mu truncate">{roleLabel}</p>
-              </div>
+            <div className="w-full p-2 rounded-xl bg-act border border-bdr2 flex items-center gap-2 mb-2 shadow-sm hover:border-pri2/40 transition-colors" style={{ boxShadow: 'inset 0 1px 0 var(--specular)' }}>
+              <Link
+                href="/profile"
+                title="Mở hồ sơ cá nhân & cài đặt phiên"
+                className="flex items-center gap-2.5 flex-1 min-w-0 p-0.5 rounded-lg hover:opacity-90 transition-opacity"
+              >
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-sm ${avatarColor}`}>
+                  {avatarInitial}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold text-tx truncate">{displayName}</p>
+                  <p className="text-[11px] text-mu truncate">{roleLabel}</p>
+                </div>
+              </Link>
               <button
-                className="p-1.5 rounded-lg text-mu hover:text-dgr hover:bg-surf transition-all duration-100 hover:scale-105 active:scale-95"
+                className="p-1.5 rounded-lg text-mu hover:text-dgr hover:bg-surf transition-all duration-100 hover:scale-105 active:scale-95 shrink-0"
                 title="Đăng xuất"
                 onClick={handleLogout}
               >
@@ -457,9 +465,13 @@ export default function Sidebar() {
 
           {collapsed && (
             <div className="flex flex-col items-center py-1 gap-1.5 mb-1.5">
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shadow-sm ${avatarColor}`}>
+              <Link
+                href="/profile"
+                title={`${displayName} — Hồ sơ cá nhân`}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shadow-sm hover:scale-105 transition-transform ${avatarColor}`}
+              >
                 {avatarInitial}
-              </div>
+              </Link>
               <button
                 onClick={handleLogout}
                 className="p-1.5 rounded-lg text-mu hover:text-dgr hover:bg-surf transition-colors duration-100"
@@ -480,51 +492,55 @@ export default function Sidebar() {
       </aside>
 
       {/* ── Mobile Top Bar ── */}
-      <header className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-side border-b border-bdr flex items-center justify-between px-3.5 h-14 shadow-md w-full max-w-full">
-        <div className="flex items-center gap-2.5">
+      <header className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-side border-b border-bdr flex items-center justify-between gap-2 px-3 h-14 shadow-md w-full max-w-full">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
           <button
             onClick={() => setMobileOpen(true)}
-            className="p-2 -ml-1 rounded-xl text-nav hover:text-tx hover:bg-act transition-colors duration-100 focus:outline-none"
+            className="p-1.5 -ml-1 rounded-xl text-nav hover:text-tx hover:bg-act transition-colors duration-100 focus:outline-none shrink-0"
             aria-label="Mở menu điều hướng"
             title="Mở menu"
           >
-            <Menu size={22} className="text-tx" />
+            <Menu size={21} className="text-tx" />
           </button>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <CraftIconBadge icon={Building2} tone="blue" size="xs" interactive={false} />
-            <div>
-              <span className="font-extrabold text-xs sm:text-sm text-tx tracking-tight block leading-tight">KÝ TÚC XÁ</span>
-              <span className="text-[10px] text-lnk font-semibold tracking-wider">PHƯỚC VĨNH TÂY</span>
+            <div className="min-w-0">
+              <span className="font-extrabold text-xs text-tx tracking-tight block leading-tight truncate whitespace-nowrap">KÝ TÚC XÁ</span>
+              <span className="text-[10px] text-lnk font-semibold tracking-wide block leading-tight truncate whitespace-nowrap">PHƯỚC VĨNH TÂY</span>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5 shrink-0">
           <NotificationCenter compact />
           <PWAInstallButton compact />
           <button
             type="button"
             onClick={openCommandPalette}
-            className="p-2 rounded-xl text-nav hover:text-tx hover:bg-act transition-colors duration-100"
+            className="p-1.5 rounded-xl text-nav hover:text-tx hover:bg-act transition-colors duration-100"
             title="Tìm nhanh (Ctrl + K)"
             aria-label="Tìm nhanh"
           >
-            <Search size={17} />
+            <Search size={16} />
           </button>
           <ThemeSwitcher compact />
           {!isTechnician && (
             <button
               onClick={refreshWorkers}
               disabled={refreshing}
-              className="p-2 rounded-xl text-nav hover:text-tx hover:bg-act transition-colors duration-100 disabled:opacity-50"
+              className="p-1.5 rounded-xl text-nav hover:text-tx hover:bg-act transition-colors duration-100 disabled:opacity-50"
               title="Tải lại dữ liệu"
             >
-              <RefreshCw size={17} className={refreshing ? 'animate-spin text-pri2' : ''} />
+              <RefreshCw size={16} className={refreshing ? 'animate-spin text-pri2' : ''} />
             </button>
           )}
-          <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shadow-sm ${avatarColor}`}>
+          <Link
+            href="/profile"
+            title="Hồ sơ cá nhân"
+            className={`w-7 h-7 ml-0.5 rounded-lg flex items-center justify-center text-white text-xs font-bold shadow-sm active:scale-95 transition-transform shrink-0 ${avatarColor}`}
+          >
             {avatarInitial}
-          </div>
+          </Link>
         </div>
       </header>
 
@@ -611,15 +627,19 @@ export default function Sidebar() {
               </div>
 
               <div className="p-3 border-t border-bdr bg-surf/60">
-                <div className="px-3 py-2.5 flex items-center gap-3 bg-act border border-bdr2 rounded-xl mb-2">
+                <Link
+                  href="/profile"
+                  onClick={() => setMobileOpen(false)}
+                  className="px-3 py-2.5 flex items-center gap-3 bg-act border border-bdr2 hover:border-pri2/40 rounded-xl mb-2 transition-colors"
+                >
                   <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0 ${avatarColor}`}>
                     {avatarInitial}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-tx truncate">{displayName}</p>
-                    <p className="text-xs text-mu truncate">{roleLabel}</p>
+                    <p className="text-xs text-mu truncate">{roleLabel} · Xem hồ sơ</p>
                   </div>
-                </div>
+                </Link>
                 <button
                   onClick={handleLogout}
                   className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-dgr bg-dgrbg hover:opacity-90 border border-dgr/25 transition-colors duration-100 text-sm font-bold"

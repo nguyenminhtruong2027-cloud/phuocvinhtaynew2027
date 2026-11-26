@@ -92,6 +92,33 @@ export function getRoomUnitMatchCount(
   return room.unitCounts[unitFilter.value] || 0;
 }
 
+export const CONTRACTOR_PALETTE: Array<{ hex: number; css: string; emissive: number }> = [
+  { hex: 0x3b82f6, css: '#3b82f6', emissive: 0x1d4ed8 }, // Blue
+  { hex: 0x10b981, css: '#10b981', emissive: 0x047857 }, // Emerald
+  { hex: 0xf59e0b, css: '#f59e0b', emissive: 0xb45309 }, // Amber
+  { hex: 0x8b5cf6, css: '#8b5cf6', emissive: 0x6d28d9 }, // Violet
+  { hex: 0x06b6d4, css: '#06b6d4', emissive: 0x0e7490 }, // Cyan
+  { hex: 0xec4899, css: '#ec4899', emissive: 0xbe185d }, // Pink
+  { hex: 0xf97316, css: '#f97316', emissive: 0xc2410c }, // Orange
+  { hex: 0x84cc16, css: '#84cc16', emissive: 0x4d7c0f }, // Lime
+];
+
+export function getContractorColorSpec(contractorName: string): {
+  hex: number;
+  css: string;
+  emissive: number;
+} {
+  const key = (contractorName || '').trim().toLowerCase();
+  if (!key) {
+    return { hex: 0x64748b, css: '#64748b', emissive: 0x000000 };
+  }
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  }
+  return CONTRACTOR_PALETTE[hash % CONTRACTOR_PALETTE.length];
+}
+
 export function resolveRoomColor(
   room: CampusRoomNode,
   mode: CampusColorMode,
@@ -119,16 +146,19 @@ export function resolveRoomColor(
     return { color: ghostColor, emissive: 0x000000, emissiveIntensity: 0, opacity: ghostOpacity };
   }
 
-  // Dedicated Maintenance / Facility Issue Heatmap Mode (checks both accommodation & functional rooms!)
+  // Dedicated Maintenance / SLA Heatmap Mode (highlights overdue SLA & urgent tickets in crimson)
   if (mode === 'maintenance') {
     const hasMaintBed = room.maintenanceBedCount > 0;
     const hasFacIssue = room.hasFacilityIssue;
-    if (hasMaintBed || hasFacIssue) {
-      const isSevere = (hasMaintBed && hasFacIssue) || room.maintenanceBedCount >= 2;
+    const hasOverdueOrUrgent =
+      (room.overdueSlaTicketCount || 0) > 0 || (room.urgentTicketCount || 0) > 0;
+    if (hasMaintBed || hasFacIssue || hasOverdueOrUrgent) {
+      const isSevere =
+        hasOverdueOrUrgent || (hasMaintBed && hasFacIssue) || room.maintenanceBedCount >= 2;
       return {
-        color: isSevere ? PALETTE.overloaded : 0xf97316,
-        emissive: isSevere ? 0xe11d48 : 0xea580c,
-        emissiveIntensity: isSevere ? 0.5 : 0.36,
+        color: isSevere ? 0xef4444 : 0xf97316,
+        emissive: isSevere ? 0xdc2626 : 0xea580c,
+        emissiveIntensity: isSevere ? 0.58 : 0.36,
         opacity: 1,
       };
     }
@@ -137,6 +167,29 @@ export function resolveRoomColor(
       emissive: 0x000000,
       emissiveIntensity: 0,
       opacity: theme === 'light' ? 0.3 : 0.24,
+    };
+  }
+
+  // Contractor / Unit Distribution Overlay Mode
+  if (mode === 'contractor') {
+    if (room.roomType === 'functional') {
+      return {
+        color: PALETTE.functional,
+        emissive: 0x6d28d9,
+        emissiveIntensity: 0.14,
+        opacity: 0.65,
+      };
+    }
+    if (isEmpty) {
+      return { color: ghostColor, emissive: 0x000000, emissiveIntensity: 0, opacity: 0.42 };
+    }
+    const label = room.dominantContractor || room.dominantUnit;
+    const cSpec = getContractorColorSpec(label);
+    return {
+      color: cSpec.hex,
+      emissive: cSpec.emissive,
+      emissiveIntensity: 0.22,
+      opacity: 1,
     };
   }
 

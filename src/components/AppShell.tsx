@@ -79,7 +79,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen bg-architectural" suppressHydrationWarning>
       <Sidebar />
       <div className="flex-1 min-w-0 flex flex-col">
-        <main className="flex-1 min-w-0 overflow-x-hidden pt-14 lg:pt-0" suppressHydrationWarning>
+        <main
+          className="flex-1 min-w-0 overflow-x-hidden pt-14 lg:pt-0"
+          suppressHydrationWarning
+        >
           <PageReveal routeKey={pathname || '/'}>{children}</PageReveal>
         </main>
       </div>
