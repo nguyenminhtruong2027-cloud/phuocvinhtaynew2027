@@ -714,268 +714,208 @@ export default function ExecutiveSpecialistsCard({
         </div>
       )}
 
-      {/* ── Main Executive Card on Dashboard (Widget Thu Gọn Bên Ngoài) ── */}
-      <div className="rounded-2xl surface-elevated p-3.5 sm:p-5 flex flex-col justify-between group w-full">
-        <div>
-          {/* Card Header */}
-          <div className="flex items-start justify-between gap-3 mb-3">
-            <div className="space-y-1 min-w-0 flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-mu group-hover:text-lnk transition-colors block">
-                  Danh Sách Các Chuyên Viên
-                </span>
-                <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-bdg text-lnk border border-bdr2 font-semibold">
-                  <Radio size={10} className="text-ok" />
-                  Realtime
-                </span>
-                {isTableMissing && isAdmin && (
-                  <button
-                    onClick={() => setShowSqlModal(true)}
-                    className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.2 rounded tint-wn text-wn border border-wn font-semibold hover:opacity-90 cursor-pointer"
-                    title="Bảng duty_assignments chưa khởi tạo trên Supabase. Bấm để lấy câu lệnh SQL."
-                  >
-                    <Database size={10} />
-                    <span>Cần chạy SQL</span>
-                  </button>
-                )}
+      {/* ── Main Executive Card on Dashboard (Full-Width Horizontal Grid) ── */}
+      <div className="rounded-2xl surface-elevated p-4 sm:p-5 w-full space-y-4">
+        {/* Top Header Row: Title + Inline Summary + Actions */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <div className="w-8 h-8 rounded-lg bg-bdg border border-bdr2 text-lnk flex items-center justify-center shrink-0">
+                <UserCheck size={16} />
               </div>
-
-              <div className="flex items-baseline gap-2 sm:gap-2.5 flex-wrap">
-                <p className="text-2xl sm:text-4xl font-extrabold font-tabular tracking-tight text-tx">
-                  {mergedSpecialists.length}
-                </p>
-                <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-okbg text-ok border border-bdr2 shadow-sm">
-                    <CheckCircle2 size={12} className="text-ok2 shrink-0" />
-                    {onDutyList.length} trực ban hôm nay
-                  </span>
-                  {offDutyList.length > 0 && (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-act text-mu border border-bdr2/40">
-                      {offDutyList.length} nghỉ ca
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Sub-breakdown per KTX Area (KTX 1, KTX 2, KTX 3...) */}
-              <div className="flex items-center gap-2 text-xs text-mu flex-wrap pt-0.5">
-                <span className="font-medium text-mu">Phân công ({todayDate}):</span>
-                {availableKtxOptions.map(ktx => {
-                  const cnt = countsPerKtx[ktx] || 0;
-                  const theme = getKtxTheme(ktx);
-                  return (
-                    <button
-                      key={ktx}
-                      onClick={() => setCardKtxFilter(ktx)}
-                      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
-                        cardKtxFilter === ktx
-                          ? theme.activeTab
-                          : cnt > 0
-                          ? `${theme.badgeBg} hover:opacity-90`
-                          : 'bg-surf text-mu border-bdr hover:text-tx'
-                      }`}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full ${cnt > 0 ? theme.dotColor : 'bg-ic'}`} />
-                      <span>{ktx}: {cnt} trực</span>
-                    </button>
-                  );
-                })}
-              </div>
+              <h2 className="text-sm sm:text-base font-bold text-tx tracking-tight">
+                Phân Công Trực Ban &amp; Chuyên Viên
+              </h2>
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ok">
+                <Radio size={11} className="shrink-0" />
+                Realtime
+              </span>
+              {isTableMissing && isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setShowSqlModal(true)}
+                  className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md tint-wn text-wn border border-wn font-semibold hover:opacity-90 cursor-pointer"
+                  title="Bảng duty_assignments chưa khởi tạo trên Supabase. Bấm để lấy câu lệnh SQL."
+                >
+                  <Database size={11} />
+                  <span>Cần chạy SQL</span>
+                </button>
+              )}
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                onClick={() => loadDutyAssignments(true)}
-                disabled={syncing}
-                title="Đồng bộ dữ liệu Supabase mới nhất"
-                className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center border bg-act text-mu border-bdr2 hover:bg-act hover:text-tx transition-all cursor-pointer shadow-sm"
-              >
-                <RefreshCw size={15} className={syncing ? 'animate-spin text-lnk' : ''} />
-              </button>
-
-              <button
-                onClick={() => setShowModal(true)}
-                title="Mở bảng phân công trực ban theo ngày"
-                className="cursor-pointer focus:outline-none"
-              >
-                <CraftIconBadge icon={UserCheck} badgeIcon={Sparkles} tone="blue" size="lg" />
-              </button>
+            <div className="flex items-center gap-2 text-xs text-mu font-tabular flex-wrap">
+              <span className="font-semibold text-tx">{mergedSpecialists.length} nhân sự</span>
+              <span aria-hidden="true">·</span>
+              <span className={onDutyList.length > 0 ? 'font-semibold text-ok' : 'text-mu'}>
+                {onDutyList.length} trực ban hôm nay
+              </span>
+              <span aria-hidden="true">·</span>
+              <span>{offDutyList.length} nghỉ ca</span>
+              <span aria-hidden="true">·</span>
+              <span>Ngày {todayDate}</span>
             </div>
           </div>
 
-          {/* ── 1. KTX FILTER TABS INSIDE OUTSIDE CARD ── */}
-          <div className="bg-act p-1.5 rounded-xl border border-bdr/80 mt-2">
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
+          {/* Right Controls: Wrapped Filter Segmented Control + Quick Buttons */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1 flex-wrap p-1 rounded-xl bg-act border border-bdr">
               <button
+                type="button"
                 onClick={() => setCardKtxFilter('all')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                   cardKtxFilter === 'all'
-                    ? 'bg-pri text-white shadow-sm font-extrabold'
-                    : 'bg-surf text-mu hover:text-tx border border-bdr2/60'
+                    ? 'bg-pri text-white shadow-sm'
+                    : 'text-mu hover:text-tx'
                 }`}
               >
                 Tất cả ({mergedSpecialists.length})
               </button>
 
               {availableKtxOptions.map(ktx => {
-                const theme = getKtxTheme(ktx);
                 const count = countsPerKtx[ktx] || 0;
                 const isSelected = cardKtxFilter === ktx;
                 return (
                   <button
                     key={ktx}
+                    type="button"
                     onClick={() => setCardKtxFilter(ktx)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 border ${
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                       isSelected
-                        ? theme.activeTab
-                        : 'bg-surf text-mu hover:text-tx border-bdr2/60'
+                        ? 'bg-pri text-white shadow-sm'
+                        : 'text-mu hover:text-tx'
                     }`}
                   >
-                    <span className={`w-2 h-2 rounded-full ${count > 0 ? theme.dotColor : 'bg-ic'}`} />
-                    <span>Trực {ktx} ({count})</span>
+                    Trực {ktx} ({count})
                   </button>
                 );
               })}
 
               <button
+                type="button"
                 onClick={() => setCardKtxFilter('off_duty')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 border ${
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1 ${
                   cardKtxFilter === 'off_duty'
-                    ? 'bg-act text-tx shadow-sm font-extrabold border-bdr2'
-                    : 'bg-surf text-mu hover:text-tx border-bdr2/60'
+                    ? 'bg-surf text-tx shadow-sm border border-bdr2'
+                    : 'text-mu hover:text-tx'
                 }`}
               >
                 <Coffee size={12} />
                 <span>Nghỉ ca ({offDutyList.length})</span>
               </button>
             </div>
+
+            <button
+              type="button"
+              onClick={() => loadDutyAssignments(true)}
+              disabled={syncing}
+              title="Đồng bộ dữ liệu trực ban mới nhất"
+              className="h-9 w-9 rounded-xl flex items-center justify-center border bg-surf text-mu border-bdr2 hover:bg-act hover:text-tx transition-colors cursor-pointer shrink-0"
+            >
+              <RefreshCw size={14} className={syncing ? 'animate-spin text-lnk' : ''} />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowModal(true)}
+              className="h-9 px-3.5 rounded-xl text-xs font-bold bg-surf hover:bg-act text-lnk border border-bdr2 transition-colors inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <span>Phân công chi tiết</span>
+              <ArrowRight size={13} />
+            </button>
           </div>
+        </div>
 
-          {/* Active Filter Scope Header */}
-          {cardKtxFilter !== 'all' && (
-            <div className="mt-2.5 px-3 py-1.5 rounded-lg bg-act border border-bdr2/60 flex items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-1.5">
-                <Filter size={12} className="text-lnk" />
-                <span className="text-mu">
-                  Đang lọc: <strong className="text-tx">{cardKtxFilter === 'off_duty' ? 'Nghỉ ca' : `Trực ${cardKtxFilter}`}</strong> ({cardFilteredList.length} chuyên viên)
-                </span>
-              </div>
-              <button
-                onClick={() => setCardKtxFilter('all')}
-                className="text-[11px] text-lnk hover:underline cursor-pointer font-semibold"
-              >
-                Xem tất cả
-              </button>
+        {/* Specialists Responsive Horizontal Grid (2 cols tablet/laptop, 3 cols desktop) */}
+        <div className="pt-3 border-t border-bdr/70">
+          {cardFilteredList.length === 0 ? (
+            <div className="py-6 px-4 text-center text-xs text-mu bg-act/40 rounded-xl border border-bdr">
+              <p className="font-semibold text-mu">
+                {cardKtxFilter === 'all'
+                  ? 'Chưa có tài khoản chuyên viên trong hệ thống.'
+                  : cardKtxFilter === 'off_duty'
+                  ? 'Tất cả chuyên viên đều đang có ca trực hôm nay.'
+                  : `Chưa có chuyên viên nào được phân công trực tại ${cardKtxFilter} hôm nay.`}
+              </p>
+              {isAdmin && cardKtxFilter !== 'all' && cardKtxFilter !== 'off_duty' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowModal(true);
+                    setActiveFilter(cardKtxFilter);
+                  }}
+                  className="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-pri text-white text-xs font-semibold hover:opacity-90 transition-opacity cursor-pointer"
+                >
+                  <span>Phân công trực {cardKtxFilter} ngay</span>
+                </button>
+              )}
             </div>
-          )}
-
-          {/* ── 2. SPECIALISTS LIST IN OUTSIDE CARD WITH PROMINENT KTX BADGES ── */}
-          <div className="space-y-2 sm:space-y-2.5 mt-2.5 pt-2.5 border-t border-bdr2/60">
-            {cardFilteredList.length === 0 ? (
-              <div className="py-6 text-center text-xs text-mu bg-act rounded-xl border border-bdr">
-                <Users size={20} className="mx-auto mb-1.5 text-ic" />
-                <p className="font-semibold text-mu">
-                  {cardKtxFilter === 'all'
-                    ? 'Chưa có tài khoản chuyên viên trong hệ thống.'
-                    : cardKtxFilter === 'off_duty'
-                    ? 'Tất cả chuyên viên đều đang có ca trực hôm nay.'
-                    : `Chưa có chuyên viên nào được phân công trực tại ${cardKtxFilter} hôm nay.`}
-                </p>
-                {isAdmin && cardKtxFilter !== 'all' && cardKtxFilter !== 'off_duty' && (
-                  <button
-                    onClick={() => {
-                      setShowModal(true);
-                      setActiveFilter(cardKtxFilter);
-                    }}
-                    className="mt-2 inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-pri/25 text-lnk border border-bdr2 text-xs font-bold hover:bg-pri/40 transition-colors cursor-pointer"
-                  >
-                    <span>Phân công trực {cardKtxFilter} ngay</span>
-                  </button>
-                )}
-              </div>
-            ) : (
-              cardFilteredList.slice(0, 6).map((sp) => {
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {cardFilteredList.slice(0, 9).map((sp) => {
                 const isSuperAdminUser = sp.role === 'super_admin';
                 const isAdminUser = sp.role === 'super_admin' || sp.role === 'admin';
                 const isOnDuty = sp.status === 'on_duty' && sp.dutyKtx !== 'Nghỉ';
                 const theme = isOnDuty ? getKtxTheme(sp.dutyKtx) : null;
+                const roleLabel = isSuperAdminUser ? 'Chủ HT' : isAdminUser ? 'Admin' : 'Chuyên viên';
 
                 return (
                   <div
                     key={sp.id}
-                    className={`flex flex-col sm:flex-row sm:items-center justify-between rounded-xl p-2.5 sm:p-3 border transition-all duration-150 gap-2 sm:gap-3 w-full ${
+                    className={`rounded-xl p-3.5 border transition-colors flex flex-col justify-between gap-3 ${
                       isOnDuty
-                        ? `bg-surf border-bdr2/80 ${theme?.borderGlow || 'hover:border-pri2'} shadow-sm`
-                        : 'bg-surf/50 border-bdr hover:border-bdr2'
+                        ? `bg-surf border-bdr2 ${theme?.borderGlow || 'hover:border-pri2'}`
+                        : 'bg-act/35 border-bdr hover:border-bdr2'
                     }`}
                   >
-                    {/* Left: Avatar, Name & High-Visibility Duty Label */}
-                    <div className="flex items-start gap-2.5 min-w-0 flex-1">
-                      <div className="relative flex-shrink-0 mt-0.5 sm:mt-0">
-                        <div className={`w-8 h-8 rounded-lg border text-xs font-bold flex items-center justify-center ${
+                    {/* Top: Avatar + Identity */}
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div
+                        className={`w-9 h-9 rounded-lg border text-xs font-bold flex items-center justify-center shrink-0 ${
                           isSuperAdminUser
                             ? 'tint-wn border-wn text-wn'
-                            : isAdminUser
-                            ? 'bg-pri/25 border-bdr2 text-lnk'
                             : isOnDuty
                             ? `${theme?.badgeBg}`
-                            : 'bg-pri/25 border-bdr2 text-lnk'
-                        }`}>
-                          {sp.name.charAt(0).toUpperCase()}
-                        </div>
-                        <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-bdr ${
-                          isOnDuty ? `${theme?.dotColor || 'bg-ok2'} animate-pulse` : 'bg-ic'
-                        }`} />
+                            : 'bg-bdg border-bdr2 text-lnk'
+                        }`}
+                      >
+                        {sp.name.charAt(0).toUpperCase()}
                       </div>
 
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-xs sm:text-sm font-bold text-tx whitespace-normal break-words leading-tight">
-                            {sp.name}
-                          </span>
-                          {isSuperAdminUser ? (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded tint-wn text-wn border border-wn font-bold shrink-0">
-                              Chủ HT
-                            </span>
-                          ) : isAdminUser ? (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-bdg text-lnk border border-bdr2 font-semibold shrink-0">
-                              Admin
-                            </span>
-                          ) : (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-bdg text-lnk border border-bdr2 font-semibold shrink-0">
-                              Chuyên viên
-                            </span>
-                          )}
-
-                          {/* PROMINENT KTX BADGE IN WIDGET */}
-                          {isOnDuty ? (
-                            <span className={`inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full font-extrabold border ${theme?.badgeBg}`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${theme?.dotColor} animate-pulse`} />
-                              <span>ĐANG TRỰC {sp.dutyKtx.toUpperCase()}</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md text-mu bg-act border border-bdr2 font-medium">
-                              <Coffee size={10} />
-                              <span>Nghỉ ca</span>
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[10px] sm:text-[11px] text-mu whitespace-normal break-words font-tabular mt-0.5">
-                          {sp.email || sp.phone || 'Nhân sự vận hành KTX'}
+                        <p className="text-sm font-bold text-tx leading-snug line-clamp-2" title={sp.name}>
+                          {sp.name}
                         </p>
+                        <div className="mt-0.5 flex items-center gap-1.5 text-xs text-mu min-w-0">
+                          <span className={`font-semibold shrink-0 ${isSuperAdminUser ? 'text-wn' : 'text-lnk'}`}>
+                            {roleLabel}
+                          </span>
+                          <span aria-hidden="true" className="shrink-0">·</span>
+                          <span className="truncate font-tabular" title={sp.email || sp.phone || ''}>
+                            {sp.email || sp.phone || 'Nhân sự KTX'}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Right: Dynamic KTX Duty Selector (Admin) / Readonly Badge (Non-Admin) */}
-                    <div className="flex items-center justify-between sm:justify-end gap-1.5 pt-1.5 sm:pt-0 border-t sm:border-t-0 border-bdr/60 flex-shrink-0">
+                    {/* Bottom: Duty Status + Inline Selector */}
+                    <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-bdr/60">
+                      <span
+                        className={`text-xs font-semibold truncate ${
+                          isOnDuty ? (theme?.accentColor || 'text-ok') : 'text-mu'
+                        }`}
+                      >
+                        {isOnDuty ? `Đang trực ${sp.dutyKtx}` : 'Nghỉ ca hôm nay'}
+                      </span>
+
                       {isAdmin ? (
                         <select
+                          aria-label={`Phân công trực cho ${sp.name}`}
                           value={isOnDuty ? sp.dutyKtx : 'Nghỉ'}
                           onChange={(e) => updateDuty(sp.id, e.target.value, sp.name)}
-                          className={`text-xs font-bold py-1 px-2.5 rounded-lg border cursor-pointer focus:outline-none focus:ring-1 focus:ring-pri2 ${
+                          className={`text-xs font-semibold py-1.5 px-2.5 rounded-lg border cursor-pointer focus:outline-none focus:ring-2 focus:ring-pri2/50 shrink-0 max-w-[175px] ${
                             isOnDuty
                               ? `${theme?.badgeBg || 'bg-bdg text-lnk border-bdr2'}`
-                              : 'bg-act text-mu border-bdr2 hover:bg-act'
+                              : 'bg-surf text-tx border-bdr2 hover:border-pri2/50'
                           }`}
                         >
                           {availableKtxOptions.map(ktx => (
@@ -988,38 +928,31 @@ export default function ExecutiveSpecialistsCard({
                           </option>
                         </select>
                       ) : (
-                        <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold border ${
-                          isOnDuty
-                            ? `${theme?.badgeBg}`
-                            : 'bg-act text-mu border-bdr2'
-                        }`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${isOnDuty ? theme?.dotColor : 'bg-ic'}`} />
-                          <span>{isOnDuty ? `Trực ${sp.dutyKtx}` : 'Nghỉ ca'}</span>
+                        <span className="text-xs font-semibold text-mu shrink-0">
+                          {isOnDuty ? `Trực ${sp.dutyKtx}` : 'Nghỉ ca'}
                         </span>
                       )}
                     </div>
                   </div>
                 );
-              })
-            )}
-          </div>
+              })}
+            </div>
+          )}
         </div>
 
-        {/* Card Action Footer */}
-        <div className="mt-3.5 pt-3 border-t border-bdr2/60 flex items-center justify-between gap-2">
+        {/* Footer Row */}
+        <div className="pt-2.5 border-t border-bdr/60 flex items-center justify-between gap-2 text-xs">
+          <span className="text-mu">
+            {cardFilteredList.length > 9
+              ? `Đang hiển thị 9/${cardFilteredList.length} chuyên viên — bấm Phân công chi tiết để xem đầy đủ`
+              : 'Thay đổi ca trực được đồng bộ tự động tới toàn bộ thiết bị'}
+          </span>
           <button
-            onClick={() => setShowModal(true)}
-            className="text-xs font-bold text-lnk hover:text-lnk flex items-center gap-1.5 transition-colors group/btn cursor-pointer"
-          >
-            <span>Phân công trực ban chi tiết ({mergedSpecialists.length})</span>
-            <ArrowRight size={13} className="group-hover/btn:translate-x-1 transition-transform shrink-0" />
-          </button>
-
-          <button
+            type="button"
             onClick={() => router.push('/user-management')}
-            className="text-[11px] font-semibold text-mu hover:text-tx flex items-center gap-1 transition-colors shrink-0 cursor-pointer"
+            className="font-semibold text-lnk hover:underline shrink-0 cursor-pointer"
           >
-            <span>Quản lý tài khoản</span>
+            Quản lý tài khoản
           </button>
         </div>
       </div>

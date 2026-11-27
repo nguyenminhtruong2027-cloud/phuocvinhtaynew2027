@@ -7,7 +7,7 @@ import { useAudit } from '@/context/AuditContext';
 import { useWorkers } from '@/context/WorkerContext';
 import { getUniqueKTX, getUniqueBuildings, getUniqueRooms, countUniqueBuildings, aggregateKtxOccupancy, DEFAULT_ROOM_CAPACITY, naturalSortCompare, compareKtxNames } from '@/data/workers';
 import { buildRoomCapacityMapFromFacilities, fetchFacilitiesList, FacilityItem, getRoomCapacity, RoomCapacityMap, normalizeRoomLabel, formatRoomDisplay } from '@/lib/facilityCapacity';
-import KtxOccupancyBreakdown from './components/KtxOccupancyBreakdown';
+import KtxOccupancyBreakdown, { type BuildingOccupancyItem } from './components/KtxOccupancyBreakdown';
 import {
   Users, LayoutGrid, FileSpreadsheet, Radio,
   ChevronDown, Search, X, Download, UserPlus, AlertTriangle,
@@ -271,18 +271,20 @@ function ExecutiveAlertCard({
   label,
   value,
   onClick,
+  className = '',
 }: {
   icon: React.ComponentType<{ size?: number; className?: string; strokeWidth?: number }>;
   tone?: CraftTone;
   label: string;
   value: React.ReactNode;
   onClick?: () => void;
+  className?: string;
 }) {
   return (
     <div
       className={`flex items-center gap-2.5 sm:gap-3 rounded-xl sm:rounded-2xl px-3 sm:px-3.5 py-2.5 sm:py-3 surface-elevated group w-full min-w-0 ${
         onClick ? 'cursor-pointer hover:-translate-y-0.5 active:scale-[0.98] transition-transform duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]' : ''
-      }`}
+      } ${className}`}
       onClick={onClick}
     >
       <CraftIconBadge icon={icon} tone={tone} size="sm" interactive={false} />
@@ -1643,6 +1645,42 @@ export default function OccupancyDashboardPage() {
     return list;
   }, [ktxListForGrid, heatmapIndex, capacities]);
 
+  const buildingOccupancyItems = useMemo<BuildingOccupancyItem[]>(() => {
+    const rows: BuildingOccupancyItem[] = [];
+    for (const ktx of ktxListForGrid) {
+      const bList = heatmapIndex.ktxBuildingsSortedMap.get(ktx) || [];
+      for (const b of bList) {
+        const bKey = `${ktx}||${b}`;
+        const rooms = heatmapIndex.buildingRoomsSortedMap.get(bKey) || [];
+        const bWorkers = heatmapIndex.buildingWorkersMap.get(bKey) || [];
+        let cap = 0;
+        let empty = 0;
+        let overflow = 0;
+        for (const r of rooms) {
+          const normR = normalizeRoomLabel(r);
+          const cnt = (heatmapIndex.roomWorkersMap.get(`${bKey}||${normR}`) || []).length;
+          const rCap = getRoomCapacity(capacities, ktx, b, r) || DEFAULT_ROOM_CAPACITY;
+          cap += rCap;
+          if (cnt === 0) empty++;
+          if (cnt > rCap) overflow += cnt - rCap;
+        }
+        const occupied = bWorkers.length;
+        rows.push({
+          ktx,
+          building: b,
+          rooms: rooms.length,
+          emptyRooms: empty,
+          occupied,
+          capacity: cap,
+          vacant: Math.max(0, cap - occupied),
+          overflow,
+          fillRate: cap > 0 ? occupied / cap : 0,
+        });
+      }
+    }
+    return rows;
+  }, [ktxListForGrid, heatmapIndex, capacities]);
+
   const dailyBriefingData = useMemo<DailyBriefingInput>(() => {
     const activeScopedWorkers = filteredWorkers.filter(
       w => !w.ngayRaKTX && !w.ghiChu?.includes('[Đã Check-out') && !w.ghiChu?.includes('[CHECKOUT]')
@@ -2068,75 +2106,84 @@ export default function OccupancyDashboardPage() {
             />
           )}
 
-          {/* ── 4. Specialists Duty Card & Operational Alerts ── */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 w-full">
-            <div className="lg:col-span-1">
-              <ExecutiveSpecialistsCard
-                specialists={specialists}
-                onDutyRosterChange={setDutyRoster}
-              />
-            </div>
+          {/* ── 4. Band 1: Full-Width 5 Operational Alert Cards ── */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 w-full">
+            <ExecutiveAlertCard
+              className="col-span-2 sm:col-span-1"
+              icon={XCircle}
+              tone="slate"
+              label="Phòng Trống (0 người)"
+              value={`${systemMetrics.emptyRooms} phòng`}
+              onClick={() => {
+                setRoomFilterMode('empty');
+                setDashboardTab('heatmap');
+              }}
+            />
+            <ExecutiveAlertCard
+              icon={AlertTriangle}
+              tone={overloadedRooms > 0 ? 'rose' : 'slate'}
+              label="Phòng Quá Tải"
+              value={`${overloadedRooms} phòng`}
+              onClick={() => {
+                setShowOverloadedModal(true);
+                setRoomFilterMode('overloaded');
+                setDashboardTab('heatmap');
+              }}
+            />
+            <ExecutiveAlertCard
+              icon={Wrench}
+              tone={
+                urgentTicketsCount > 0 || overdueSlaTicketsCount > 0
+                  ? 'rose'
+                  : totalMaintenanceCount > 0
+                  ? 'amber'
+                  : 'slate'
+              }
+              label="Sự cố & Bảo trì"
+              value={`${totalMaintenanceCount} mục`}
+              onClick={() => setShowMaintenanceModal(true)}
+            />
+            <ExecutiveAlertCard
+              icon={TrendingUp}
+              tone="teal"
+              label="Vào Hôm Nay"
+              value={`+${todayStats.entered} người`}
+              onClick={() => router.push('/report-dashboard?tab=bien-dong')}
+            />
+            <ExecutiveAlertCard
+              icon={TrendingDown}
+              tone="amber"
+              label="Ra Hôm Nay"
+              value={`-${todayStats.left} người`}
+              onClick={() => router.push('/report-dashboard?tab=bien-dong')}
+            />
+          </div>
 
-            <div className="lg:col-span-2 flex flex-col justify-between gap-3.5">
-              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
-                <ExecutiveAlertCard
-                  icon={XCircle}
-                  tone="slate"
-                  label="Phòng Trống (0 người)"
-                  value={`${systemMetrics.emptyRooms} phòng`}
-                  onClick={() => {
-                    setRoomFilterMode('empty');
-                    setDashboardTab('heatmap');
-                  }}
-                />
-                <ExecutiveAlertCard
-                  icon={AlertTriangle}
-                  tone={overloadedRooms > 0 ? 'rose' : 'slate'}
-                  label="Phòng Quá Tải"
-                  value={`${overloadedRooms} phòng`}
-                  onClick={() => {
-                    setShowOverloadedModal(true);
-                    setRoomFilterMode('overloaded');
-                    setDashboardTab('heatmap');
-                  }}
-                />
-                <ExecutiveAlertCard
-                  icon={Wrench}
-                  tone={
-                    urgentTicketsCount > 0 || overdueSlaTicketsCount > 0
-                      ? 'rose'
-                      : totalMaintenanceCount > 0
-                      ? 'amber'
-                      : 'slate'
-                  }
-                  label="Sự cố & Bảo trì"
-                  value={`${totalMaintenanceCount} mục`}
-                  onClick={() => setShowMaintenanceModal(true)}
-                />
-                <ExecutiveAlertCard
-                  icon={TrendingUp}
-                  tone="teal"
-                  label="Vào Hôm Nay"
-                  value={`+${todayStats.entered} người`}
-                  onClick={() => router.push('/report-dashboard?tab=bien-dong')}
-                />
-                <ExecutiveAlertCard
-                  icon={TrendingDown}
-                  tone="amber"
-                  label="Ra Hôm Nay"
-                  value={`-${todayStats.left} người`}
-                  onClick={() => router.push('/report-dashboard?tab=bien-dong')}
-                />
-              </div>
+          {/* ── 5. Band 2: Full-Width KTX & Building Occupancy Breakdown ── */}
+          <div className="rounded-2xl surface-elevated p-4 sm:p-5 w-full">
+            <KtxOccupancyBreakdown
+              items={ktxOccupancy}
+              selectedKtx={selectedKTX}
+              onSelectKtx={(ktx) => {
+                setSelectedKTX(ktx);
+                setSelectedBuilding(null);
+              }}
+              buildings={buildingOccupancyItems}
+              onSelectBuilding={(ktx, building) => {
+                setSelectedKTX(ktx);
+                setSelectedBuilding(building);
+                setRoomFilterMode('all');
+                setDashboardTab('heatmap');
+              }}
+            />
+          </div>
 
-              <div className="rounded-2xl surface-elevated p-4 sm:p-5 flex-1 flex flex-col justify-between">
-                <KtxOccupancyBreakdown
-                  items={ktxOccupancy}
-                  selectedKtx={selectedKTX}
-                  onSelectKtx={(ktx) => { setSelectedKTX(ktx); setSelectedBuilding(null); }}
-                />
-              </div>
-            </div>
+          {/* ── 6. Band 3: Full-Width Specialists Duty Roster (2–3 Col Grid) ── */}
+          <div className="w-full">
+            <ExecutiveSpecialistsCard
+              specialists={specialists}
+              onDutyRosterChange={setDutyRoster}
+            />
           </div>
 
           {/* Quick Jump Strip to Heatmap & Analytics */}
