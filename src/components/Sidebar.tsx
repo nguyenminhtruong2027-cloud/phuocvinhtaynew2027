@@ -9,6 +9,7 @@ import {
 import { useAuth } from '@/context/AuthContext';
 import { useWorkers } from '@/context/WorkerContext';
 import { createClient } from '@/lib/supabase/client';
+import { subscribeTableChanges } from '@/lib/realtimeHub';
 import ThemeSwitcher from '@/components/ui/ThemeSwitcher';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { openCommandPalette } from '@/components/ui/CommandPalette';
@@ -237,15 +238,12 @@ export default function Sidebar() {
     };
 
     void loadPending();
-    const channel = supabase
-      .channel('sidebar_pending_qr_count')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_registrations' }, scheduleLoad)
-      .subscribe();
+    const unsubscribe = subscribeTableChanges('worker_registrations', scheduleLoad);
 
     return () => {
       active = false;
       if (timer) clearTimeout(timer);
-      supabase.removeChannel(channel);
+      unsubscribe();
     };
   }, [currentUser, isAdmin, isTechnician, canWriteBlock]);
 
@@ -280,15 +278,12 @@ export default function Sidebar() {
     };
 
     void loadMaintenancePending();
-    const channel = supabase
-      .channel('sidebar_pending_maintenance_count')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'maintenance_tickets' }, scheduleLoad)
-      .subscribe();
+    const unsubscribe = subscribeTableChanges('maintenance_tickets', scheduleLoad);
 
     return () => {
       active = false;
       if (timer) clearTimeout(timer);
-      supabase.removeChannel(channel);
+      unsubscribe();
     };
   }, [currentUser, isAdmin, canAccessMaintenanceBlock]);
 

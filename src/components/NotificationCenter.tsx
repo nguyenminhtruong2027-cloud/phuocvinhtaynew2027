@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
+import { subscribeTablesChanges } from '@/lib/realtimeHub';
 import { useAuth } from '@/context/AuthContext';
 import { useWorkers } from '@/context/WorkerContext';
 import {
@@ -171,25 +172,17 @@ export default function NotificationCenter({
       }, 400);
     };
 
-    const uniqueChannelName = `notif_center_${compact ? 'm' : 'd'}_${Date.now()}_${Math.random()
-      .toString(36)
-      .slice(2, 7)}`;
+    const watchedTables = isTechnician
+      ? ['maintenance_tickets']
+      : ['maintenance_tickets', 'worker_registrations'];
 
-    const channel = supabase
-      .channel(uniqueChannelName)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'maintenance_tickets' }, schedule);
-
-    if (!isTechnician) {
-      channel.on('postgres_changes', { event: '*', schema: 'public', table: 'worker_registrations' }, schedule);
-    }
-
-    channel.subscribe();
+    const unsubscribe = subscribeTablesChanges(watchedTables, schedule);
 
     return () => {
       if (timer) clearTimeout(timer);
-      void supabase.removeChannel(channel);
+      unsubscribe();
     };
-  }, [currentUser, isTechnician, compact, supabase]);
+  }, [currentUser, isTechnician]);
 
   // Compute floating portal position so sidebar overflow never clips the popover
   const updatePopoverPosition = useCallback(() => {

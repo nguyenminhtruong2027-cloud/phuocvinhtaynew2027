@@ -2,7 +2,8 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { Worker, calcSoNgay, compareKtxNames } from '@/data/workers';
-import { X, Loader2, Save, ScanLine, CheckCircle2, Camera, AlertTriangle, AlertCircle, Check, RefreshCw, Sparkles, ShieldAlert } from 'lucide-react';
+import { X, Loader2, Save, ScanLine, CheckCircle2, Camera, AlertTriangle, AlertCircle, Check, RefreshCw, Sparkles, ShieldAlert, ImagePlus, RotateCcw } from 'lucide-react';
+import { toast } from 'sonner';
 import { useKtxStructure, compareDayNames } from '@/lib/ktxStructure';
 import { fetchRoomBedAvailability, RoomBedAvailability } from '@/lib/workerHierarchy';
 import { FacilityItem, fetchFacilitiesList, formatRoomDisplay, normalizeRoomLabel } from '@/lib/facilityCapacity';
@@ -13,6 +14,8 @@ import { createClient } from '@/lib/supabase/client';
 import { RoomAssignmentCandidate, suggestOptimalRooms } from '@/lib/smartRoomAssign';
 import { useAuth } from '@/context/AuthContext';
 import { fetchBlacklist, matchBlacklistInMemory, type BlacklistRecord } from '@/lib/disciplineService';
+import { decodeQrTextFromCanvas, decodeCCCDFromImageFile, parseVietnameseCCCDQR } from '@/lib/cccdQrDecoder';
+import { useFormDraft, formatDraftAgeVN } from '@/lib/useFormDraft';
 
 interface Props {
   worker: Worker | null;
@@ -337,7 +340,7 @@ function CCCDOCRScanner({
   );
 }
 
-/** CCCDScanner: QR scan mode — opens camera, uses BarcodeDetector to scan QR on back of CCCD */
+/** CCCDScanner: QR scan mode — works on iOS Safari, Android Chrome & Desktop using bundled jsQR + gallery photo upload */
 function CCCDQRScanner({ onScanned, onClose, onSwitchOCR }: {
   onScanned: (data: CCCDData | null) => void;
   onClose: () => void;
@@ -345,10 +348,14 @@ function CCCDQRScanner({ onScanned, onClose, onSwitchOCR }: {
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number>(0);
+  const lastDecodeAtRef = useRef<number>(0);
   const [status, setStatus] = useState<'starting' | 'scanning' | 'error'>('starting');
   const [errorMsg, setErrorMsg] = useState('');
+  const [galleryBusy, setGalleryBusy] = useState(false);
+  const [galleryError, setGalleryError] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -375,38 +382,25 @@ function CCCDQRScanner({ onScanned, onClose, onSwitchOCR }: {
       if (!active || !videoRef.current || !canvasRef.current) return;
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext('2d');
+      const now = performance.now();
+
+      // Throttle decoding to ~8 fps to keep iOS/Android smooth & battery friendly
+      if (video.readyState === video.HAVE_ENOUGH_DATA && now - lastDecodeAtRef.current >= 120) {
+        lastDecodeAtRef.current = now;
+        const maxW = 960;
+        const scale = Math.min(1, maxW / Math.max(1, video.videoWidth));
+        canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+        canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
         if (ctx) {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          if ('BarcodeDetector' in window) {
-            try {
-              // @ts-ignore
-              const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-              const codes = await detector.detect(canvas);
-              if (codes.length > 0) {
-                const raw = codes[0].rawValue as string;
-                const parsed = parseCCCDQR(raw);
-                onScanned(parsed);
-                return;
-              }
-            } catch {}
-          } else {
-            try {
-              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-              // @ts-ignore
-              if (window.__jsQR) {
-                // @ts-ignore
-                const code = window.__jsQR(imageData.data, canvas.width, canvas.height);
-                if (code) {
-                  const parsed = parseCCCDQR(code.data);
-                  onScanned(parsed);
-                  return;
-                }
-              }
-            } catch {}
+          const raw = await decodeQrTextFromCanvas(canvas, ctx);
+          if (raw) {
+            const parsed = parseVietnameseCCCDQR(raw) || parseCCCDQR(raw);
+            if (parsed) {
+              onScanned(parsed);
+              return;
+            }
           }
         }
       }
@@ -421,9 +415,27 @@ function CCCDQRScanner({ onScanned, onClose, onSwitchOCR }: {
     };
   }, [onScanned]);
 
+  const handleGalleryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setGalleryError('');
+    setGalleryBusy(true);
+    try {
+      const res = await decodeCCCDFromImageFile(file);
+      if (res.data) {
+        onScanned(res.data);
+      } else {
+        setGalleryError(res.error || 'Không đọc được mã QR từ ảnh này.');
+      }
+    } finally {
+      setGalleryBusy(false);
+      if (galleryInputRef.current) galleryInputRef.current.value = '';
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4">
-      <div className="bg-card rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/80 p-0 sm:p-4">
+      <div className="bg-card rounded-t-3xl sm:rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden sheet-enter-bottom">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2">
             <ScanLine size={16} className="text-primary" />
@@ -445,11 +457,31 @@ function CCCDQRScanner({ onScanned, onClose, onSwitchOCR }: {
         </div>
         <div className="px-4 py-3 space-y-2">
           {status === 'starting' && <p className="text-xs text-muted-foreground flex items-center justify-center gap-1.5"><Loader2 size={12} className="animate-spin" />Đang khởi động camera...</p>}
-          {status === 'scanning' && <p className="text-xs text-muted-foreground text-center">Hướng camera vào mã QR trên mặt sau CCCD gắn chip</p>}
-          {status === 'error' && <p className="text-xs text-red-500 text-center">{errorMsg || 'Không thể truy cập camera. Vui lòng nhập tay.'}</p>}
+          {status === 'scanning' && <p className="text-xs text-muted-foreground text-center">Hướng camera vào mã QR CCCD (hỗ trợ cả iPhone &amp; Android)</p>}
+          {status === 'error' && <p className="text-xs text-red-500 text-center">{errorMsg || 'Không thể truy cập camera. Hãy chọn ảnh CCCD bên dưới.'}</p>}
+          {galleryError && <p className="text-xs text-dgr text-center font-medium">{galleryError}</p>}
+
+          <input
+            ref={galleryInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleGalleryUpload}
+            className="hidden"
+          />
           <button
+            type="button"
+            disabled={galleryBusy}
+            onClick={() => galleryInputRef.current?.click()}
+            className="w-full py-2 border border-bdr2 bg-surf hover:bg-act text-tx rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+          >
+            {galleryBusy ? <Loader2 size={13} className="animate-spin text-pri2" /> : <ImagePlus size={13} className="text-pri2" />}
+            <span>{galleryBusy ? 'Đang giải mã QR từ ảnh...' : 'Chọn ảnh CCCD từ thư viện (Zalo / Ảnh chụp)'}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={onSwitchOCR}
-            className="w-full py-2 border border-wn/40 tint-wn hover:opacity-90 text-wn rounded-xl text-xs font-semibold transition-opacity flex items-center justify-center gap-1.5"
+            className="w-full py-2 border border-wn/40 tint-wn hover:opacity-90 text-wn rounded-xl text-xs font-semibold transition-opacity flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <Camera size={12} />
             Mã QR bị hỏng? Chuyển sang chụp mặt trước (OCR)
@@ -533,7 +565,7 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
   const defaultKtxVal = ktxList[0] || '';
   const defaultDayVal = allAvailableDays[0] || '';
 
-  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
+  const { register, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<FormData>({
     defaultValues: worker ? {
       hoVaTen: worker.hoVaTen, maNV: worker.maNV, tieuDoan: worker.tieuDoan,
       ktx: worker.ktx || defaultKtxVal, donVi: worker.donVi || 'XD',
@@ -545,6 +577,46 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
       avatar: worker.avatar,
     } : { ktx: defaultKtxVal, donVi: 'XD', gioiTinh: 'Nam', day: defaultDayVal, phongSo: '1' },
   });
+
+  // Auto-draft persistence for newly created worker forms (prevents data loss on weak mobile signal)
+  const {
+    hasDraft: hasWorkerDraft,
+    draftSavedAt: workerDraftSavedAt,
+    saveDraft: saveWorkerDraft,
+    consumeDraft: consumeWorkerDraft,
+    clearDraft: clearWorkerDraft,
+  } = useFormDraft<Partial<FormData>>('new_worker_form', { enabled: !isEdit });
+
+  useEffect(() => {
+    if (isEdit) return;
+    const subscription = watch(values => {
+      const hasMeaningfulInput = Boolean(
+        values.hoVaTen?.trim() ||
+        values.cccd?.trim() ||
+        values.soDienThoai?.trim() ||
+        values.maNV?.trim()
+      );
+      if (hasMeaningfulInput) {
+        const { avatar: _omitAvatar, ...safeDraft } = values;
+        saveWorkerDraft(safeDraft);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [isEdit, watch, saveWorkerDraft]);
+
+  const handleRestoreDraft = () => {
+    const restored = consumeWorkerDraft();
+    if (!restored) return;
+    reset({
+      ktx: defaultKtxVal,
+      donVi: 'XD',
+      gioiTinh: 'Nam',
+      day: defaultDayVal,
+      phongSo: '1',
+      ...restored,
+    } as FormData);
+    toast.success('Đã khôi phục bản nháp công nhân chưa lưu');
+  };
 
   useEffect(() => {
     if (!isEdit || !worker?.id || worker.avatar !== undefined) return;
@@ -827,13 +899,31 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
   const handleScanned = (parsed: CCCDData | null) => {
     setShowScanner(false);
     if (parsed) {
-      if (parsed.cccd) setValue('cccd', parsed.cccd);
-      if (parsed.hoVaTen) setValue('hoVaTen', parsed.hoVaTen);
-      if (parsed.ngaySinh) setValue('ngaySinh', parsed.ngaySinh);
-      if (parsed.gioiTinh) setValue('gioiTinh', parsed.gioiTinh as 'Nam' | 'Nữ');
-      if (parsed.hoKhauTinh) setValue('hoKhauTinh', parsed.hoKhauTinh);
+      if (parsed.cccd) setValue('cccd', parsed.cccd, { shouldDirty: true });
+      if (parsed.hoVaTen) setValue('hoVaTen', parsed.hoVaTen, { shouldDirty: true });
+      if (parsed.ngaySinh) setValue('ngaySinh', parsed.ngaySinh, { shouldDirty: true });
+      if (parsed.gioiTinh) setValue('gioiTinh', parsed.gioiTinh as 'Nam' | 'Nữ', { shouldDirty: true });
+      if (parsed.hoKhauTinh) setValue('hoKhauTinh', parsed.hoKhauTinh, { shouldDirty: true });
       setScanSuccess(true);
       setTimeout(() => setScanSuccess(false), 3000);
+
+      // Instant Blacklist & Duplicate CCCD alert right upon scanning
+      const cleanCccd = (parsed.cccd || '').replace(/\s+/g, '').trim();
+      if (cleanCccd.length >= 8) {
+        const blCheck = matchBlacklistInMemory(blacklistRecords, cleanCccd, '');
+        if (blCheck.isBanned) {
+          toast.error(`CẢNH BÁO BLACKLIST: ${parsed.hoVaTen || cleanCccd} đang bị hạn chế nhập trú (${blCheck.matchedRecord?.reason || 'Danh sách đen'})!`, { duration: 6500 });
+        } else {
+          const dup = allWorkers.find(
+            w => w.id !== worker?.id && !(w.ngayRaKTX || '').trim() && (w.cccd || '').replace(/\s+/g, '').trim() === cleanCccd
+          );
+          if (dup) {
+            toast.warning(`Phát hiện trùng CCCD: ${dup.hoVaTen} đang ở ${dup.ktx} · ${dup.day} · P.${dup.phongSo}`, { duration: 5500 });
+          } else {
+            toast.success(`Đã đọc CCCD: ${parsed.hoVaTen || cleanCccd}`);
+          }
+        }
+      }
     }
   };
 
@@ -848,6 +938,7 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
         khoaTraCuu: `${data.ktx || ''}|${data.day || ''}|${data.phongSo || ''}`,
         avatar: data.avatar !== undefined ? data.avatar : worker?.avatar,
       };
+      if (!isEdit) clearWorkerDraft();
       onSave(saved);
     } finally {
       setSaving(false);
@@ -874,6 +965,32 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
 
           <form onSubmit={handleSubmit(onSubmit)} className="flex-1 flex flex-col min-h-0">
             <div className="flex-1 overflow-y-auto scrollbar-thin px-4 sm:px-5 py-4 space-y-5">
+              {!isEdit && hasWorkerDraft && (
+                <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-bdg/60 border border-bdr2 text-xs">
+                  <div className="flex items-center gap-2 text-tx font-medium">
+                    <RotateCcw size={13} className="text-lnk shrink-0" />
+                    <span>
+                      Có bản nháp chưa lưu ({formatDraftAgeVN(workerDraftSavedAt)}). Bạn muốn khôi phục không?
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleRestoreDraft}
+                      className="px-2.5 py-1 rounded-lg bg-pri2 text-white font-semibold hover:opacity-90 cursor-pointer"
+                    >
+                      Khôi phục
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearWorkerDraft}
+                      className="px-2 py-1 rounded-lg text-mu hover:text-tx hover:bg-act cursor-pointer"
+                    >
+                      Bỏ qua
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Thông tin cá nhân */}
               <div>

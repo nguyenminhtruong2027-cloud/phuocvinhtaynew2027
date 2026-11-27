@@ -18,6 +18,7 @@ import { CraftIconBadge, type CraftTone } from '@/components/ui/CraftIcon';
 import { AnimatedNumber, SlidingTabs, StaggerGrid, StaggerItem } from '@/components/ui/MotionPrimitives';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabase/client';
+import { subscribeTableChanges } from '@/lib/realtimeHub';
 import ExecutiveSpecialistsCard from './components/ExecutiveSpecialistsCard';
 import DataQualityAlert from './components/DataQualityAlert';
 import OperationalReadinessCard from './components/OperationalReadinessCard';
@@ -756,16 +757,12 @@ export default function OccupancyDashboardPage() {
 
     syncLabels();
 
-    const supabase = createClient();
-    const channel = supabase
-      .channel('dashboard_room_units_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_units' }, scheduleSyncLabels)
-      .subscribe();
+    const unsubscribe = subscribeTableChanges('room_units', scheduleSyncLabels);
 
     return () => {
       active = false;
       if (syncTimer) clearTimeout(syncTimer);
-      supabase.removeChannel(channel);
+      unsubscribe();
     };
   }, []);
 
@@ -792,11 +789,7 @@ export default function OccupancyDashboardPage() {
       }, 250);
     };
     load(false);
-    const supabase = createClient();
-    const channel = supabase
-      .channel('dashboard_facilities_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, scheduleLoad)
-      .subscribe();
+    const unsubscribe = subscribeTableChanges('facilities', scheduleLoad);
     const onFacilitiesUpdated = () => { scheduleLoad(); };
     if (typeof window !== 'undefined') {
       window.addEventListener('ktx_facilities_updated', onFacilitiesUpdated);
@@ -804,7 +797,7 @@ export default function OccupancyDashboardPage() {
     return () => {
       active = false;
       if (reloadTimer) clearTimeout(reloadTimer);
-      supabase.removeChannel(channel);
+      unsubscribe();
       if (typeof window !== 'undefined') {
         window.removeEventListener('ktx_facilities_updated', onFacilitiesUpdated);
       }
@@ -877,7 +870,6 @@ export default function OccupancyDashboardPage() {
 
   useEffect(() => {
     void reloadOperationalSupportData();
-    const supabase = createClient();
     let timer: ReturnType<typeof setTimeout> | null = null;
     const schedule = () => {
       if (timer) clearTimeout(timer);
@@ -885,13 +877,10 @@ export default function OccupancyDashboardPage() {
         void reloadOperationalSupportData();
       }, 450);
     };
-    const channel = supabase
-      .channel('dashboard_maintenance_tickets_rt')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'maintenance_tickets' }, schedule)
-      .subscribe();
+    const unsubscribe = subscribeTableChanges('maintenance_tickets', schedule);
     return () => {
       if (timer) clearTimeout(timer);
-      supabase.removeChannel(channel);
+      unsubscribe();
     };
   }, [reloadOperationalSupportData]);
 
@@ -1350,7 +1339,6 @@ export default function OccupancyDashboardPage() {
 
     loadTodayStats();
 
-    const supabase = createClient();
     const scheduleReload = () => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
@@ -1358,17 +1346,14 @@ export default function OccupancyDashboardPage() {
       }, 250);
     };
 
-    const channel = supabase
-      .channel('dashboard_today_fluctuation_v1')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_deletion_log' }, scheduleReload)
-      .subscribe();
+    const unsubscribe = subscribeTableChanges('worker_deletion_log', scheduleReload);
 
     window.addEventListener('ktx_fluctuation_baseline_updated', scheduleReload);
 
     return () => {
       active = false;
       if (timer) clearTimeout(timer);
-      supabase.removeChannel(channel);
+      unsubscribe();
       window.removeEventListener('ktx_fluctuation_baseline_updated', scheduleReload);
     };
   }, [loading, preloadedFluctuationRows, selectedKTX, selectedBuilding]);

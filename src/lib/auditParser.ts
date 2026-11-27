@@ -44,6 +44,7 @@ export const AUDIT_ACTION_META: Record<AuditAction, AuditActionMeta> = {
   MAINTENANCE_TICKET_RESOLVE: { action: 'MAINTENANCE_TICKET_RESOLVE', labelVi: 'Hoàn thành sửa chữa', shortVi: 'Hoàn thành BT', category: 'facility', severity: 'normal' },
   MAINTENANCE_TICKET_DELETE: { action: 'MAINTENANCE_TICKET_DELETE', labelVi: 'Xóa bản ghi phiếu bảo trì', shortVi: 'Xóa phiếu BT', category: 'facility', severity: 'warning' },
   SYSTEM_BACKUP: { action: 'SYSTEM_BACKUP', labelVi: 'Sao lưu toàn hệ thống', shortVi: 'Sao lưu HT', category: 'account', severity: 'warning' },
+  SYSTEM_RESTORE: { action: 'SYSTEM_RESTORE', labelVi: 'Khôi phục dữ liệu từ Backup', shortVi: 'Khôi phục HT', category: 'account', severity: 'critical' },
   DISCIPLINE_CREATE: { action: 'DISCIPLINE_CREATE', labelVi: 'Lập biên bản vi phạm KTX', shortVi: 'Biên bản VP', category: 'sensitive', severity: 'warning' },
   BLACKLIST_ADD: { action: 'BLACKLIST_ADD', labelVi: 'Đưa vào Danh sách Đen', shortVi: 'Blacklist', category: 'sensitive', severity: 'critical' },
   BLACKLIST_REVOKE: { action: 'BLACKLIST_REVOKE', labelVi: 'Gỡ khỏi Danh sách Đen', shortVi: 'Gỡ Blacklist', category: 'sensitive', severity: 'warning' },
@@ -67,7 +68,7 @@ export const CATEGORY_ACTIONS: Record<Exclude<AuditCategory, 'all' | 'anomaly'>,
     'MAINTENANCE_TICKET_RESOLVE',
     'MAINTENANCE_TICKET_DELETE',
   ],
-  account: ['USER_PASSWORD_RESET', 'AUDIT_ARCHIVE_PURGE', 'SYSTEM_BACKUP'],
+  account: ['USER_PASSWORD_RESET', 'AUDIT_ARCHIVE_PURGE', 'SYSTEM_BACKUP', 'SYSTEM_RESTORE'],
 };
 
 export function getActionMeta(action: string): AuditActionMeta {

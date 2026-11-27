@@ -6,7 +6,7 @@ import { Worker, getProfileStatus, calcSoNgay, DEFAULT_ROOM_CAPACITY, removeAcce
 import WorkerTable from './WorkerTable';
 import WorkerFilters from './WorkerFilters';
 import BulkActionBar from './BulkActionBar';
-import { Plus, Download, Upload, X, FileText, AlertCircle, AlertTriangle, FileCheck, ChevronLeft, ChevronRight, Trash2, Building2, CheckSquare, Filter, Users, ArrowRightLeft, ShieldAlert, UserMinus, MoreHorizontal } from 'lucide-react';
+import { Plus, Download, Upload, X, FileText, AlertCircle, AlertTriangle, FileCheck, ChevronLeft, ChevronRight, Trash2, Building2, CheckSquare, Filter, Users, ArrowRightLeft, ShieldAlert, UserMinus, MoreHorizontal, Sparkles, Clock, BedDouble, CheckCircle2, CalendarCheck } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { exportToExcel } from '@/lib/exportExcel';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
@@ -21,12 +21,14 @@ import { BatchAssignmentPlanItem } from '@/lib/smartRoomAssign';
 import { daysSinceVN } from '@/lib/vnDate';
 import { fetchBlacklist, matchBlacklistInMemory, type BlacklistRecord } from '@/lib/disciplineService';
 import { CACHE_KEYS, getCachedData, setCachedData } from '@/lib/clientCache';
+import { analyzeWorkerHygiene } from './DataHygieneModal';
 
 const WorkerFormModal = dynamic(() => import('./WorkerFormModal'), { ssr: false });
 const WorkerDetailModal = dynamic(() => import('./WorkerDetailModal'), { ssr: false });
 const DeleteConfirmModal = dynamic(() => import('./DeleteConfirmModal'), { ssr: false });
 const BatchSmartAssignModal = dynamic(() => import('./BatchSmartAssignModal'), { ssr: false });
 const BatchCheckoutReconcileModal = dynamic(() => import('./BatchCheckoutReconcileModal'), { ssr: false });
+const DataHygieneModal = dynamic(() => import('./DataHygieneModal'), { ssr: false });
 
 export interface FilterState {
   search: string;
@@ -1358,13 +1360,42 @@ function BulkAssignKtxModal({
   );
 }
 
-// TamTru Export Modal
-function TamTruExportModal({ workers, onClose }: { workers: Worker[]; onClose: () => void }) {
-  const [filter, setFilter] = useState<'all' | 'unregistered'>('all');
+// TamTru Export Modal (with 1-Click Batch Mark Registered after export)
+function TamTruExportModal({
+  workers,
+  onClose,
+  onMarkRegistered,
+  canWriteBlock,
+  isAdmin,
+}: {
+  workers: Worker[];
+  onClose: () => void;
+  onMarkRegistered: (ids: string[]) => Promise<void>;
+  canWriteBlock: (day: string, ktx?: string) => boolean;
+  isAdmin: boolean;
+}) {
+  const [filter, setFilter] = useState<'unregistered' | 'overdue' | 'all'>('unregistered');
+  const [exportedUnregisteredIds, setExportedUnregisteredIds] = useState<string[]>([]);
+  const [marking, setMarking] = useState(false);
+
+  const unregisteredList = useMemo(
+    () => workers.filter(w => w.tamTruStatus !== 'registered' && !w.ngayRaKTX),
+    [workers]
+  );
+  const overdueList = useMemo(
+    () =>
+      unregisteredList.filter(w => {
+        const days = daysSinceVN(w.ngayVaoKTX || w.createdAt);
+        return days !== null && days > 7;
+      }),
+    [unregisteredList]
+  );
+
+  const targetList = filter === 'all' ? workers : filter === 'overdue' ? overdueList : unregisteredList;
 
   const handleExport = () => {
-    let list = filter === 'all' ? workers : workers.filter(w => w.tamTruStatus !== 'registered');
-    const data = list.map(w => ({
+    const data = targetList.map((w, idx) => ({
+      'STT': idx + 1,
       'Họ và tên': w.hoVaTen,
       'Ngày sinh': w.ngaySinh,
       'CCCD': w.cccd,
@@ -1377,44 +1408,115 @@ function TamTruExportModal({ workers, onClose }: { workers: Worker[]; onClose: (
       'Trạng thái tạm trú': w.tamTruStatus === 'registered' ? 'Đã đăng ký' : 'Chưa đăng ký',
     }));
     const vnDate = formatDateVN(nowVN()).replace(/\//g, '-');
-    const fileName = `KTX_TamTru_${filter === 'all' ? 'TatCa' : 'ChuaDangKy'}_${vnDate}.xlsx`;
+    const suffix = filter === 'all' ? 'TatCa' : filter === 'overdue' ? 'QuaHan7Ngay' : 'ChuaDangKy';
+    const fileName = `KTX_TamTru_${suffix}_${vnDate}.xlsx`;
     exportToExcel(data, fileName, 'Tạm trú');
     toast.success(`Đã xuất ${data.length} bản ghi tạm trú`);
-    onClose();
+
+    const eligibleIds = targetList
+      .filter(w => w.tamTruStatus !== 'registered' && (isAdmin || canWriteBlock(w.day, w.ktx)))
+      .map(w => w.id);
+
+    if (eligibleIds.length > 0) {
+      setExportedUnregisteredIds(eligibleIds);
+    } else {
+      onClose();
+    }
   };
 
-  const unregisteredCount = workers.filter(w => w.tamTruStatus !== 'registered').length;
+  const handleConfirmMarkRegistered = async () => {
+    if (exportedUnregisteredIds.length === 0) return;
+    setMarking(true);
+    try {
+      await onMarkRegistered(exportedUnregisteredIds);
+      onClose();
+    } finally {
+      setMarking(false);
+    }
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65">
-      <div className="surface-elevated rounded-2xl shadow-2xl border border-bdr3 w-full max-w-md overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <h2 className="text-base font-bold text-foreground">Xuất file Tạm Trú (Excel)</h2>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/65 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="surface-elevated rounded-t-3xl sm:rounded-2xl shadow-2xl border border-bdr3 w-full max-w-md overflow-hidden sheet-enter-bottom"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="sm:hidden flex justify-center pt-2.5 pb-1">
+          <div className="w-10 h-1 rounded-full bg-bdr2" />
+        </div>
+        <div className="flex items-center justify-between px-5 py-3.5 sm:py-4 border-b border-border">
+          <h2 className="text-base font-bold text-foreground">Xuất file Tạm Trú (Công An)</h2>
           <button onClick={onClose} className="p-2 rounded-lg text-mu hover:text-tx hover:bg-act transition-colors"><X size={16} /></button>
         </div>
+
         <div className="p-5 space-y-3">
-          <p className="text-sm text-muted-foreground">Chọn danh sách cần xuất (theo bộ lọc hiện tại):</p>
-          <label className="flex items-center gap-3 p-3 rounded-lg border border-border cursor-pointer hover:bg-muted/30">
-            <input type="radio" name="tamtru-filter" value="all" checked={filter === 'all'} onChange={() => setFilter('all')} className="accent-primary" />
-            <div>
-              <p className="text-sm font-semibold text-foreground">Tất cả (theo bộ lọc)</p>
-              <p className="text-xs text-muted-foreground">{workers.length} bản ghi</p>
+          {exportedUnregisteredIds.length > 0 ? (
+            <div className="rounded-xl bg-okbg/30 border border-ok2/50 p-4 space-y-3">
+              <div className="flex items-start gap-2.5">
+                <CheckCircle2 size={18} className="text-ok shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-tx">Đã tải xong file Excel khai báo!</p>
+                  <p className="text-xs text-mu leading-relaxed">
+                    Bạn có muốn đánh dấu luôn <strong className="text-tx font-tabular">{exportedUnregisteredIds.length}</strong> công nhân vừa xuất sang trạng thái <strong className="text-ok">&quot;Đã đăng ký tạm trú&quot;</strong> để tránh phải tích tay từng người không?
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  disabled={marking}
+                  className="px-3 py-1.5 rounded-lg border border-bdr2 bg-surf text-xs font-semibold text-mu hover:text-tx cursor-pointer"
+                >
+                  Để sau
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmMarkRegistered}
+                  disabled={marking}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-ok2 hover:opacity-90 text-ok2-fg text-xs font-bold cursor-pointer disabled:opacity-50"
+                >
+                  <CheckCircle2 size={13} />
+                  <span>{marking ? 'Đang cập nhật...' : `Đánh dấu Đã ĐK (${exportedUnregisteredIds.length})`}</span>
+                </button>
+              </div>
             </div>
-          </label>
-          <label className="flex items-center gap-3 p-3 rounded-lg border border-border cursor-pointer hover:bg-muted/30">
-            <input type="radio" name="tamtru-filter" value="unregistered" checked={filter === 'unregistered'} onChange={() => setFilter('unregistered')} className="accent-primary" />
-            <div>
-              <p className="text-sm font-semibold text-foreground">Chỉ &quot;Chưa đăng ký&quot; (theo bộ lọc)</p>
-              <p className="text-xs text-muted-foreground">{unregisteredCount} bản ghi</p>
-            </div>
-          </label>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground">Chọn danh sách cần xuất (theo bộ lọc hiện tại):</p>
+              <label className="flex items-center gap-3 p-3 rounded-xl border border-border cursor-pointer hover:bg-muted/30">
+                <input type="radio" name="tamtru-filter" value="unregistered" checked={filter === 'unregistered'} onChange={() => setFilter('unregistered')} className="accent-primary" />
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Chưa đăng ký tạm trú</p>
+                  <p className="text-xs text-muted-foreground font-tabular">{unregisteredList.length} công nhân</p>
+                </div>
+              </label>
+              <label className="flex items-center gap-3 p-3 rounded-xl border border-border cursor-pointer hover:bg-muted/30">
+                <input type="radio" name="tamtru-filter" value="overdue" checked={filter === 'overdue'} onChange={() => setFilter('overdue')} className="accent-primary" />
+                <div>
+                  <p className="text-sm font-semibold text-wn">Quá hạn &gt; 7 ngày chưa đăng ký</p>
+                  <p className="text-xs text-muted-foreground font-tabular">{overdueList.length} công nhân ưu tiên nộp gấp</p>
+                </div>
+              </label>
+              <label className="flex items-center gap-3 p-3 rounded-xl border border-border cursor-pointer hover:bg-muted/30">
+                <input type="radio" name="tamtru-filter" value="all" checked={filter === 'all'} onChange={() => setFilter('all')} className="accent-primary" />
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Tất cả (theo bộ lọc)</p>
+                  <p className="text-xs text-muted-foreground font-tabular">{workers.length} bản ghi</p>
+                </div>
+              </label>
+            </>
+          )}
         </div>
-        <div className="px-5 py-3 border-t border-border flex justify-end gap-2">
-          <button onClick={onClose} className="btn-secondary text-xs">Hủy</button>
-          <button onClick={handleExport} className="btn-primary text-xs">
-            <FileCheck size={14} />Xuất Excel
-          </button>
-        </div>
+
+        {exportedUnregisteredIds.length === 0 && (
+          <div className="px-5 py-3 border-t border-border flex justify-end gap-2">
+            <button onClick={onClose} className="btn-secondary text-xs">Hủy</button>
+            <button onClick={handleExport} disabled={targetList.length === 0} className="btn-primary text-xs disabled:opacity-50">
+              <FileCheck size={14} />Xuất Excel ({targetList.length})
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1908,6 +2010,8 @@ export function WorkerManagementClient() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showTamTruExport, setShowTamTruExport] = useState(false);
+  const [showDataHygiene, setShowDataHygiene] = useState(false);
+  const [quickChip, setQuickChip] = useState<'none' | 'overdue_tamtru' | 'missing_cccd_phone' | 'entered_today' | 'no_bed'>('none');
   const [showBulkAssignKtx, setShowBulkAssignKtx] = useState(false);
   const [showBulkTransfer, setShowBulkTransfer] = useState(false);
   const [showBulkDeleteFilter, setShowBulkDeleteFilter] = useState(false);
@@ -2145,6 +2249,31 @@ export function WorkerManagementClient() {
     } else if (filters.tamTruStatus) {
       list = list.filter(w => (w.tamTruStatus || 'unregistered') === filters.tamTruStatus);
     }
+
+    // 1-Tap Quick Smart Filter Chips
+    if (quickChip === 'overdue_tamtru') {
+      list = list.filter(w => {
+        if ((w.tamTruStatus || 'unregistered') === 'registered' || w.ngayRaKTX) return false;
+        const days = daysSinceVN(w.ngayVaoKTX || w.createdAt);
+        return days !== null && days > 7;
+      });
+    } else if (quickChip === 'missing_cccd_phone') {
+      list = list.filter(w => {
+        if (w.ngayRaKTX) return false;
+        const cccdLen = (w.cccd || '').replace(/\D/g, '').length;
+        const phoneLen = (w.soDienThoai || '').replace(/\D/g, '').length;
+        return cccdLen < 9 || phoneLen < 9;
+      });
+    } else if (quickChip === 'entered_today') {
+      list = list.filter(w => {
+        if (w.ngayRaKTX) return false;
+        const days = daysSinceVN(w.ngayVaoKTX || w.createdAt);
+        return days === 0;
+      });
+    } else if (quickChip === 'no_bed') {
+      list = list.filter(w => !w.ngayRaKTX && !(w.giuong || '').trim());
+    }
+
     list.sort((a, b) => {
       if (sortKey === 'stt') {
         const cmp = Number(a.stt ?? 0) - Number(b.stt ?? 0);
@@ -2156,7 +2285,34 @@ export function WorkerManagementClient() {
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return list;
-  }, [workers, searchIndexById, deferredSearch, filters.ktx, filters.building, filters.room, filters.platoon, filters.profileStatus, filters.toTruong, filters.province, filters.tamTruStatus, sortKey, sortDir]);
+  }, [workers, searchIndexById, deferredSearch, filters.ktx, filters.building, filters.room, filters.platoon, filters.profileStatus, filters.toTruong, filters.province, filters.tamTruStatus, quickChip, sortKey, sortDir]);
+
+  const hygieneStats = useMemo(() => analyzeWorkerHygiene(workers), [workers]);
+  const enteredTodayCount = useMemo(
+    () => workers.filter(w => !w.ngayRaKTX && daysSinceVN(w.ngayVaoKTX || w.createdAt) === 0).length,
+    [workers]
+  );
+
+  const handleBulkMarkTamTruByIds = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+      const userEmail = currentUser?.email ?? 'unknown';
+      const userName = currentUser?.name ?? userEmail;
+      const now = formatDateVN(nowVN());
+      try {
+        await bulkUpdateWorkers(ids, { tamTruStatus: 'registered' });
+        addLog(
+          `${userName} (${userEmail})`,
+          'Đổi trạng thái tạm trú',
+          `[${now}] Đánh dấu Đã ĐK tạm trú hàng loạt cho ${ids.length} công nhân`
+        );
+        toast.success(`Đã đánh dấu ${ids.length} công nhân sang "Đã ĐK tạm trú"`);
+      } catch (err) {
+        toast.error(`Lỗi cập nhật tạm trú: ${err instanceof Error ? err.message : 'Không thể cập nhật'}`);
+      }
+    },
+    [currentUser, bulkUpdateWorkers, addLog]
+  );
 
   const totalPages = Math.ceil(filtered.length / pageSize);
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
@@ -2732,6 +2888,79 @@ export function WorkerManagementClient() {
 
       <WorkerFilters filters={filters} onChange={f => { setFilters(f); setPage(1); }} workers={workers} />
 
+      {/* 1-Tap Quick Smart Filter Chips + Data Hygiene Trigger */}
+      <div className="flex items-center gap-2 overflow-x-auto scrollbar-none pb-0.5">
+        <button
+          type="button"
+          onClick={() => { setQuickChip(c => c === 'overdue_tamtru' ? 'none' : 'overdue_tamtru'); setPage(1); }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap border transition-colors cursor-pointer ${
+            quickChip === 'overdue_tamtru'
+              ? 'tint-wn border-wn text-wn shadow-sm'
+              : 'bg-surf border-bdr text-mu hover:text-tx hover:bg-act'
+          }`}
+        >
+          <Clock size={13} className={hygieneStats.overdueTamTru.length > 0 ? 'text-wn' : ''} />
+          <span>Quá hạn tạm trú &gt;7 ngày</span>
+          <span className="font-tabular font-bold">{hygieneStats.overdueTamTru.length}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => { setQuickChip(c => c === 'missing_cccd_phone' ? 'none' : 'missing_cccd_phone'); setPage(1); }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap border transition-colors cursor-pointer ${
+            quickChip === 'missing_cccd_phone'
+              ? 'tint-wn border-wn text-wn shadow-sm'
+              : 'bg-surf border-bdr text-mu hover:text-tx hover:bg-act'
+          }`}
+        >
+          <AlertTriangle size={13} className={hygieneStats.missingInfo.length > 0 ? 'text-wn' : ''} />
+          <span>Thiếu CCCD/SĐT</span>
+          <span className="font-tabular font-bold">{hygieneStats.missingInfo.length}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => { setQuickChip(c => c === 'entered_today' ? 'none' : 'entered_today'); setPage(1); }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap border transition-colors cursor-pointer ${
+            quickChip === 'entered_today'
+              ? 'bg-okbg/40 border-ok2 text-ok shadow-sm'
+              : 'bg-surf border-bdr text-mu hover:text-tx hover:bg-act'
+          }`}
+        >
+          <CalendarCheck size={13} className="text-ok" />
+          <span>Vào hôm nay</span>
+          <span className="font-tabular font-bold">{enteredTodayCount}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => { setQuickChip(c => c === 'no_bed' ? 'none' : 'no_bed'); setPage(1); }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap border transition-colors cursor-pointer ${
+            quickChip === 'no_bed'
+              ? 'bg-bdg border-pri2 text-lnk shadow-sm'
+              : 'bg-surf border-bdr text-mu hover:text-tx hover:bg-act'
+          }`}
+        >
+          <BedDouble size={13} className="text-lnk" />
+          <span>Chưa gắn giường</span>
+          <span className="font-tabular font-bold">{hygieneStats.noBed.length}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setShowDataHygiene(true)}
+          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap border border-bdr2 bg-surf text-lnk hover:bg-act transition-colors cursor-pointer shrink-0"
+        >
+          <Sparkles size={13} />
+          <span>Làm sạch dữ liệu</span>
+          {hygieneStats.totalIssues > 0 && (
+            <span className="px-1.5 py-0.2 rounded-md bg-wn/20 text-wn font-tabular text-[11px]">
+              {hygieneStats.totalIssues}
+            </span>
+          )}
+        </button>
+      </div>
+
       <BulkActionBar
         selectedCount={selectedIds.size}
         onDelete={canBulkDelete ? () => setDeleteTarget(workers.filter(w => selectedIds.has(w.id))) : undefined}
@@ -2785,7 +3014,28 @@ export function WorkerManagementClient() {
       {viewingWorker && <WorkerDetailModal worker={viewingWorker} onClose={() => setViewingWorker(null)} onEdit={w => { setViewingWorker(null); setEditingWorker(w); }} canEdit={canWriteBlock(viewingWorker.day, viewingWorker.ktx)} onDelete={canDeleteSingle && canWriteBlock(viewingWorker.day, viewingWorker.ktx) ? w => { setViewingWorker(null); setDeleteTarget(w); } : undefined} />}
       {deleteTarget && canDeleteSingle && <DeleteConfirmModal target={deleteTarget} onConfirm={() => handleDelete(deleteTarget)} onClose={() => setDeleteTarget(null)} />}
       {showImport && <ExcelImportModal onClose={() => setShowImport(false)} onImport={handleImport} existingWorkers={workers} />}
-      {showTamTruExport && <TamTruExportModal workers={filtered} onClose={() => setShowTamTruExport(false)} />}
+      {showTamTruExport && (
+        <TamTruExportModal
+          workers={filtered}
+          onClose={() => setShowTamTruExport(false)}
+          onMarkRegistered={handleBulkMarkTamTruByIds}
+          canWriteBlock={canWriteBlock}
+          isAdmin={isAdmin}
+        />
+      )}
+      {showDataHygiene && (
+        <DataHygieneModal
+          workers={workers}
+          onClose={() => setShowDataHygiene(false)}
+          onEditWorker={w => {
+            setShowDataHygiene(false);
+            setEditingWorker(w);
+          }}
+          onBulkMarkTamTru={handleBulkMarkTamTruByIds}
+          canWriteBlock={canWriteBlock}
+          isAdmin={isAdmin}
+        />
+      )}
       {showBulkAssignKtx && isAdmin && <BulkAssignKtxModal workers={workers} onClose={() => setShowBulkAssignKtx(false)} onAssign={handleBulkAssignKtx} />}
       {showBulkTransfer && (
         <BulkTransferWorkersModal

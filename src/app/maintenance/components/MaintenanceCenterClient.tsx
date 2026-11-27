@@ -35,6 +35,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
+import { subscribeTableChanges } from '@/lib/realtimeHub';
+import { formatDraftAgeVN, useFormDraft } from '@/lib/useFormDraft';
 import { useAuth } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
 import { CACHE_KEYS, getCachedData, setCachedData } from '@/lib/clientCache';
@@ -166,6 +168,46 @@ export default function MaintenanceCenterClient() {
   const [createReporterPhone, setCreateReporterPhone] = useState('');
   const [creating, setCreating] = useState(false);
 
+  const {
+    hasDraft: hasCreateDraft,
+    draftSavedAt: createDraftSavedAt,
+    saveDraft: saveCreateDraft,
+    consumeDraft: consumeCreateDraft,
+    clearDraft: clearCreateDraft,
+  } = useFormDraft<{
+    ktx: string;
+    day: string;
+    room: string;
+    category: TicketCategory;
+    priority: TicketPriority;
+    desc: string;
+    reporterPhone: string;
+  }>('maintenance_ticket_create', { enabled: showCreateModal });
+
+  useEffect(() => {
+    if (!showCreateModal) return;
+    if (!createDesc.trim() && !createReporterPhone.trim()) return;
+    saveCreateDraft({
+      ktx: createKtx,
+      day: createDay,
+      room: createRoom,
+      category: createCategory,
+      priority: createPriority,
+      desc: createDesc,
+      reporterPhone: createReporterPhone,
+    });
+  }, [
+    showCreateModal,
+    createKtx,
+    createDay,
+    createRoom,
+    createCategory,
+    createPriority,
+    createDesc,
+    createReporterPhone,
+    saveCreateDraft,
+  ]);
+
   // QR generator state
   const [qrKtx, setQrKtx] = useState('');
   const [qrDay, setQrDay] = useState('');
@@ -226,7 +268,7 @@ export default function MaintenanceCenterClient() {
     void loadAll(hasWarm);
   }, [loadAll]);
 
-  // Realtime subscription on maintenance_tickets
+  // Realtime subscription on maintenance_tickets (shared hub)
   useEffect(() => {
     if (tableMissing) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -236,15 +278,12 @@ export default function MaintenanceCenterClient() {
         void loadAll(true);
       }, 350);
     };
-    const channel = supabase
-      .channel('maintenance_center_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'maintenance_tickets' }, schedule)
-      .subscribe();
+    const unsubscribe = subscribeTableChanges('maintenance_tickets', schedule);
     return () => {
       if (timer) clearTimeout(timer);
-      supabase.removeChannel(channel);
+      unsubscribe();
     };
-  }, [supabase, tableMissing, loadAll]);
+  }, [tableMissing, loadAll]);
 
   // Scope-filtered tickets
   const scopedTickets = useMemo(() => {
@@ -631,6 +670,7 @@ export default function MaintenanceCenterClient() {
         `Tạo phiếu bảo trì ${created.ticket_code} tại ${created.day} - ${formatRoomDisplay(created.phong_so)} (${getTicketCategoryShortLabel(created.category)}): ${created.description}`
       );
       toast.success(`Đã tạo phiếu ${created.ticket_code}`);
+      clearCreateDraft();
       setCreateDesc('');
       setCreateReporterPhone('');
       setCreatePriority('normal');
@@ -1771,6 +1811,43 @@ export default function MaintenanceCenterClient() {
               </button>
             </div>
             <div className="p-5 space-y-3.5">
+              {hasCreateDraft && (
+                <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs">
+                  <div className="flex items-center gap-2 text-amber-500 font-semibold min-w-0">
+                    <RotateCcw size={14} className="shrink-0" />
+                    <span className="truncate">
+                      Có bản nháp chưa gửi ({formatDraftAgeVN(createDraftSavedAt)})
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const draft = consumeCreateDraft();
+                        if (!draft) return;
+                        if (draft.ktx) setCreateKtx(draft.ktx);
+                        if (draft.day) setCreateDay(draft.day);
+                        if (draft.room) setCreateRoom(draft.room);
+                        if (draft.category) setCreateCategory(draft.category);
+                        if (draft.priority) setCreatePriority(draft.priority);
+                        if (typeof draft.desc === 'string') setCreateDesc(draft.desc);
+                        if (typeof draft.reporterPhone === 'string') setCreateReporterPhone(draft.reporterPhone);
+                        toast.success('Đã khôi phục bản nháp phiếu báo hỏng.');
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-amber-500 text-white font-bold hover:opacity-90 cursor-pointer"
+                    >
+                      Khôi phục
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearCreateDraft}
+                      className="px-2 py-1 rounded-lg bg-act text-mu hover:text-tx font-semibold cursor-pointer"
+                    >
+                      Bỏ qua
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 <div>
                   <label className="text-xs font-semibold text-mu block mb-1">Khu KTX</label>

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth, UserRole } from '@/context/AuthContext';
 import { useAudit } from '@/context/AuditContext';
 import { createClient, getSupabaseConfig } from '@/lib/supabase/client';
-import { UserPlus, Pencil, Trash2, Shield, ShieldCheck, Crown, Lock, RefreshCw, AlertCircle, CheckCircle, Building2, Search, Database, Check, Copy, KeyRound, UserCog, Wrench, HardDriveDownload, FileSpreadsheet, FileJson } from 'lucide-react';
+import { UserPlus, Pencil, Trash2, Shield, ShieldCheck, Crown, Lock, RefreshCw, AlertCircle, CheckCircle, Building2, Search, Database, Check, Copy, KeyRound, UserCog, Wrench, HardDriveDownload, FileSpreadsheet, FileJson, RotateCcw } from 'lucide-react';
 import { useKtxStructure, KtxBlockGroup } from '@/lib/ktxStructure';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { SlidingTabs } from '@/components/ui/MotionPrimitives';
@@ -16,6 +16,7 @@ import {
   FullSystemBackupSnapshot,
 } from '@/lib/systemBackup';
 import { BED_RESERVATIONS_SETUP_SQL } from '@/lib/bedReservations';
+import BackupRestoreModal from './BackupRestoreModal';
 
 interface ProfileRecord {
   id: string;
@@ -123,6 +124,7 @@ export default function UserManagementClient() {
   const [copiedMigrationPath, setCopiedMigrationPath] = useState<string | null>(null);
   const [backupBusy, setBackupBusy] = useState<'excel' | 'json' | null>(null);
   const [lastBackup, setLastBackup] = useState<{ format: 'Excel' | 'JSON'; snapshot: FullSystemBackupSnapshot } | null>(null);
+  const [showBackupRestore, setShowBackupRestore] = useState(false);
 
   const handleFullSystemBackup = async (format: 'excel' | 'json') => {
     if (!isSuperAdmin || backupBusy) return;
@@ -1267,8 +1269,28 @@ export default function UserManagementClient() {
                 {backupBusy === 'json' ? <RefreshCw size={14} className="animate-spin text-pri2" /> : <FileJson size={14} className="text-pri2" />}
                 <span>{backupBusy === 'json' ? 'Đang xuất JSON...' : 'Tải gói phục hồi (.json)'}</span>
               </button>
+              <button
+                type="button"
+                onClick={() => setShowBackupRestore(true)}
+                disabled={backupBusy !== null}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-bdg/70 border border-bdr2 text-lnk text-xs font-bold hover:bg-bdg shadow-sm cursor-pointer disabled:opacity-60 whitespace-nowrap transition-colors"
+              >
+                <RotateCcw size={14} />
+                <span>Kiểm tra &amp; Khôi phục (.json)</span>
+              </button>
             </div>
           </div>
+
+          {showBackupRestore && (
+            <BackupRestoreModal
+              onClose={() => setShowBackupRestore(false)}
+              onRestoreComplete={summaryText => {
+                const actor = currentUser?.email || currentUser?.name || 'super_admin';
+                addLog(actor, 'SYSTEM_RESTORE', summaryText);
+                showToast(summaryText, 'success');
+              }}
+            />
+          )}
 
           {lastBackup && (
             <div className="pt-3 border-t border-bdr space-y-2">

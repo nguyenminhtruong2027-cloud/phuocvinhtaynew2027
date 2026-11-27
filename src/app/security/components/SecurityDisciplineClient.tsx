@@ -33,6 +33,7 @@ import { CraftIconBadge } from '@/components/ui/CraftIcon';
 import { SlidingTabs } from '@/components/ui/MotionPrimitives';
 import { StatusTag } from '@/components/ui/StatusTag';
 import { CACHE_KEYS, getCachedData, setCachedData } from '@/lib/clientCache';
+import { formatDraftAgeVN, useFormDraft } from '@/lib/useFormDraft';
 import {
   BlacklistRecord,
   createDisciplineRecord,
@@ -119,6 +120,27 @@ export default function SecurityDisciplineClient() {
     blacklistSeverity: 'permanent' as 'permanent' | 'temporary',
     banned_until: '',
   });
+
+  const {
+    hasDraft: hasDiscDraft,
+    draftSavedAt: discDraftSavedAt,
+    saveDraft: saveDiscDraft,
+    consumeDraft: consumeDiscDraft,
+    clearDraft: clearDiscDraft,
+  } = useFormDraft<typeof discForm>('security_discipline_create', { enabled: showDisciplineModal });
+
+  useEffect(() => {
+    if (!showDisciplineModal) return;
+    const hasContent = Boolean(
+      discForm.ho_va_ten.trim() ||
+        discForm.cccd.trim() ||
+        discForm.title.trim() ||
+        discForm.description.trim() ||
+        discForm.action_taken.trim()
+    );
+    if (!hasContent) return;
+    saveDiscDraft(discForm);
+  }, [showDisciplineModal, discForm, saveDiscDraft]);
 
   // Blacklist form state
   const [blForm, setBlForm] = useState({
@@ -360,6 +382,7 @@ export default function SecurityDisciplineClient() {
           ? 'Đã lưu biên bản vi phạm và kích hoạt chốt chặn Danh sách Đen.'
           : 'Đã ghi nhận biên bản vi phạm nội quy.'
       );
+      clearDiscDraft();
       setShowDisciplineModal(false);
       setDiscForm({
         worker_id: '',
@@ -1255,6 +1278,37 @@ export default function SecurityDisciplineClient() {
               </button>
             </div>
             <form onSubmit={handleSaveDiscipline} className="p-5 space-y-3.5 overflow-y-auto flex-1">
+              {hasDiscDraft && (
+                <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs">
+                  <div className="flex items-center gap-2 text-amber-500 font-semibold min-w-0">
+                    <Undo2 size={14} className="shrink-0" />
+                    <span className="truncate">
+                      Phát hiện bản nháp biên bản chưa lưu ({formatDraftAgeVN(discDraftSavedAt)})
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const draft = consumeDiscDraft();
+                        if (!draft) return;
+                        setDiscForm(prev => ({ ...prev, ...draft }));
+                        toast.success('Đã khôi phục bản nháp biên bản vi phạm.');
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-amber-500 text-white font-bold hover:opacity-90 cursor-pointer"
+                    >
+                      Khôi phục
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearDiscDraft}
+                      className="px-2 py-1 rounded-lg bg-act text-mu hover:text-tx font-semibold cursor-pointer"
+                    >
+                      Bỏ qua
+                    </button>
+                  </div>
+                </div>
+              )}
               {/* Quick Worker Picker */}
               <div className="relative">
                 <label className="block text-xs font-semibold text-mu mb-1">Tìm nhanh công nhân đang ở KTX (tự điền thông tin)</label>

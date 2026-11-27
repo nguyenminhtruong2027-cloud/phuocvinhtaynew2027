@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { compareKtxNames } from '@/data/workers';
 import { fetchFacilitiesList } from '@/lib/facilityCapacity';
+import { subscribeTableChanges } from '@/lib/realtimeHub';
 
 export interface KtxBlockGroup {
   ktx: string;
@@ -289,27 +290,23 @@ function handleWorkerInsertRealtime(payload: { new?: Record<string, unknown> }) 
 
 function ensureSharedRealtimeSubscription() {
   if (_sharedRealtimeCleanup) return;
-  let supabase: ReturnType<typeof createClient> | null = null;
-  try {
-    supabase = createClient();
-  } catch (err) {
-    console.warn('[ktxStructure] Realtime disabled (client init failed):', err);
-    return;
-  }
 
-  let channel: ReturnType<typeof supabase.channel> | null = null;
+  const unsubs: Array<() => void> = [];
   try {
-    channel = supabase
-      .channel('ktx_structure_realtime_shared')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'workers' }, handleWorkerInsertRealtime)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'facilities' }, scheduleSharedStructureReload)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_units' }, (payload: { new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
+    unsubs.push(
+      subscribeTableChanges('workers', payload => {
+        if (payload.eventType === 'INSERT') {
+          handleWorkerInsertRealtime(payload);
+        }
+      }),
+      subscribeTableChanges('facilities', () => scheduleSharedStructureReload()),
+      subscribeTableChanges('room_units', payload => {
         const ktxVal = String(payload?.new?.ktx ?? payload?.old?.ktx ?? '').trim();
         if (ktxVal.startsWith('__') && ktxVal.endsWith('__')) return;
         scheduleSharedStructureReload();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, scheduleSharedStructureReload)
-      .subscribe();
+      }),
+      subscribeTableChanges('profiles', () => scheduleSharedStructureReload())
+    );
   } catch (err) {
     console.warn('[ktxStructure] Realtime subscribe failed (table may be missing):', err);
   }
@@ -324,9 +321,11 @@ function ensureSharedRealtimeSubscription() {
       clearTimeout(_reloadDebounceTimer);
       _reloadDebounceTimer = null;
     }
-    try {
-      if (channel && supabase) supabase.removeChannel(channel);
-    } catch {}
+    unsubs.forEach(fn => {
+      try {
+        fn();
+      } catch {}
+    });
     if (typeof window !== 'undefined') {
       window.removeEventListener('ktx_facilities_updated', onFacilitiesUpdated);
     }

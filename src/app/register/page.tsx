@@ -9,8 +9,9 @@ import {
   RoomBedAvailability,
   WorkerRef,
 } from '@/lib/workerHierarchy';
-import { CheckCircle2, AlertCircle, Loader2, User, X, QrCode, Home, ScanLine, CheckCircle, Camera, AlertTriangle, Check, RefreshCw } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Loader2, User, X, QrCode, Home, ScanLine, CheckCircle, Camera, AlertTriangle, Check, RefreshCw, ImagePlus } from 'lucide-react';
 import { checkBlacklistPublic } from '@/lib/disciplineService';
+import { decodeQrTextFromCanvas, decodeCCCDFromImageFile, parseVietnameseCCCDQR } from '@/lib/cccdQrDecoder';
 
 interface RegistrationForm {
   ma_nv: string;
@@ -314,10 +315,14 @@ function CCCDQRScanner({ onScanned, onClose, onSwitchOCR }: {
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number>(0);
+  const lastDecodeAtRef = useRef<number>(0);
   const [status, setStatus] = useState<'starting' | 'scanning' | 'error'>('starting');
   const [errorMsg, setErrorMsg] = useState('');
+  const [galleryBusy, setGalleryBusy] = useState(false);
+  const [galleryError, setGalleryError] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -344,34 +349,24 @@ function CCCDQRScanner({ onScanned, onClose, onSwitchOCR }: {
       if (!active || !videoRef.current || !canvasRef.current) return;
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext('2d');
+      const now = performance.now();
+
+      if (video.readyState === video.HAVE_ENOUGH_DATA && now - lastDecodeAtRef.current >= 120) {
+        lastDecodeAtRef.current = now;
+        const maxW = 960;
+        const scale = Math.min(1, maxW / Math.max(1, video.videoWidth));
+        canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+        canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
         if (ctx) {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          if ('BarcodeDetector' in window) {
-            try {
-              // @ts-ignore
-              const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-              const codes = await detector.detect(canvas);
-              if (codes.length > 0) {
-                const raw = codes[0].rawValue as string;
-                const parsed = parseCCCDQR(raw);
-                onScanned(parsed);
-                return;
-              }
-            } catch {}
-          } else {
-            try {
-              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-              // @ts-ignore
-              if (window.__jsQR) {
-                // @ts-ignore
-                const code = window.__jsQR(imageData.data, canvas.width, canvas.height);
-                if (code) { onScanned(parseCCCDQR(code.data)); return; }
-              }
-            } catch {}
+          const raw = await decodeQrTextFromCanvas(canvas, ctx);
+          if (raw) {
+            const parsed = parseVietnameseCCCDQR(raw) || parseCCCDQR(raw);
+            if (parsed) {
+              onScanned(parsed);
+              return;
+            }
           }
         }
       }
@@ -386,9 +381,27 @@ function CCCDQRScanner({ onScanned, onClose, onSwitchOCR }: {
     };
   }, [onScanned]);
 
+  const handleGalleryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setGalleryError('');
+    setGalleryBusy(true);
+    try {
+      const res = await decodeCCCDFromImageFile(file);
+      if (res.data) {
+        onScanned(res.data);
+      } else {
+        setGalleryError(res.error || 'Không đọc được mã QR từ ảnh này.');
+      }
+    } finally {
+      setGalleryBusy(false);
+      if (galleryInputRef.current) galleryInputRef.current.value = '';
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4" suppressHydrationWarning>
-      <div className="bg-surf rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" suppressHydrationWarning>
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/80 p-0 sm:p-4" suppressHydrationWarning>
+      <div className="bg-surf rounded-t-3xl sm:rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden sheet-enter-bottom" suppressHydrationWarning>
         <div className="flex items-center justify-between px-4 py-3 border-b border-bdr" suppressHydrationWarning>
           <div className="flex items-center gap-2" suppressHydrationWarning>
             <ScanLine size={16} className="text-pri2" />
@@ -397,7 +410,7 @@ function CCCDQRScanner({ onScanned, onClose, onSwitchOCR }: {
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+            className="p-1.5 rounded-lg hover:bg-act transition-colors"
             suppressHydrationWarning
           >
             <X size={16} />
@@ -417,8 +430,28 @@ function CCCDQRScanner({ onScanned, onClose, onSwitchOCR }: {
         </div>
         <div className="px-4 py-3 space-y-2" suppressHydrationWarning>
           {status === 'starting' && <p className="text-xs text-mu flex items-center justify-center gap-1.5"><Loader2 size={12} className="animate-spin" />Đang khởi động camera...</p>}
-          {status === 'scanning' && <p className="text-xs text-mu text-center">Hướng camera vào mã QR trên mặt sau CCCD gắn chip</p>}
-          {status === 'error' && <p className="text-xs text-dgr text-center">{errorMsg || 'Không thể truy cập camera. Vui lòng nhập tay.'}</p>}
+          {status === 'scanning' && <p className="text-xs text-mu text-center">Hướng camera vào mã QR CCCD (hỗ trợ cả iPhone &amp; Android)</p>}
+          {status === 'error' && <p className="text-xs text-dgr text-center">{errorMsg || 'Không thể truy cập camera. Hãy chọn ảnh CCCD bên dưới.'}</p>}
+          {galleryError && <p className="text-xs text-dgr text-center font-medium">{galleryError}</p>}
+
+          <input
+            ref={galleryInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleGalleryUpload}
+            className="hidden"
+          />
+          <button
+            type="button"
+            disabled={galleryBusy}
+            onClick={() => galleryInputRef.current?.click()}
+            className="w-full py-2 border border-bdr2 bg-surf hover:bg-act text-tx rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+            suppressHydrationWarning
+          >
+            {galleryBusy ? <Loader2 size={13} className="animate-spin text-pri2" /> : <ImagePlus size={13} className="text-pri2" />}
+            <span>{galleryBusy ? 'Đang giải mã QR từ ảnh...' : 'Chọn ảnh CCCD từ điện thoại'}</span>
+          </button>
+
           <button
             type="button"
             onClick={onSwitchOCR}
@@ -676,6 +709,20 @@ export default function RegisterPage() {
       }));
       setScanSuccess(true);
       setTimeout(() => setScanSuccess(false), 3000);
+
+      // Immediate public blacklist verification upon scanning CCCD
+      if (parsed.cccd && parsed.cccd.trim().length >= 8) {
+        void checkBlacklistPublic(parsed.cccd.trim())
+          .then(res => {
+            if (res.isBanned) {
+              const reasonDetail = res.reason ? ` Lý do: ${res.reason}.` : '';
+              setError(
+                `Số CCCD vừa quét hiện nằm trong Danh sách hạn chế nhập trú của KTX Phước Vĩnh Tây.${reasonDetail} Vui lòng liên hệ trực tiếp Ban Quản Lý KTX.`
+              );
+            }
+          })
+          .catch(() => {});
+      }
     }
   }, []);
 

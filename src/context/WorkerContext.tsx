@@ -19,6 +19,7 @@ import {
   syncBedForWorkerSave,
 } from '@/lib/bedSync';
 import { useAuth } from '@/context/AuthContext';
+import { subscribeTableChanges } from '@/lib/realtimeHub';
 
 const PUBLIC_PATHS = ['/sign-up-login', '/login', '/register', '/checkout', '/attendance', '/report-issue'];
 
@@ -149,7 +150,6 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const supabase = useMemo(() => createClient(), []);
-  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const workerMetaByIdRef = useRef<Map<string, Worker>>(new Map());
   const lastFetchedAtRef = useRef<number>(0);
   const fetchSeqRef = useRef<number>(0);
@@ -289,42 +289,34 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!shouldLoadWorkers) return;
 
-    const workersChannel = supabase
-      .channel('workers_realtime_v2')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'workers' },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const newWorker = dbRowToWorker(payload.new as Record<string, unknown>);
-            if (newWorker.id && (isRecentlyDeleted(newWorker.id) || isWorkerTombstoned(newWorker.id, newWorker.createdAt))) return;
-            if (newWorker.id) workerMetaByIdRef.current.set(newWorker.id, newWorker);
-            setWorkers(prev => {
-              if (prev.some(w => w.id === newWorker.id)) return prev;
-              const last = prev[prev.length - 1];
-              const canAppend = !last || (newWorker.stt ?? 0) >= (last.stt ?? 0);
-              return canAppend
-                ? [...prev, newWorker]
-                : [...prev, newWorker].sort((a, b) => (a.stt ?? 0) - (b.stt ?? 0) || a.hoVaTen.localeCompare(b.hoVaTen));
-            });
-          } else if (payload.eventType === 'UPDATE') {
-            const updated = dbRowToWorker(payload.new as Record<string, unknown>);
-            if (updated.id && (isRecentlyDeleted(updated.id) || isWorkerTombstoned(updated.id, updated.createdAt))) return;
-            if (updated.id) workerMetaByIdRef.current.set(updated.id, updated);
-            setWorkers(prev => prev.map(w => w.id === updated.id ? updated : w));
-          } else if (payload.eventType === 'DELETE') {
-            const deletedId = (payload.old as Record<string, unknown>).id as string;
-            const prevMeta = workerMetaByIdRef.current.get(deletedId);
-            if (prevMeta) {
-              preserveDeletedWorkerEntries([prevMeta]);
-            }
-            markWorkersDeleted([deletedId]);
-          }
+    const unsubscribeWorkers = subscribeTableChanges('workers', (payload) => {
+      if (payload.eventType === 'INSERT') {
+        const newWorker = dbRowToWorker((payload.new || {}) as Record<string, unknown>);
+        if (newWorker.id && (isRecentlyDeleted(newWorker.id) || isWorkerTombstoned(newWorker.id, newWorker.createdAt))) return;
+        if (newWorker.id) workerMetaByIdRef.current.set(newWorker.id, newWorker);
+        setWorkers(prev => {
+          if (prev.some(w => w.id === newWorker.id)) return prev;
+          const last = prev[prev.length - 1];
+          const canAppend = !last || (newWorker.stt ?? 0) >= (last.stt ?? 0);
+          return canAppend
+            ? [...prev, newWorker]
+            : [...prev, newWorker].sort((a, b) => (a.stt ?? 0) - (b.stt ?? 0) || a.hoVaTen.localeCompare(b.hoVaTen));
+        });
+      } else if (payload.eventType === 'UPDATE') {
+        const updated = dbRowToWorker((payload.new || {}) as Record<string, unknown>);
+        if (updated.id && (isRecentlyDeleted(updated.id) || isWorkerTombstoned(updated.id, updated.createdAt))) return;
+        if (updated.id) workerMetaByIdRef.current.set(updated.id, updated);
+        setWorkers(prev => prev.map(w => w.id === updated.id ? updated : w));
+      } else if (payload.eventType === 'DELETE') {
+        const deletedId = String((payload.old as Record<string, unknown> | undefined)?.id ?? '');
+        if (!deletedId) return;
+        const prevMeta = workerMetaByIdRef.current.get(deletedId);
+        if (prevMeta) {
+          preserveDeletedWorkerEntries([prevMeta]);
         }
-      )
-      .subscribe();
-
-    channelRef.current = workersChannel;
+        markWorkersDeleted([deletedId]);
+      }
+    });
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && Date.now() - lastFetchedAtRef.current > 45_000) {
@@ -349,9 +341,9 @@ export function WorkerProvider({ children }: { children: React.ReactNode }) {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('ktx_workers_deleted', handleExternalDeleted);
       unsubscribeCrossTab();
-      supabase.removeChannel(workersChannel);
+      unsubscribeWorkers();
     };
-  }, [shouldLoadWorkers, supabase, fetchWorkers, isRecentlyDeleted, markWorkersDeleted]);
+  }, [shouldLoadWorkers, fetchWorkers, isRecentlyDeleted, markWorkersDeleted]);
 
   const refreshWorkers = useCallback(async () => {
     await fetchWorkers(true);

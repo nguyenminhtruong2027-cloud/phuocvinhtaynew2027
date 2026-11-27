@@ -222,3 +222,279 @@ export async function exportFullSystemJsonBackup(actor: string): Promise<FullSys
 
   return snapshot;
 }
+
+// ─── Backup Diff & Safe Restore Engine (Super Admin Only) ───────────────────
+
+export interface RestorableTableMeta {
+  key: string;
+  label: string;
+  pk: string;
+}
+
+/**
+ * Explicit allowlist of operational tables eligible for restore.
+ * `profiles` and `audit_logs` are intentionally excluded to protect
+ * authentication roles and preserve tamper-evident audit history.
+ */
+export const RESTORABLE_TABLES: RestorableTableMeta[] = [
+  { key: 'workers', label: 'Danh sách Công nhân', pk: 'id' },
+  { key: 'beds', label: 'Quản lý Giường', pk: 'id' },
+  { key: 'bed_reservations', label: 'Giữ chỗ giường đoàn sắp vào', pk: 'id' },
+  { key: 'facilities', label: 'Cơ sở vật chất', pk: 'id' },
+  { key: 'room_units', label: 'Cấu hình Phòng & Giới tính', pk: 'id' },
+  { key: 'maintenance_tickets', label: 'Phiếu Kỹ thuật & Bảo trì', pk: 'id' },
+  { key: 'worker_registrations', label: 'Hồ sơ Đăng ký QR', pk: 'id' },
+  { key: 'worker_disciplines', label: 'Sổ Vi phạm & Kỷ luật KTX', pk: 'id' },
+  { key: 'worker_blacklist', label: 'Danh sách Đen (Blacklist)', pk: 'id' },
+];
+
+export type RestoreMode = 'missing_only' | 'upsert';
+
+export interface TableDiffResult {
+  key: string;
+  label: string;
+  backupCount: number;
+  liveCount: number;
+  missingCount: number;
+  existingCount: number;
+  missingRows: Record<string, unknown>[];
+  allRows: Record<string, unknown>[];
+  available: boolean;
+  error?: string;
+}
+
+export interface BackupRestoreTableOutcome {
+  key: string;
+  label: string;
+  attempted: number;
+  restored: number;
+  ok: boolean;
+  error?: string;
+}
+
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function sanitizeRowRecord(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const clean: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (FORBIDDEN_KEYS.has(k)) continue;
+    clean[k] = v;
+  }
+  return clean;
+}
+
+export function parseAndValidateBackupJson(rawText: string): {
+  snapshot: FullSystemBackupSnapshot | null;
+  error?: string;
+} {
+  if (!rawText || rawText.length > 25 * 1024 * 1024) {
+    return { snapshot: null, error: 'Tệp sao lưu rỗng hoặc vượt quá giới hạn 25MB.' };
+  }
+  try {
+    const parsed = JSON.parse(rawText) as Partial<FullSystemBackupSnapshot>;
+    if (!parsed || typeof parsed !== 'object' || !parsed.tables || typeof parsed.tables !== 'object') {
+      return { snapshot: null, error: 'Định dạng JSON không hợp lệ (thiếu cấu trúc tables của gói sao lưu KTX).' };
+    }
+
+    const sanitizedTables: Record<string, Record<string, unknown>[]> = {};
+    let totalRecords = 0;
+
+    for (const meta of RESTORABLE_TABLES) {
+      const rawArr = (parsed.tables as Record<string, unknown>)[meta.key];
+      if (!Array.isArray(rawArr)) {
+        sanitizedTables[meta.key] = [];
+        continue;
+      }
+      const rows: Record<string, unknown>[] = [];
+      for (const item of rawArr) {
+        const clean = sanitizeRowRecord(item);
+        if (clean) rows.push(clean);
+      }
+      sanitizedTables[meta.key] = rows;
+      totalRecords += rows.length;
+    }
+
+    if (totalRecords === 0) {
+      return { snapshot: null, error: 'Gói sao lưu không chứa bản ghi nào thuộc các bảng vận hành có thể khôi phục.' };
+    }
+
+    return {
+      snapshot: {
+        schemaVersion: String(parsed.schemaVersion || '1.0'),
+        systemName: String(parsed.systemName || 'KTX Phước Vĩnh Tây'),
+        generatedAt: String(parsed.generatedAt || ''),
+        generatedAtVN: String(parsed.generatedAtVN || 'Không rõ thời gian'),
+        actor: String(parsed.actor || 'Không rõ'),
+        totalRecords,
+        summaries: Array.isArray(parsed.summaries) ? parsed.summaries : [],
+        tables: sanitizedTables,
+      },
+    };
+  } catch {
+    return { snapshot: null, error: 'Không thể giải mã tệp JSON. Vui lòng chọn đúng file .json xuất từ hệ thống.' };
+  }
+}
+
+async function fetchLivePrimaryKeys(
+  table: string,
+  pk: string
+): Promise<{ ids: Set<string>; ok: boolean; error?: string }> {
+  const supabase = createClient();
+  const ids = new Set<string>();
+  const pageSize = 1000;
+  let from = 0;
+
+  try {
+    while (from < 20000) {
+      const { data, error } = await supabase
+        .from(table)
+        .select(pk)
+        .range(from, from + pageSize - 1);
+      if (error) {
+        return { ids, ok: false, error: error.message };
+      }
+      const batch = (data || []) as unknown as Record<string, unknown>[];
+      for (const row of batch) {
+        const val = row[pk];
+        if (val !== null && val !== undefined) ids.add(String(val));
+      }
+      if (batch.length < pageSize) break;
+      from += pageSize;
+    }
+    return { ids, ok: true };
+  } catch (err) {
+    return { ids, ok: false, error: err instanceof Error ? err.message : 'Lỗi truy vấn bảng hiện tại' };
+  }
+}
+
+export async function diffBackupAgainstLive(
+  snapshot: FullSystemBackupSnapshot
+): Promise<TableDiffResult[]> {
+  const diffs = await Promise.all(
+    RESTORABLE_TABLES.map(async (meta): Promise<TableDiffResult> => {
+      const allRows = snapshot.tables[meta.key] || [];
+      const live = await fetchLivePrimaryKeys(meta.key, meta.pk);
+      if (!live.ok) {
+        return {
+          key: meta.key,
+          label: meta.label,
+          backupCount: allRows.length,
+          liveCount: 0,
+          missingCount: 0,
+          existingCount: 0,
+          missingRows: [],
+          allRows,
+          available: false,
+          error: live.error,
+        };
+      }
+
+      const missingRows: Record<string, unknown>[] = [];
+      let existingCount = 0;
+      for (const row of allRows) {
+        const pkVal = row[meta.pk];
+        if (pkVal !== null && pkVal !== undefined && live.ids.has(String(pkVal))) {
+          existingCount++;
+        } else {
+          missingRows.push(row);
+        }
+      }
+
+      return {
+        key: meta.key,
+        label: meta.label,
+        backupCount: allRows.length,
+        liveCount: live.ids.size,
+        missingCount: missingRows.length,
+        existingCount,
+        missingRows,
+        allRows,
+        available: true,
+      };
+    })
+  );
+
+  return diffs;
+}
+
+export async function restoreBackupTables(params: {
+  diffs: TableDiffResult[];
+  selectedTableKeys: string[];
+  mode: RestoreMode;
+  onProgress?: (tableLabel: string, current: number, total: number) => void;
+}): Promise<BackupRestoreTableOutcome[]> {
+  const { diffs, selectedTableKeys, mode, onProgress } = params;
+  const supabase = createClient();
+
+  // Verify active authenticated Super Admin session before any write
+  const { data: authData, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !authData?.user) {
+    throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại bằng tài khoản Super Admin.');
+  }
+  const { data: profileRow, error: profErr } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', authData.user.id)
+    .maybeSingle();
+  if (profErr || (profileRow as { role?: string } | null)?.role !== 'super_admin') {
+    throw new Error('Chỉ tài khoản Super Admin mới có quyền thực hiện khôi phục sao lưu hệ thống.');
+  }
+
+  const allowedKeys = new Set(RESTORABLE_TABLES.map(t => t.key));
+  const selectedSet = new Set(selectedTableKeys.filter(k => allowedKeys.has(k)));
+  const targets = diffs.filter(d => selectedSet.has(d.key) && d.available);
+
+  const outcomes: BackupRestoreTableOutcome[] = [];
+  const CHUNK_SIZE = 100;
+
+  for (let i = 0; i < targets.length; i++) {
+    const t = targets[i];
+    const meta = RESTORABLE_TABLES.find(m => m.key === t.key)!;
+    const rowsToWrite = mode === 'missing_only' ? t.missingRows : t.allRows;
+
+    onProgress?.(t.label, i + 1, targets.length);
+
+    if (rowsToWrite.length === 0) {
+      outcomes.push({
+        key: t.key,
+        label: t.label,
+        attempted: 0,
+        restored: 0,
+        ok: true,
+      });
+      continue;
+    }
+
+    let restored = 0;
+    let tableError: string | undefined;
+
+    for (let offset = 0; offset < rowsToWrite.length; offset += CHUNK_SIZE) {
+      const chunk = rowsToWrite.slice(offset, offset + CHUNK_SIZE);
+      const { error } = await supabase
+        .from(t.key)
+        .upsert(chunk, {
+          onConflict: meta.pk,
+          ignoreDuplicates: mode === 'missing_only',
+        });
+
+      if (error) {
+        tableError = error.message;
+        break;
+      }
+      restored += chunk.length;
+    }
+
+    outcomes.push({
+      key: t.key,
+      label: t.label,
+      attempted: rowsToWrite.length,
+      restored,
+      ok: !tableError,
+      error: tableError,
+    });
+  }
+
+  return outcomes;
+}
+
