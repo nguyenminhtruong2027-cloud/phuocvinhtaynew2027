@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import MaintenanceCenterClient from './components/MaintenanceCenterClient';
 
 export const metadata = {
@@ -6,5 +6,9 @@ export const metadata = {
 };
 
 export default function MaintenancePage() {
-  return <MaintenanceCenterClient />;
+  return (
+    <Suspense fallback={null}>
+      <MaintenanceCenterClient />
+    </Suspense>
+  );
 }

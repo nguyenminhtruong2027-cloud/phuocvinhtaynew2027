@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect, useRef, useCallback, useDeferredVa
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/context/AuthContext';
+import { useAudit } from '@/context/AuditContext';
 import { useWorkers } from '@/context/WorkerContext';
 import { getUniqueKTX, getUniqueBuildings, getUniqueRooms, countUniqueBuildings, aggregateKtxOccupancy, DEFAULT_ROOM_CAPACITY, naturalSortCompare, compareKtxNames } from '@/data/workers';
 import { buildRoomCapacityMapFromFacilities, fetchFacilitiesList, FacilityItem, getRoomCapacity, RoomCapacityMap, normalizeRoomLabel, formatRoomDisplay } from '@/lib/facilityCapacity';
@@ -67,6 +68,7 @@ const WorkerFormModal = dynamic(() => import('@/app/worker-management/components
 const MaintenanceTrackerModal = dynamic(() => import('./components/MaintenanceTrackerModal'), { ssr: false });
 const DailyBriefingModal = dynamic(() => import('./components/DailyBriefingModal'), { ssr: false });
 const BulkGenderAndPrintModal = dynamic(() => import('./components/BulkGenderAndPrintModal'), { ssr: false });
+const HallwayInspectorModal = dynamic(() => import('@/components/HallwayInspectorModal'), { ssr: false });
 
 interface DashboardSupportCache {
   maintenanceBeds: MaintenanceBedItem[];
@@ -668,7 +670,8 @@ function BlockTitle({
 
 // ─── Main Executive Dashboard Page ─────────────────────────────────────────
 export default function OccupancyDashboardPage() {
-  const { currentUser } = useAuth();
+  const { currentUser, isAdmin, canWriteBlock, isTechnician } = useAuth();
+  const { addLog } = useAudit();
   const { workers, loading, addWorker } = useWorkers();
   const { ktxNames } = useKtxStructure();
   const router = useRouter();
@@ -711,6 +714,7 @@ export default function OccupancyDashboardPage() {
   });
   const [showMaintenanceModal, setShowMaintenanceModal] = useState(false);
   const [showBriefingModal, setShowBriefingModal] = useState(false);
+  const [showHallwayInspector, setShowHallwayInspector] = useState(false);
   const [bulkModalMode, setBulkModalMode] = useState<'gender' | 'print' | null>(null);
   const [dashboardTab, setDashboardTab] = useState<'overview' | 'heatmap' | 'analytics' | 'risk'>('overview');
   const [showToolsMenu, setShowToolsMenu] = useState(false);
@@ -1841,6 +1845,18 @@ export default function OccupancyDashboardPage() {
               </div>
 
               <div className="flex items-center gap-1.5 shrink-0">
+                {!isTechnician && (
+                  <button
+                    type="button"
+                    onClick={() => setShowHallwayInspector(true)}
+                    className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-ok2/45 bg-okbg/40 text-ok hover:bg-okbg/70 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                    title="Kiểm phòng hành lang từng phòng P101 → P102 → P103 (quân số, điện nước, báo hỏng & xuất Zalo)"
+                  >
+                    <ClipboardCheck size={14} />
+                    <span>Kiểm phòng</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => setShowBriefingModal(true)}
@@ -2892,6 +2908,25 @@ export default function OccupancyDashboardPage() {
               setShowQuickAdd(false);
             }}
             onClose={() => setShowQuickAdd(false)}
+          />
+        )}
+
+        {/* Mobile Hallway Inspector Modal (Gói 4) */}
+        {showHallwayInspector && (
+          <HallwayInspectorModal
+            workers={workers}
+            facilities={facilitiesList}
+            isAdmin={isAdmin}
+            canWriteBlock={canWriteBlock}
+            actorName={currentUser?.name || currentUser?.email || 'Ban Quản Lý KTX'}
+            actorEmail={currentUser?.email || ''}
+            onLog={(action, detail) => {
+              addLog(currentUser?.email || currentUser?.name || 'Admin', action, detail);
+            }}
+            onClose={() => {
+              setShowHallwayInspector(false);
+              void reloadOperationalSupportData();
+            }}
           />
         )}
       </div>

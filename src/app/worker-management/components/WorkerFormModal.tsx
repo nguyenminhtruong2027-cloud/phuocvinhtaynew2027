@@ -19,6 +19,7 @@ import { useFormDraft, formatDraftAgeVN } from '@/lib/useFormDraft';
 
 interface Props {
   worker: Worker | null;
+  prefillData?: Partial<Worker> | null;
   onSave: (w: Worker) => void;
   onClose: () => void;
   allWorkers?: Worker[];
@@ -524,7 +525,7 @@ function CCCDScanner({ onScanned, onClose }: {
   );
 }
 
-export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = [] }: Props) {
+export default function WorkerFormModal({ worker, prefillData = null, onSave, onClose, allWorkers = [] }: Props) {
   const [saving, setSaving] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [scanSuccess, setScanSuccess] = useState(false);
@@ -575,17 +576,35 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
       toTruong: worker.toTruong, sdtToTruong: worker.sdtToTruong,
       ngayVaoKTX: worker.ngayVaoKTX, ngayRaKTX: worker.ngayRaKTX, ghiChu: worker.ghiChu,
       avatar: worker.avatar,
-    } : { ktx: defaultKtxVal, donVi: 'XD', gioiTinh: 'Nam', day: defaultDayVal, phongSo: '1' },
+    } : {
+      ktx: prefillData?.ktx || defaultKtxVal,
+      donVi: prefillData?.donVi || 'XD',
+      gioiTinh: prefillData?.gioiTinh || 'Nam',
+      day: prefillData?.day || defaultDayVal,
+      phongSo: prefillData?.phongSo || '1',
+      giuong: prefillData?.giuong || '',
+      hoVaTen: prefillData?.hoVaTen || '',
+      maNV: prefillData?.maNV || '',
+      tieuDoan: prefillData?.tieuDoan || '',
+      ngaySinh: prefillData?.ngaySinh || '',
+      soDienThoai: prefillData?.soDienThoai || '',
+      cccd: prefillData?.cccd || '',
+      hoKhauTinh: prefillData?.hoKhauTinh || '',
+      toTruong: prefillData?.toTruong || '',
+      sdtToTruong: prefillData?.sdtToTruong || '',
+      ngayVaoKTX: prefillData?.ngayVaoKTX || '',
+      ghiChu: prefillData?.ghiChu || '',
+    },
   });
 
-  // Auto-draft persistence for newly created worker forms (prevents data loss on weak mobile signal)
+  // Auto-draft persistence for newly created worker forms (disabled when editing or prefilled from re-entry)
   const {
     hasDraft: hasWorkerDraft,
     draftSavedAt: workerDraftSavedAt,
     saveDraft: saveWorkerDraft,
     consumeDraft: consumeWorkerDraft,
     clearDraft: clearWorkerDraft,
-  } = useFormDraft<Partial<FormData>>('new_worker_form', { enabled: !isEdit });
+  } = useFormDraft<Partial<FormData>>('new_worker_form', { enabled: !isEdit && !prefillData });
 
   useEffect(() => {
     if (isEdit) return;

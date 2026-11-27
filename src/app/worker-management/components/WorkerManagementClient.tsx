@@ -6,7 +6,7 @@ import { Worker, getProfileStatus, calcSoNgay, DEFAULT_ROOM_CAPACITY, removeAcce
 import WorkerTable from './WorkerTable';
 import WorkerFilters from './WorkerFilters';
 import BulkActionBar from './BulkActionBar';
-import { Plus, Download, Upload, X, FileText, AlertCircle, AlertTriangle, FileCheck, ChevronLeft, ChevronRight, Trash2, Building2, CheckSquare, Filter, Users, ArrowRightLeft, ShieldAlert, UserMinus, MoreHorizontal, Sparkles, Clock, BedDouble, CheckCircle2, CalendarCheck } from 'lucide-react';
+import { Plus, Download, Upload, X, FileText, AlertCircle, AlertTriangle, FileCheck, ChevronLeft, ChevronRight, Trash2, Building2, CheckSquare, Filter, Users, ArrowRightLeft, ShieldAlert, UserMinus, MoreHorizontal, Sparkles, Clock, BedDouble, CheckCircle2, CalendarCheck, Columns3, Bookmark, BookmarkPlus, RotateCcw, Rows3 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { exportToExcel } from '@/lib/exportExcel';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
@@ -21,6 +21,18 @@ import { BatchAssignmentPlanItem } from '@/lib/smartRoomAssign';
 import { daysSinceVN } from '@/lib/vnDate';
 import { fetchBlacklist, matchBlacklistInMemory, type BlacklistRecord } from '@/lib/disciplineService';
 import { CACHE_KEYS, getCachedData, setCachedData } from '@/lib/clientCache';
+import {
+  DEFAULT_WORKER_TABLE_PREFS,
+  TOGGLEABLE_WORKER_COLUMNS,
+  type SavedWorkerView,
+  type WorkerTableColumnKey,
+  type WorkerTableDensity,
+  type WorkerTablePrefs,
+  loadSavedWorkerViews,
+  loadWorkerTablePrefs,
+  saveSavedWorkerViews,
+  saveWorkerTablePrefs,
+} from '@/lib/workerTablePrefs';
 import { analyzeWorkerHygiene } from './DataHygieneModal';
 
 const WorkerFormModal = dynamic(() => import('./WorkerFormModal'), { ssr: false });
@@ -29,6 +41,7 @@ const DeleteConfirmModal = dynamic(() => import('./DeleteConfirmModal'), { ssr: 
 const BatchSmartAssignModal = dynamic(() => import('./BatchSmartAssignModal'), { ssr: false });
 const BatchCheckoutReconcileModal = dynamic(() => import('./BatchCheckoutReconcileModal'), { ssr: false });
 const DataHygieneModal = dynamic(() => import('./DataHygieneModal'), { ssr: false });
+const QuickReentryModal = dynamic(() => import('./QuickReentryModal'), { ssr: false });
 
 export interface FilterState {
   search: string;
@@ -1997,7 +2010,7 @@ function BulkTransferWorkersModal({
 }
 
 export function WorkerManagementClient() {
-  const { workers, loading, addWorker, updateWorker, deleteWorkers, deleteAllWorkers, importWorkers, updateTamTruStatus, bulkUpdateKtx, bulkUpdateWorkers } = useWorkers();
+  const { workers, loading, addWorker, updateWorker, deleteWorkers, deleteAllWorkers, importWorkers, updateTamTruStatus, bulkUpdateKtx, bulkUpdateWorkers, refreshWorkers } = useWorkers();
   const searchParams = useSearchParams();
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [sortKey, setSortKey] = useState<keyof Worker>('stt');
@@ -2008,10 +2021,18 @@ export function WorkerManagementClient() {
   const [editingWorker, setEditingWorker] = useState<Worker | null>(null);
   const [viewingWorker, setViewingWorker] = useState<Worker | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showQuickReentry, setShowQuickReentry] = useState(false);
+  const [reentryPrefill, setReentryPrefill] = useState<Partial<Worker> | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [showTamTruExport, setShowTamTruExport] = useState(false);
   const [showDataHygiene, setShowDataHygiene] = useState(false);
   const [quickChip, setQuickChip] = useState<'none' | 'overdue_tamtru' | 'missing_cccd_phone' | 'entered_today' | 'no_bed'>('none');
+  const [tablePrefs, setTablePrefs] = useState<WorkerTablePrefs>(DEFAULT_WORKER_TABLE_PREFS);
+  const [savedViews, setSavedViews] = useState<SavedWorkerView[]>([]);
+  const [showColumnPopover, setShowColumnPopover] = useState(false);
+  const [showSaveViewInput, setShowSaveViewInput] = useState(false);
+  const [newViewName, setNewViewName] = useState('');
+  const columnPopoverRef = useRef<HTMLDivElement>(null);
   const [showBulkAssignKtx, setShowBulkAssignKtx] = useState(false);
   const [showBulkTransfer, setShowBulkTransfer] = useState(false);
   const [showBulkDeleteFilter, setShowBulkDeleteFilter] = useState(false);
@@ -2033,6 +2054,22 @@ export function WorkerManagementClient() {
   });
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const mobileMoreRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setTablePrefs(loadWorkerTablePrefs());
+    setSavedViews(loadSavedWorkerViews());
+  }, []);
+
+  useEffect(() => {
+    if (!showColumnPopover) return;
+    const handleOutside = (e: MouseEvent) => {
+      if (columnPopoverRef.current && !columnPopoverRef.current.contains(e.target as Node)) {
+        setShowColumnPopover(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [showColumnPopover]);
 
   useEffect(() => {
     if (!mobileMoreOpen) return;
@@ -2187,6 +2224,114 @@ export function WorkerManagementClient() {
       setViewingWorker(match);
     }
   }, [searchParams, workers]);
+
+  // Handle CommandPalette quick operational shortcuts (?quick=..., ?open=..., ?action=...)
+  useEffect(() => {
+    const quickParam = searchParams?.get('quick');
+    if (quickParam === 'overdue_tamtru') {
+      setQuickChip('overdue_tamtru');
+      setPage(1);
+    } else if (quickParam === 'missing_info' || quickParam === 'missing_cccd_phone') {
+      setQuickChip('missing_cccd_phone');
+      setPage(1);
+    } else if (quickParam === 'no_bed') {
+      setQuickChip('no_bed');
+      setPage(1);
+    } else if (quickParam === 'today' || quickParam === 'entered_today') {
+      setQuickChip('entered_today');
+      setPage(1);
+    }
+
+    const openParam = searchParams?.get('open');
+    if (openParam === 'hygiene') {
+      setShowDataHygiene(true);
+    } else if (openParam === 'reentry') {
+      setShowQuickReentry(true);
+    }
+
+    const actParam = searchParams?.get('action');
+    if (actParam === 'batch-checkout' || actParam === 'reconcile') {
+      setBatchReconcileTab(actParam);
+    }
+  }, [searchParams]);
+
+  const hiddenColumnsSet = useMemo(() => new Set<string>(tablePrefs.hiddenColumns), [tablePrefs.hiddenColumns]);
+
+  const toggleTableColumn = useCallback((col: WorkerTableColumnKey) => {
+    setTablePrefs(prev => {
+      const exists = prev.hiddenColumns.includes(col);
+      const hiddenColumns = exists
+        ? prev.hiddenColumns.filter(c => c !== col)
+        : [...prev.hiddenColumns, col];
+      const next: WorkerTablePrefs = { ...prev, hiddenColumns };
+      saveWorkerTablePrefs(next);
+      return next;
+    });
+  }, []);
+
+  const updateTableDensity = useCallback((density: WorkerTableDensity) => {
+    setTablePrefs(prev => {
+      const next: WorkerTablePrefs = { ...prev, density };
+      saveWorkerTablePrefs(next);
+      return next;
+    });
+  }, []);
+
+  const resetTablePrefs = useCallback(() => {
+    saveWorkerTablePrefs(DEFAULT_WORKER_TABLE_PREFS);
+    setTablePrefs(DEFAULT_WORKER_TABLE_PREFS);
+    toast.info('Đã khôi phục cấu hình cột & mật độ mặc định');
+  }, []);
+
+  const handleSaveCurrentView = useCallback(() => {
+    const trimmed = newViewName.trim();
+    if (!trimmed) {
+      toast.warning('Nhập tên bộ lọc muốn lưu');
+      return;
+    }
+    const mappedChip: SavedWorkerView['quickChip'] =
+      quickChip === 'missing_cccd_phone'
+        ? 'missing_info'
+        : quickChip === 'entered_today'
+        ? 'today'
+        : quickChip;
+    const entry: SavedWorkerView = {
+      id: `view-${Date.now()}`,
+      name: trimmed,
+      filters: { ...filters },
+      quickChip: mappedChip,
+      createdAt: Date.now(),
+    };
+    setSavedViews(prev => {
+      const next = [entry, ...prev.filter(v => v.name.toLowerCase() !== trimmed.toLowerCase())].slice(0, 12);
+      saveSavedWorkerViews(next);
+      return next;
+    });
+    setNewViewName('');
+    setShowSaveViewInput(false);
+    toast.success(`Đã lưu bộ lọc "${trimmed}"`);
+  }, [newViewName, filters, quickChip]);
+
+  const handleApplySavedView = useCallback((view: SavedWorkerView) => {
+    setFilters({ ...DEFAULT_FILTERS, ...view.filters });
+    const mappedChip =
+      view.quickChip === 'missing_info'
+        ? 'missing_cccd_phone'
+        : view.quickChip === 'today'
+        ? 'entered_today'
+        : view.quickChip;
+    setQuickChip(mappedChip);
+    setPage(1);
+    toast.info(`Đã áp dụng bộ lọc "${view.name}"`);
+  }, []);
+
+  const handleDeleteSavedView = useCallback((id: string) => {
+    setSavedViews(prev => {
+      const next = prev.filter(v => v.id !== id);
+      saveSavedWorkerViews(next);
+      return next;
+    });
+  }, []);
 
   const noKtxCount = useMemo(
     () =>
@@ -2387,6 +2532,7 @@ export function WorkerManagementClient() {
 
     setEditingWorker(null);
     setShowAddModal(false);
+    setReentryPrefill(null);
   }, [workers, currentUser, writeAuditLog, checkRoomCapacity, addWorker, updateWorker, isAdmin, canWriteBlock]);
 
   const handleDelete = useCallback(async (targets: Worker | Worker[]) => {
@@ -2442,7 +2588,10 @@ export function WorkerManagementClient() {
   }, [currentUser, writeAuditLog, deleteAllWorkers]);
 
   const handleToggleTamTru = useCallback(async (worker: Worker) => {
-    const newStatus = worker.tamTruStatus === 'registered' ? 'unregistered' : 'registered';
+    const prevStatus: 'registered' | 'unregistered' =
+      worker.tamTruStatus === 'registered' ? 'registered' : 'unregistered';
+    const newStatus: 'registered' | 'unregistered' =
+      prevStatus === 'registered' ? 'unregistered' : 'registered';
     const userEmail = currentUser?.email ?? 'unknown';
     const userName = currentUser?.name ?? userEmail;
     const now = formatDateVN(nowVN());
@@ -2451,9 +2600,26 @@ export function WorkerManagementClient() {
       addLog(
         `${userName} (${userEmail})`,
         'Đổi trạng thái tạm trú',
-        `[${now}] ${worker.hoVaTen} (${worker.maNV || 'N/A'}): ${worker.tamTruStatus === 'registered' ? 'Đã ĐK → Chưa ĐK' : 'Chưa ĐK → Đã ĐK'}`
+        `[${now}] ${worker.hoVaTen} (${worker.maNV || 'N/A'}): ${prevStatus === 'registered' ? 'Đã ĐK → Chưa ĐK' : 'Chưa ĐK → Đã ĐK'}`
       );
-      toast.success(`Đã đổi trạng thái tạm trú: ${newStatus === 'registered' ? 'Đã đăng ký' : 'Chưa đăng ký'}`);
+      toast.success(
+        `${worker.hoVaTen}: ${newStatus === 'registered' ? 'Đã đăng ký tạm trú' : 'Chưa đăng ký tạm trú'}`,
+        {
+          duration: 6000,
+          action: {
+            label: 'Hoàn tác',
+            onClick: () => {
+              void updateTamTruStatus(worker.id, prevStatus)
+                .then(() => {
+                  toast.info(`Đã hoàn tác tạm trú của ${worker.hoVaTen}`);
+                })
+                .catch(() => {
+                  toast.error('Không thể hoàn tác trạng thái tạm trú');
+                });
+            },
+          },
+        }
+      );
     } catch (err) {
       toast.error(`Lỗi: ${err instanceof Error ? err.message : 'Không thể cập nhật'}`);
     }
@@ -2727,6 +2893,16 @@ export function WorkerManagementClient() {
 
             {mobileMoreOpen && (
               <div className="absolute right-0 top-full mt-2 w-60 bg-surf border border-bdr2 rounded-2xl shadow-2xl z-50 py-1.5 overflow-hidden">
+                {(isAdmin || (currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && (
+                  <button
+                    type="button"
+                    onClick={() => { setMobileMoreOpen(false); setShowQuickReentry(true); }}
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-tx hover:bg-act text-left cursor-pointer"
+                  >
+                    <RotateCcw size={15} className="text-ok" />
+                    <span>Tái nhập KTX (CN cũ)</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => { setMobileMoreOpen(false); setShowImport(true); }}
@@ -2861,6 +3037,19 @@ export function WorkerManagementClient() {
               <span>Nhập từ Excel</span>
             </button>
 
+            {/* Tái nhập nhanh CN cũ */}
+            {(isAdmin || (currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && (
+              <button
+                type="button"
+                onClick={() => setShowQuickReentry(true)}
+                className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl border border-ok2/40 bg-okbg/40 text-ok text-xs sm:text-sm font-bold hover:bg-okbg/70 transition-colors duration-100 cursor-pointer"
+                title="Khôi phục nhanh hồ sơ công nhân đã check-out quay lại KTX (tự động kiểm tra Blacklist)"
+              >
+                <RotateCcw size={15} />
+                <span>Tái nhập</span>
+              </button>
+            )}
+
             {/* Đối soát quân số & Check-out hàng loạt */}
             {(isAdmin || (currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && (
               <button
@@ -2876,7 +3065,7 @@ export function WorkerManagementClient() {
             {/* Nút chính: Thêm công nhân */}
             {(isAdmin || (currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && (
               <button
-                onClick={() => setShowAddModal(true)}
+                onClick={() => { setReentryPrefill(null); setShowAddModal(true); }}
                 className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl btn-glow-primary text-xs sm:text-sm font-semibold cursor-pointer"
               >
                 <Plus size={16} />
@@ -2888,77 +3077,234 @@ export function WorkerManagementClient() {
 
       <WorkerFilters filters={filters} onChange={f => { setFilters(f); setPage(1); }} workers={workers} />
 
-      {/* 1-Tap Quick Smart Filter Chips + Data Hygiene Trigger */}
-      <div className="flex items-center gap-2 overflow-x-auto scrollbar-none pb-0.5">
-        <button
-          type="button"
-          onClick={() => { setQuickChip(c => c === 'overdue_tamtru' ? 'none' : 'overdue_tamtru'); setPage(1); }}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap border transition-colors cursor-pointer ${
-            quickChip === 'overdue_tamtru'
-              ? 'tint-wn border-wn text-wn shadow-sm'
-              : 'bg-surf border-bdr text-mu hover:text-tx hover:bg-act'
-          }`}
-        >
-          <Clock size={13} className={hygieneStats.overdueTamTru.length > 0 ? 'text-wn' : ''} />
-          <span>Quá hạn tạm trú &gt;7 ngày</span>
-          <span className="font-tabular font-bold">{hygieneStats.overdueTamTru.length}</span>
-        </button>
+      {/* 1-Tap Quick Smart Filter Chips + Column/Density Picker + Data Hygiene Trigger */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 overflow-x-auto scrollbar-none pb-0.5 flex-1 min-w-0">
+          <button
+            type="button"
+            onClick={() => { setQuickChip(c => c === 'overdue_tamtru' ? 'none' : 'overdue_tamtru'); setPage(1); }}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap border transition-colors cursor-pointer ${
+              quickChip === 'overdue_tamtru'
+                ? 'tint-wn border-wn text-wn shadow-sm'
+                : 'bg-surf border-bdr text-mu hover:text-tx hover:bg-act'
+            }`}
+          >
+            <Clock size={13} className={hygieneStats.overdueTamTru.length > 0 ? 'text-wn' : ''} />
+            <span>Quá hạn tạm trú &gt;7 ngày</span>
+            <span className="font-tabular font-bold">{hygieneStats.overdueTamTru.length}</span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => { setQuickChip(c => c === 'missing_cccd_phone' ? 'none' : 'missing_cccd_phone'); setPage(1); }}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap border transition-colors cursor-pointer ${
-            quickChip === 'missing_cccd_phone'
-              ? 'tint-wn border-wn text-wn shadow-sm'
-              : 'bg-surf border-bdr text-mu hover:text-tx hover:bg-act'
-          }`}
-        >
-          <AlertTriangle size={13} className={hygieneStats.missingInfo.length > 0 ? 'text-wn' : ''} />
-          <span>Thiếu CCCD/SĐT</span>
-          <span className="font-tabular font-bold">{hygieneStats.missingInfo.length}</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => { setQuickChip(c => c === 'missing_cccd_phone' ? 'none' : 'missing_cccd_phone'); setPage(1); }}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap border transition-colors cursor-pointer ${
+              quickChip === 'missing_cccd_phone'
+                ? 'tint-wn border-wn text-wn shadow-sm'
+                : 'bg-surf border-bdr text-mu hover:text-tx hover:bg-act'
+            }`}
+          >
+            <AlertTriangle size={13} className={hygieneStats.missingInfo.length > 0 ? 'text-wn' : ''} />
+            <span>Thiếu CCCD/SĐT</span>
+            <span className="font-tabular font-bold">{hygieneStats.missingInfo.length}</span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => { setQuickChip(c => c === 'entered_today' ? 'none' : 'entered_today'); setPage(1); }}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap border transition-colors cursor-pointer ${
-            quickChip === 'entered_today'
-              ? 'bg-okbg/40 border-ok2 text-ok shadow-sm'
-              : 'bg-surf border-bdr text-mu hover:text-tx hover:bg-act'
-          }`}
-        >
-          <CalendarCheck size={13} className="text-ok" />
-          <span>Vào hôm nay</span>
-          <span className="font-tabular font-bold">{enteredTodayCount}</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => { setQuickChip(c => c === 'entered_today' ? 'none' : 'entered_today'); setPage(1); }}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap border transition-colors cursor-pointer ${
+              quickChip === 'entered_today'
+                ? 'bg-okbg/40 border-ok2 text-ok shadow-sm'
+                : 'bg-surf border-bdr text-mu hover:text-tx hover:bg-act'
+            }`}
+          >
+            <CalendarCheck size={13} className="text-ok" />
+            <span>Vào hôm nay</span>
+            <span className="font-tabular font-bold">{enteredTodayCount}</span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => { setQuickChip(c => c === 'no_bed' ? 'none' : 'no_bed'); setPage(1); }}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap border transition-colors cursor-pointer ${
-            quickChip === 'no_bed'
-              ? 'bg-bdg border-pri2 text-lnk shadow-sm'
-              : 'bg-surf border-bdr text-mu hover:text-tx hover:bg-act'
-          }`}
-        >
-          <BedDouble size={13} className="text-lnk" />
-          <span>Chưa gắn giường</span>
-          <span className="font-tabular font-bold">{hygieneStats.noBed.length}</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => { setQuickChip(c => c === 'no_bed' ? 'none' : 'no_bed'); setPage(1); }}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap border transition-colors cursor-pointer ${
+              quickChip === 'no_bed'
+                ? 'bg-bdg border-pri2 text-lnk shadow-sm'
+                : 'bg-surf border-bdr text-mu hover:text-tx hover:bg-act'
+            }`}
+          >
+            <BedDouble size={13} className="text-lnk" />
+            <span>Chưa gắn giường</span>
+            <span className="font-tabular font-bold">{hygieneStats.noBed.length}</span>
+          </button>
+        </div>
 
-        <button
-          type="button"
-          onClick={() => setShowDataHygiene(true)}
-          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap border border-bdr2 bg-surf text-lnk hover:bg-act transition-colors cursor-pointer shrink-0"
-        >
-          <Sparkles size={13} />
-          <span>Làm sạch dữ liệu</span>
-          {hygieneStats.totalIssues > 0 && (
-            <span className="px-1.5 py-0.2 rounded-md bg-wn/20 text-wn font-tabular text-[11px]">
-              {hygieneStats.totalIssues}
-            </span>
-          )}
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Desktop Column Visibility & Density Picker */}
+          <div ref={columnPopoverRef} className="relative hidden md:block">
+            <button
+              type="button"
+              onClick={() => setShowColumnPopover(prev => !prev)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap border transition-colors cursor-pointer ${
+                showColumnPopover || tablePrefs.hiddenColumns.length > 0 || tablePrefs.density === 'compact'
+                  ? 'bg-bdg border-pri2/50 text-lnk'
+                  : 'bg-surf border-bdr2 text-tx hover:bg-act'
+              }`}
+              title="Ẩn/hiện cột bảng và chọn mật độ dòng"
+            >
+              <Columns3 size={13} />
+              <span>Cột &amp; Mật độ</span>
+              {tablePrefs.hiddenColumns.length > 0 && (
+                <span className="px-1.5 py-0.2 rounded bg-pri text-white text-[10px] font-tabular font-bold">
+                  -{tablePrefs.hiddenColumns.length}
+                </span>
+              )}
+            </button>
+
+            {showColumnPopover && (
+              <div className="absolute right-0 top-full mt-1.5 w-72 rounded-2xl dropdown-menu-panel p-3 z-40 fade-in space-y-3">
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-mu flex items-center gap-1">
+                      <Rows3 size={12} /> Mật độ dòng
+                    </span>
+                    <button
+                      type="button"
+                      onClick={resetTablePrefs}
+                      className="text-[11px] font-semibold text-lnk hover:underline cursor-pointer"
+                    >
+                      Mặc định
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {([
+                      { id: 'comfortable', label: 'Tiêu chuẩn' },
+                      { id: 'compact', label: 'Gọn (nhiều dòng)' },
+                    ] as const).map(opt => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => updateTableDensity(opt.id)}
+                        className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                          tablePrefs.density === opt.id
+                            ? 'bg-pri text-white border-pri'
+                            : 'bg-surf text-tx border-bdr hover:bg-act'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="border-t border-bdr pt-2.5 space-y-1.5">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-mu block">
+                    Hiển thị cột trên bảng
+                  </span>
+                  <div className="grid grid-cols-2 gap-1.5 max-h-56 overflow-y-auto scrollbar-thin pr-1">
+                    {TOGGLEABLE_WORKER_COLUMNS.map(col => {
+                      const visible = !hiddenColumnsSet.has(col.key);
+                      return (
+                        <label
+                          key={col.key}
+                          className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-act cursor-pointer text-xs text-tx select-none"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={visible}
+                            onChange={() => toggleTableColumn(col.key)}
+                            className="w-3.5 h-3.5 rounded accent-primary cursor-pointer"
+                          />
+                          <span className="truncate">{col.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowDataHygiene(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap border border-bdr2 bg-surf text-lnk hover:bg-act transition-colors cursor-pointer shrink-0"
+          >
+            <Sparkles size={13} />
+            <span>Làm sạch dữ liệu</span>
+            {hygieneStats.totalIssues > 0 && (
+              <span className="px-1.5 py-0.2 rounded-md bg-wn/20 text-wn font-tabular text-[11px]">
+                {hygieneStats.totalIssues}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Saved Filter Views Strip */}
+      <div className="flex items-center gap-1.5 flex-wrap text-xs">
+        <span className="text-[11px] font-bold text-mu inline-flex items-center gap-1 mr-0.5">
+          <Bookmark size={12} /> Bộ lọc đã lưu:
+        </span>
+        {savedViews.map(v => (
+          <div
+            key={v.id}
+            className="inline-flex items-center rounded-lg border border-bdr2 bg-surf hover:border-pri2/50 overflow-hidden transition-colors"
+          >
+            <button
+              type="button"
+              onClick={() => handleApplySavedView(v)}
+              className="px-2.5 py-1 text-[11px] font-semibold text-tx hover:text-lnk hover:bg-act/60 transition-colors cursor-pointer"
+              title="Bấm để áp dụng nhanh bộ lọc này"
+            >
+              {v.name}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDeleteSavedView(v.id)}
+              aria-label={`Xóa bộ lọc ${v.name}`}
+              className="px-1.5 py-1 text-mu hover:text-dgr hover:bg-dgrbg/50 border-l border-bdr transition-colors cursor-pointer"
+            >
+              <X size={11} />
+            </button>
+          </div>
+        ))}
+        {showSaveViewInput ? (
+          <div className="inline-flex items-center gap-1 bg-surf border border-pri2/60 rounded-lg px-2 py-0.5">
+            <input
+              autoFocus
+              value={newViewName}
+              onChange={e => setNewViewName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') handleSaveCurrentView();
+                if (e.key === 'Escape') { setShowSaveViewInput(false); setNewViewName(''); }
+              }}
+              placeholder="VD: KTX 1 chưa ĐK tạm trú..."
+              className="bg-transparent text-xs text-tx placeholder-mu focus:outline-none w-44 py-0.5"
+            />
+            <button
+              type="button"
+              onClick={handleSaveCurrentView}
+              className="px-2 py-0.5 rounded bg-pri text-white text-[11px] font-bold cursor-pointer"
+            >
+              Lưu
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowSaveViewInput(false); setNewViewName(''); }}
+              className="p-0.5 text-mu hover:text-tx cursor-pointer"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowSaveViewInput(true)}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-dashed border-bdr2 text-[11px] font-semibold text-lnk hover:bg-bdg/50 transition-colors cursor-pointer"
+          >
+            <BookmarkPlus size={12} />
+            <span>Lưu bộ lọc hiện tại</span>
+          </button>
+        )}
       </div>
 
       <BulkActionBar
@@ -2984,6 +3330,8 @@ export function WorkerManagementClient() {
         onToggleTamTru={handleToggleTamTru}
         canWriteBlock={canWriteBlock}
         rowOffset={rowOffset}
+        hiddenColumns={hiddenColumnsSet}
+        density={tablePrefs.density}
       />
 
       {/* Pagination */}
@@ -3009,7 +3357,26 @@ export function WorkerManagementClient() {
         </div>
       </div>
 
-      {showAddModal && <WorkerFormModal worker={null} onSave={handleSave} onClose={() => setShowAddModal(false)} allWorkers={workers} />}
+      {showAddModal && (
+        <WorkerFormModal
+          worker={null}
+          prefillData={reentryPrefill}
+          onSave={handleSave}
+          onClose={() => { setShowAddModal(false); setReentryPrefill(null); }}
+          allWorkers={workers}
+        />
+      )}
+      {showQuickReentry && (
+        <QuickReentryModal
+          activeWorkers={workers}
+          onSelectReentry={prefill => {
+            setShowQuickReentry(false);
+            setReentryPrefill(prefill);
+            setShowAddModal(true);
+          }}
+          onClose={() => setShowQuickReentry(false)}
+        />
+      )}
       {editingWorker && <WorkerFormModal worker={editingWorker} onSave={handleSave} onClose={() => setEditingWorker(null)} allWorkers={workers} />}
       {viewingWorker && <WorkerDetailModal worker={viewingWorker} onClose={() => setViewingWorker(null)} onEdit={w => { setViewingWorker(null); setEditingWorker(w); }} canEdit={canWriteBlock(viewingWorker.day, viewingWorker.ktx)} onDelete={canDeleteSingle && canWriteBlock(viewingWorker.day, viewingWorker.ktx) ? w => { setViewingWorker(null); setDeleteTarget(w); } : undefined} />}
       {deleteTarget && canDeleteSingle && <DeleteConfirmModal target={deleteTarget} onConfirm={() => handleDelete(deleteTarget)} onClose={() => setDeleteTarget(null)} />}
@@ -3032,6 +3399,10 @@ export function WorkerManagementClient() {
             setEditingWorker(w);
           }}
           onBulkMarkTamTru={handleBulkMarkTamTruByIds}
+          onAutoFixed={async summaryDetail => {
+            await refreshWorkers();
+            writeAuditLog('UPDATE', summaryDetail);
+          }}
           canWriteBlock={canWriteBlock}
           isAdmin={isAdmin}
         />

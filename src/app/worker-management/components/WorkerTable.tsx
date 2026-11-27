@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { StatusTag, MonoChip } from '@/components/ui/StatusTag';
 import { normalizeBedLabel } from '@/lib/bedSync';
+import type { WorkerTableColumnKey, WorkerTableDensity } from '@/lib/workerTablePrefs';
 
 interface Props {
   workers: Worker[];
@@ -40,23 +41,27 @@ interface Props {
   canWriteBlock?: (blockName: string, ktxName?: string) => boolean;
   /** Sequential row number offset for renumbering after filter (0-based index of first row) */
   rowOffset?: number;
+  /** Optional desktop column visibility hide-set */
+  hiddenColumns?: Set<string>;
+  /** Optional desktop row density */
+  density?: WorkerTableDensity;
 }
 
-const COLUMNS: { key: keyof Worker; label: string; width?: string }[] = [
+const COLUMNS: { key: keyof Worker; colId?: WorkerTableColumnKey; label: string; width?: string }[] = [
   { key: 'stt', label: 'STT', width: 'w-12' },
   { key: 'hoVaTen', label: 'Họ và Tên', width: 'min-w-[230px]' },
-  { key: 'maNV', label: 'Mã NV', width: 'w-28' },
-  { key: 'tieuDoan', label: 'TD', width: 'w-20' },
-  { key: 'ktx', label: 'KTX', width: 'w-20' },
-  { key: 'day', label: 'Dãy', width: 'w-20' },
-  { key: 'phongSo', label: 'Phòng', width: 'w-16' },
-  { key: 'giuong', label: 'Giường', width: 'w-16' },
-  { key: 'soDienThoai', label: 'SĐT', width: 'w-32' },
-  { key: 'cccd', label: 'CCCD', width: 'w-36' },
-  { key: 'hoKhauTinh', label: 'Tỉnh/TP', width: 'min-w-[120px]' },
-  { key: 'toTruong', label: 'Tổ Trưởng', width: 'min-w-[130px]' },
-  { key: 'ngayVaoKTX', label: 'Ngày Vào', width: 'w-28' },
-  { key: 'ngayVaoKTX', label: 'Số Ngày', width: 'w-20' },
+  { key: 'maNV', colId: 'maNV', label: 'Mã NV', width: 'w-28' },
+  { key: 'tieuDoan', colId: 'tieuDoan', label: 'TD', width: 'w-20' },
+  { key: 'ktx', colId: 'ktx', label: 'KTX', width: 'w-20' },
+  { key: 'day', colId: 'day', label: 'Dãy', width: 'w-20' },
+  { key: 'phongSo', colId: 'phongSo', label: 'Phòng', width: 'w-16' },
+  { key: 'giuong', colId: 'giuong', label: 'Giường', width: 'w-16' },
+  { key: 'soDienThoai', colId: 'soDienThoai', label: 'SĐT', width: 'w-32' },
+  { key: 'cccd', colId: 'cccd', label: 'CCCD', width: 'w-36' },
+  { key: 'hoKhauTinh', colId: 'hoKhauTinh', label: 'Tỉnh/TP', width: 'min-w-[120px]' },
+  { key: 'toTruong', colId: 'toTruong', label: 'Tổ Trưởng', width: 'min-w-[130px]' },
+  { key: 'ngayVaoKTX', colId: 'ngayVaoKTX', label: 'Ngày Vào', width: 'w-28' },
+  { key: 'ngayVaoKTX', colId: 'soNgay', label: 'Số Ngày', width: 'w-20' },
 ];
 
 const MOBILE_SORT_OPTIONS: { key: keyof Worker; label: string }[] = [
@@ -194,8 +199,17 @@ const WorkerTable = React.memo(function WorkerTable({
   onToggleTamTru,
   canWriteBlock,
   rowOffset = 0,
+  hiddenColumns,
+  density = 'comfortable',
 }: Props) {
   const [mobileMode, setMobileMode] = useState<'cards' | 'table'>('cards');
+  const isCompact = density === 'compact';
+  const cellPy = isCompact ? 'py-1.5' : 'py-3';
+  const headPy = isCompact ? 'py-2' : 'py-3';
+  const isColVisible = (colId?: WorkerTableColumnKey) => !colId || !hiddenColumns?.has(colId);
+  const showTamTruCol = isColVisible('tamTru');
+  const showProfileStatus = isColVisible('profileStatus');
+  const tableMinW = hiddenColumns && hiddenColumns.size >= 5 ? 'min-w-[820px]' : 'min-w-[1250px]';
 
   const allSelected = allIds.length > 0 && allIds.every(id => selectedIds.has(id));
   const someSelected = allIds.some(id => selectedIds.has(id)) && !allSelected;
@@ -522,10 +536,10 @@ const WorkerTable = React.memo(function WorkerTable({
           </div>
         )}
         <div className="overflow-x-auto scrollbar-thin">
-          <table className="w-full border-collapse min-w-[1250px] text-left table-auto">
+          <table className={`w-full border-collapse ${tableMinW} text-left table-auto`}>
             <thead>
               <tr className="bg-act border-b border-bdr2 sticky top-0 z-20">
-                <th className="px-3 py-3 w-10 text-center bg-act z-20">
+                <th className={`px-3 ${headPy} w-10 text-center bg-act z-20`}>
                   <input
                     type="checkbox"
                     checked={allSelected}
@@ -536,28 +550,33 @@ const WorkerTable = React.memo(function WorkerTable({
                     className="rounded border-bdr2 bg-surf text-pri focus:ring-pri2 cursor-pointer"
                   />
                 </th>
-                {COLUMNS.map((col, i) => (
-                  <th
-                    key={`th-${col.key}-${i}`}
-                    className={`px-3 py-3 text-[11px] font-bold text-mu uppercase tracking-wider whitespace-nowrap cursor-pointer select-none hover:text-tx transition-colors bg-act z-20 ${col.width || ''} ${
-                      i === 0
-                        ? 'lg:sticky lg:left-0 lg:z-30'
-                        : i === 1
-                        ? 'lg:sticky lg:left-[52px] lg:z-30 lg:shadow-[4px_0_12px_-4px_rgba(0,0,0,0.28)]'
-                        : ''
-                    }`}
-                    onClick={() => onSort(col.key)}
-                  >
-                    <div className="flex items-center gap-1.5 whitespace-nowrap">
-                      <span>{col.label}</span>
-                      <SortIcon col={col.key} />
-                    </div>
+                {COLUMNS.map((col, i) => {
+                  if (!isColVisible(col.colId)) return null;
+                  return (
+                    <th
+                      key={`th-${col.key}-${i}`}
+                      className={`px-3 ${headPy} text-[11px] font-bold text-mu uppercase tracking-wider whitespace-nowrap cursor-pointer select-none hover:text-tx transition-colors bg-act z-20 ${col.width || ''} ${
+                        i === 0
+                          ? 'lg:sticky lg:left-0 lg:z-30'
+                          : i === 1
+                          ? 'lg:sticky lg:left-[52px] lg:z-30 lg:shadow-[4px_0_12px_-4px_rgba(0,0,0,0.28)]'
+                          : ''
+                      }`}
+                      onClick={() => onSort(col.key)}
+                    >
+                      <div className="flex items-center gap-1.5 whitespace-nowrap">
+                        <span>{col.label}</span>
+                        <SortIcon col={col.key} />
+                      </div>
+                    </th>
+                  );
+                })}
+                {showTamTruCol && (
+                  <th className={`px-3 ${headPy} text-[11px] font-bold text-mu uppercase tracking-wider w-24 whitespace-nowrap bg-act z-20`}>
+                    Tạm trú
                   </th>
-                ))}
-                <th className="px-3 py-3 text-[11px] font-bold text-mu uppercase tracking-wider w-24 whitespace-nowrap bg-act z-20">
-                  Tạm trú
-                </th>
-                <th className="px-3 py-3 text-[11px] font-bold text-mu uppercase tracking-wider w-28 text-right pr-4 whitespace-nowrap bg-act z-20">
+                )}
+                <th className={`px-3 ${headPy} text-[11px] font-bold text-mu uppercase tracking-wider w-28 text-right pr-4 whitespace-nowrap bg-act z-20`}>
                   Thao tác
                 </th>
               </tr>
@@ -582,7 +601,7 @@ const WorkerTable = React.memo(function WorkerTable({
                     } hover:bg-act/75`}
                     onClick={() => onView(w)}
                   >
-                    <td className="px-3 py-3 text-center" onClick={e => e.stopPropagation()}>
+                    <td className={`px-3 ${cellPy} text-center`} onClick={e => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={isSelected}
@@ -591,7 +610,7 @@ const WorkerTable = React.memo(function WorkerTable({
                       />
                     </td>
                     <td
-                      className={`px-3 py-3 whitespace-nowrap lg:sticky lg:left-0 lg:z-10 transition-colors ${
+                      className={`px-3 ${cellPy} whitespace-nowrap lg:sticky lg:left-0 lg:z-10 transition-colors ${
                         isSelected ? 'bg-bdg' : 'bg-surf group-hover:bg-act'
                       }`}
                       onClick={e => e.stopPropagation()}
@@ -599,14 +618,14 @@ const WorkerTable = React.memo(function WorkerTable({
                       <span className="text-xs font-mono font-tabular text-mu font-semibold">{displayStt}</span>
                     </td>
                     <td
-                      className={`px-3.5 py-3 whitespace-nowrap min-w-[230px] lg:sticky lg:left-[52px] lg:z-10 lg:shadow-[4px_0_12px_-4px_rgba(0,0,0,0.22)] transition-colors ${
+                      className={`px-3.5 ${cellPy} whitespace-nowrap min-w-[230px] lg:sticky lg:left-[52px] lg:z-10 lg:shadow-[4px_0_12px_-4px_rgba(0,0,0,0.22)] transition-colors ${
                         isSelected ? 'bg-bdg' : 'bg-surf group-hover:bg-act'
                       }`}
                     >
-                      <div className="flex flex-col gap-1">
+                      <div className={`flex flex-col ${isCompact ? 'gap-0.5' : 'gap-1'}`}>
                         <div className="flex items-center gap-2 flex-nowrap whitespace-nowrap">
                           <div
-                            className={`w-7 h-7 rounded-lg border flex items-center justify-center text-xs font-bold shrink-0 ${
+                            className={`${isCompact ? 'w-6 h-6 text-[11px]' : 'w-7 h-7 text-xs'} rounded-lg border flex items-center justify-center font-bold shrink-0 ${
                               isFemale
                                 ? 'tint-pink border-pink-tint text-pink-tone'
                                 : 'bg-bdg border-bdr2 text-lnk'
@@ -614,61 +633,89 @@ const WorkerTable = React.memo(function WorkerTable({
                           >
                             {w.hoVaTen.split(' ').pop()?.charAt(0) ?? '?'}
                           </div>
-                          <p className="text-sm font-bold text-tx whitespace-nowrap group-hover:text-lnk transition-colors">
+                          <p className={`${isCompact ? 'text-[13px]' : 'text-sm'} font-bold text-tx whitespace-nowrap group-hover:text-lnk transition-colors`}>
                             {w.hoVaTen}
                           </p>
                         </div>
-                        <div className="whitespace-nowrap flex items-center">
-                          <ProfileStatusTag worker={w} />
-                        </div>
+                        {showProfileStatus && (
+                          <div className="whitespace-nowrap flex items-center">
+                            <ProfileStatusTag worker={w} />
+                          </div>
+                        )}
                       </div>
                     </td>
-                    <td className="px-3 py-3">
-                      <MaNVCell value={w.maNV} />
-                    </td>
-                    <td className="px-3 py-3">
-                      <PlatoonBadge value={w.tieuDoan} />
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className="text-xs text-mu font-semibold whitespace-nowrap">{w.ktx || '—'}</span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className="text-xs font-bold text-tx whitespace-nowrap">{w.day || '—'}</span>
-                    </td>
-                    <td className="px-3 py-3">
-                      {w.phongSo ? <MonoChip tone="blue">P.{w.phongSo}</MonoChip> : <span className="text-xs text-mu">—</span>}
-                    </td>
-                    <td className="px-3 py-3">
-                      {w.giuong ? <MonoChip>G{normalizeBedLabel(w.giuong) || w.giuong}</MonoChip> : <span className="text-xs text-mu">—</span>}
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className="text-xs font-mono font-tabular text-mu">{w.soDienThoai || '—'}</span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <CCCDCell value={w.cccd} />
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className="text-xs text-mu truncate max-w-[120px] block">{w.hoKhauTinh || '—'}</span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className="text-xs text-mu truncate max-w-[130px] block">{w.toTruong || '—'}</span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className="text-xs font-mono font-tabular text-mu">{w.ngayVaoKTX || '—'}</span>
-                    </td>
-                    <td className="px-3 py-3">
-                      {soNgay !== null ? (
-                        <StatusTag tone={soNgay <= 7 ? 'teal' : 'slate'} mono>
-                          {soNgay}n
-                        </StatusTag>
-                      ) : (
-                        <span className="text-ic text-xs">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
-                      <TamTruTag worker={w} onToggle={onToggleTamTru} />
-                    </td>
-                    <td className="px-3 py-3 text-right pr-4" onClick={e => e.stopPropagation()}>
+                    {isColVisible('maNV') && (
+                      <td className={`px-3 ${cellPy}`}>
+                        <MaNVCell value={w.maNV} />
+                      </td>
+                    )}
+                    {isColVisible('tieuDoan') && (
+                      <td className={`px-3 ${cellPy}`}>
+                        <PlatoonBadge value={w.tieuDoan} />
+                      </td>
+                    )}
+                    {isColVisible('ktx') && (
+                      <td className={`px-3 ${cellPy}`}>
+                        <span className="text-xs text-mu font-semibold whitespace-nowrap">{w.ktx || '—'}</span>
+                      </td>
+                    )}
+                    {isColVisible('day') && (
+                      <td className={`px-3 ${cellPy}`}>
+                        <span className="text-xs font-bold text-tx whitespace-nowrap">{w.day || '—'}</span>
+                      </td>
+                    )}
+                    {isColVisible('phongSo') && (
+                      <td className={`px-3 ${cellPy}`}>
+                        {w.phongSo ? <MonoChip tone="blue">P.{w.phongSo}</MonoChip> : <span className="text-xs text-mu">—</span>}
+                      </td>
+                    )}
+                    {isColVisible('giuong') && (
+                      <td className={`px-3 ${cellPy}`}>
+                        {w.giuong ? <MonoChip>G{normalizeBedLabel(w.giuong) || w.giuong}</MonoChip> : <span className="text-xs text-mu">—</span>}
+                      </td>
+                    )}
+                    {isColVisible('soDienThoai') && (
+                      <td className={`px-3 ${cellPy}`}>
+                        <span className="text-xs font-mono font-tabular text-mu">{w.soDienThoai || '—'}</span>
+                      </td>
+                    )}
+                    {isColVisible('cccd') && (
+                      <td className={`px-3 ${cellPy}`}>
+                        <CCCDCell value={w.cccd} />
+                      </td>
+                    )}
+                    {isColVisible('hoKhauTinh') && (
+                      <td className={`px-3 ${cellPy}`}>
+                        <span className="text-xs text-mu truncate max-w-[120px] block">{w.hoKhauTinh || '—'}</span>
+                      </td>
+                    )}
+                    {isColVisible('toTruong') && (
+                      <td className={`px-3 ${cellPy}`}>
+                        <span className="text-xs text-mu truncate max-w-[130px] block">{w.toTruong || '—'}</span>
+                      </td>
+                    )}
+                    {isColVisible('ngayVaoKTX') && (
+                      <td className={`px-3 ${cellPy}`}>
+                        <span className="text-xs font-mono font-tabular text-mu">{w.ngayVaoKTX || '—'}</span>
+                      </td>
+                    )}
+                    {isColVisible('soNgay') && (
+                      <td className={`px-3 ${cellPy}`}>
+                        {soNgay !== null ? (
+                          <StatusTag tone={soNgay <= 7 ? 'teal' : 'slate'} mono>
+                            {soNgay}n
+                          </StatusTag>
+                        ) : (
+                          <span className="text-ic text-xs">—</span>
+                        )}
+                      </td>
+                    )}
+                    {showTamTruCol && (
+                      <td className={`px-3 ${cellPy}`} onClick={e => e.stopPropagation()}>
+                        <TamTruTag worker={w} onToggle={onToggleTamTru} />
+                      </td>
+                    )}
+                    <td className={`px-3 ${cellPy} text-right pr-4`} onClick={e => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
                         <button
                           onClick={() => onView(w)}

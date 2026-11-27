@@ -9,7 +9,7 @@ import {
   AlertCircle, LayoutGrid, Table2, BarChart3, Wrench, DoorOpen, Calendar,
   ExternalLink, UserPlus, CheckCircle2, Printer, Lock, Download, Minimize2,
   BookmarkCheck, ArrowLeftRight, GripVertical, Move, Trash2, CalendarClock,
-  MoreHorizontal, SlidersHorizontal,
+  MoreHorizontal, SlidersHorizontal, Users, ClipboardCheck,
 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -26,6 +26,7 @@ import { invalidateWorkerHierarchyCache } from '@/lib/workerHierarchy';
 import { invalidateKtxStructureCache } from '@/lib/ktxStructure';
 import { exportToExcel } from '@/lib/exportExcel';
 import { CACHE_KEYS, getCachedData, setCachedData } from '@/lib/clientCache';
+import { loadSavedRoomGenderMap, fetchRoomLabelsAuthoritative } from '@/lib/roomGender';
 import {
   BedReservation,
   BedReservationSlotInput,
@@ -43,6 +44,8 @@ const BedTransferModal = dynamic(() => import('./BedTransferModal'), { ssr: fals
 const RoomConsolidationModal = dynamic(() => import('./RoomConsolidationModal'), { ssr: false });
 const BedSwapModal = dynamic(() => import('./BedSwapModal'), { ssr: false });
 const BedReserveModal = dynamic(() => import('./BedReserveModal'), { ssr: false });
+const GroupIntakeModal = dynamic(() => import('./GroupIntakeModal'), { ssr: false });
+const HallwayInspectorModal = dynamic(() => import('@/components/HallwayInspectorModal'), { ssr: false });
 
 type BedStatus = 'empty' | 'occupied' | 'maintenance';
 type BedFilterStatus = 'all' | BedStatus | 'reserved';
@@ -259,6 +262,13 @@ export default function BedManagementClient() {
   const [showConsolidationModal, setShowConsolidationModal] = useState(
     () => searchParams?.get('action') === 'consolidate'
   );
+  const [showGroupIntakeModal, setShowGroupIntakeModal] = useState(
+    () => searchParams?.get('action') === 'group-intake'
+  );
+  const [showHallwayInspector, setShowHallwayInspector] = useState(
+    () => searchParams?.get('action') === 'inspect'
+  );
+  const [roomGenderMap, setRoomGenderMap] = useState<Record<string, 'male' | 'female' | 'auto'>>({});
   // Group 3: Bed Reservations, Global Swap Modal, and Drag & Drop Mode
   const [reservations, setReservations] = useState<BedReservation[]>(() => getCachedData<BedReservation[]>(CACHE_KEYS.BEDS_RESERVATIONS) ?? []);
   const [reservationsMissingTable, setReservationsMissingTable] = useState(false);
@@ -289,6 +299,27 @@ export default function BedManagementClient() {
     targetBed: BedRow;
     targetReservation?: BedReservation | null;
   } | null>(null);
+
+  useEffect(() => {
+    setRoomGenderMap(loadSavedRoomGenderMap());
+    let active = true;
+    fetchRoomLabelsAuthoritative()
+      .then(res => {
+        if (active && res.ok) setRoomGenderMap(prev => ({ ...prev, ...res.data }));
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  // React to CommandPalette / deep-link ?action=... even when already mounted
+  useEffect(() => {
+    const act = searchParams?.get('action');
+    if (act === 'group-intake') setShowGroupIntakeModal(true);
+    else if (act === 'inspect') setShowHallwayInspector(true);
+    else if (act === 'consolidate') setShowConsolidationModal(true);
+    else if (act === 'swap') setGlobalSwapState({ open: true });
+    else if (act === 'reserve') setReserveModalState({ open: true, mode: 'create', preselected: [] });
+  }, [searchParams]);
 
   useEffect(() => {
     if (!showToolsMenu) return;
@@ -1682,6 +1713,17 @@ export default function BedManagementClient() {
 
           <button
             type="button"
+            onClick={() => setShowGroupIntakeModal(true)}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl border border-ok2/45 bg-okbg/40 text-ok hover:bg-okbg/70 text-xs font-bold transition-colors disabled:opacity-60 cursor-pointer whitespace-nowrap"
+            title="Dự báo sức chứa đón đoàn, giữ chỗ liền phòng & tự động xếp giường hàng loạt"
+          >
+            <Users size={14} />
+            <span>Đón đoàn</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setReserveModalState({ open: true, mode: reservations.length > 0 ? 'manage' : 'create', preselected: [] })}
             disabled={loading}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl border border-purple-500/40 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 text-xs font-bold transition-colors disabled:opacity-60 cursor-pointer whitespace-nowrap"
@@ -1735,6 +1777,15 @@ export default function BedManagementClient() {
 
             {showToolsMenu && (
               <div className="absolute right-0 top-full mt-1.5 w-60 rounded-xl dropdown-menu-panel p-1.5 z-40 fade-in space-y-0.5">
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => { setShowToolsMenu(false); setShowHallwayInspector(true); }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-tx hover:bg-act transition-colors text-left disabled:opacity-50 cursor-pointer"
+                >
+                  <ClipboardCheck size={14} className="text-ok shrink-0" />
+                  <span>Kiểm phòng hành lang (Mobile)</span>
+                </button>
                 <button
                   type="button"
                   disabled={loading}
@@ -3097,6 +3148,42 @@ export default function BedManagementClient() {
             </div>
           </div>
         </div>
+      )}
+      {/* ─── Group Intake & Contiguous Batch Auto-Assign Modal (Gói 3) ─── */}
+      {showGroupIntakeModal && (
+        <GroupIntakeModal
+          facilities={facilitiesList}
+          beds={beds}
+          workers={contextWorkers}
+          reservations={reservations}
+          roomGenderMap={roomGenderMap}
+          isAdmin={isAdmin}
+          canWriteBlock={canWriteBlock}
+          actorName={currentUser?.name || currentUser?.email || 'Admin'}
+          onLog={(action, detail) => {
+            addLog(currentUser?.email || currentUser?.name || 'Admin', action, detail);
+          }}
+          onCompleted={async () => {
+            await Promise.all([loadBeds(true), loadReservations(), refreshWorkers()]);
+          }}
+          onClose={() => setShowGroupIntakeModal(false)}
+        />
+      )}
+
+      {/* ─── Mobile Hallway Inspector Modal (Gói 4) ─── */}
+      {showHallwayInspector && (
+        <HallwayInspectorModal
+          workers={contextWorkers}
+          facilities={facilitiesList}
+          isAdmin={isAdmin}
+          canWriteBlock={canWriteBlock}
+          actorName={currentUser?.name || currentUser?.email || 'Admin'}
+          actorEmail={currentUser?.email || ''}
+          onLog={(action, detail) => {
+            addLog(currentUser?.email || currentUser?.name || 'Admin', action, detail);
+          }}
+          onClose={() => setShowHallwayInspector(false)}
+        />
       )}
     </div>
   );

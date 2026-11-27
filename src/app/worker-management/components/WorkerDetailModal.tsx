@@ -23,8 +23,13 @@ import {
   CheckCircle2,
   Clock,
   Box,
+  Copy,
+  Check,
+  BedDouble,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
+import { useWorkers } from '@/context/WorkerContext';
 import { escapeHtml, printHtmlViaIframe } from '@/lib/printHtml';
 import { SlidingTabs } from '@/components/ui/MotionPrimitives';
 import { StatusTag, MonoChip } from '@/components/ui/StatusTag';
@@ -53,21 +58,62 @@ function DetailRow({
   value,
   icon: Icon,
   mono,
+  copyable,
+  tel,
 }: {
   label: string;
   value: string | undefined;
   icon?: React.ComponentType<{ size?: number; className?: string }>;
   mono?: boolean;
+  copyable?: boolean;
+  tel?: boolean;
 }) {
+  const [copied, setCopied] = useState(false);
+  const cleanVal = (value || '').trim();
+  const handleCopy = async () => {
+    if (!cleanVal) return;
+    try {
+      await navigator.clipboard.writeText(cleanVal);
+      setCopied(true);
+      toast.success(`Đã copy ${label}: ${cleanVal}`);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      toast.error('Không thể tự động copy.');
+    }
+  };
+
   return (
-    <div className="flex items-start gap-3 py-2.5 border-b border-bdr last:border-0">
+    <div className="flex items-start gap-3 py-2.5 border-b border-bdr last:border-0 group">
       {Icon && <Icon size={14} className="text-ic mt-0.5 flex-shrink-0" />}
       <div className="flex-1 min-w-0">
         <p className="text-xs text-mu font-medium">{label}</p>
         <p className={`text-sm text-tx mt-0.5 ${mono ? 'font-mono font-tabular' : 'font-semibold'} break-words`}>
-          {value || <span className="text-mu italic text-xs font-normal">Chưa có thông tin</span>}
+          {cleanVal || <span className="text-mu italic text-xs font-normal">Chưa có thông tin</span>}
         </p>
       </div>
+      {cleanVal && (copyable || tel) && (
+        <div className="flex items-center gap-1 shrink-0 pt-1">
+          {tel && (
+            <a
+              href={`tel:${cleanVal.replace(/\s+/g, '')}`}
+              className="p-1.5 rounded-lg bg-okbg/40 text-ok hover:bg-okbg transition-colors"
+              title={`Gọi ${cleanVal}`}
+            >
+              <Phone size={12} />
+            </a>
+          )}
+          {copyable && (
+            <button
+              type="button"
+              onClick={handleCopy}
+              className="p-1.5 rounded-lg bg-act/70 text-mu hover:text-tx hover:bg-act transition-colors cursor-pointer"
+              title={`Sao chép ${label}`}
+            >
+              {copied ? <Check size={12} className="text-ok" /> : <Copy size={12} />}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -88,10 +134,72 @@ function formatHistoryTime(iso: string): string {
 
 export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete, canEdit = true }: Props) {
   const router = useRouter();
+  const { updateTamTruStatus } = useWorkers();
   const [activeTab, setActiveTab] = useState<'info' | 'history'>('info');
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [lazyAvatar, setLazyAvatar] = useState<string | undefined>(w.avatar);
+  const [localTamTru, setLocalTamTru] = useState<'registered' | 'unregistered'>(
+    w.tamTruStatus === 'registered' ? 'registered' : 'unregistered'
+  );
+  const [togglingTamTru, setTogglingTamTru] = useState(false);
+
+  useEffect(() => {
+    setLocalTamTru(w.tamTruStatus === 'registered' ? 'registered' : 'unregistered');
+  }, [w.id, w.tamTruStatus]);
+
+  const handleQuickToggleTamTru = async () => {
+    if (!canEdit || togglingTamTru) return;
+    const prevStatus = localTamTru;
+    const nextStatus = prevStatus === 'registered' ? 'unregistered' : 'registered';
+    setTogglingTamTru(true);
+    setLocalTamTru(nextStatus);
+    try {
+      await updateTamTruStatus(w.id, nextStatus);
+      toast.success(
+        nextStatus === 'registered'
+          ? `Đã đánh dấu ${w.hoVaTen}: Đã ĐK tạm trú`
+          : `Đã chuyển ${w.hoVaTen} về Chưa ĐK tạm trú`,
+        {
+          duration: 6000,
+          action: {
+            label: 'Hoàn tác',
+            onClick: () => {
+              setLocalTamTru(prevStatus);
+              void updateTamTruStatus(w.id, prevStatus);
+            },
+          },
+        }
+      );
+    } catch {
+      setLocalTamTru(prevStatus);
+      toast.error('Không thể cập nhật trạng thái tạm trú.');
+    } finally {
+      setTogglingTamTru(false);
+    }
+  };
+
+  const handleCopyProfileCard = async () => {
+    const loc = [w.ktx, w.day, w.phongSo ? `P.${w.phongSo}` : '', w.giuong ? `G${normalizeBedLabel(w.giuong)}` : '']
+      .filter(Boolean)
+      .join(' · ');
+    const text = [
+      `👤 ${w.hoVaTen}${w.maNV ? ` (#${w.maNV})` : ''}`,
+      w.cccd ? `🪪 CCCD: ${w.cccd}` : '',
+      w.soDienThoai ? `📞 SĐT: ${w.soDienThoai}` : '',
+      w.donVi ? `🏢 Đơn vị: ${w.donVi}${w.tieuDoan ? ` (TD ${w.tieuDoan})` : ''}` : '',
+      loc ? `🛏️ Vị trí: ${loc}` : '',
+      `📋 Tạm trú: ${localTamTru === 'registered' ? 'Đã đăng ký' : 'Chưa đăng ký'}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('Đã copy tóm tắt hồ sơ công nhân (dán thẳng Zalo)!');
+    } catch {
+      toast.error('Không thể tự copy.');
+    }
+  };
 
   const workerId = w.id;
   const workerMaNV = w.maNV || '';
@@ -461,7 +569,7 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
         </div>
 
         {/* Sliding Tabs */}
-        <div className="px-5 py-2.5 border-b border-bdr bg-surf/80">
+        <div className="px-5 py-2.5 border-b border-bdr bg-surf/80 space-y-2.5">
           <SlidingTabs<'info' | 'history'>
             layoutId="worker-detail-tabs"
             compact
@@ -472,6 +580,64 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
               { id: 'history', label: 'Lịch sử lưu trú', icon: History, count: events.length > 0 ? events.length : undefined },
             ]}
           />
+
+          {/* Quick Action Strip */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {canEdit && (
+              <button
+                type="button"
+                disabled={togglingTamTru}
+                onClick={handleQuickToggleTamTru}
+                className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer disabled:opacity-50 ${
+                  localTamTru === 'registered'
+                    ? 'bg-okbg/40 text-ok border-ok2/40 hover:bg-okbg/60'
+                    : 'tint-wn text-wn border-wn/40 hover:opacity-90'
+                }`}
+              >
+                {localTamTru === 'registered' ? <CheckCircle2 size={12} /> : <Clock size={12} />}
+                <span>{localTamTru === 'registered' ? 'Đã ĐK tạm trú' : 'Đánh dấu Đã ĐK tạm trú'}</span>
+              </button>
+            )}
+            {w.soDienThoai && (
+              <a
+                href={`tel:${w.soDienThoai.replace(/\s+/g, '')}`}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-surf border border-bdr2 text-tx hover:bg-act transition-colors"
+              >
+                <Phone size={12} className="text-ok" />
+                <span>Gọi CN</span>
+              </a>
+            )}
+            {w.sdtToTruong && (
+              <a
+                href={`tel:${w.sdtToTruong.replace(/\s+/g, '')}`}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-surf border border-bdr2 text-tx hover:bg-act transition-colors"
+              >
+                <Phone size={12} className="text-lnk" />
+                <span>Gọi Tổ trưởng</span>
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={handleCopyProfileCard}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-surf border border-bdr2 text-tx hover:bg-act transition-colors cursor-pointer"
+            >
+              <Copy size={12} className="text-mu" />
+              <span>Copy Zalo</span>
+            </button>
+            {w.ktx && w.day && w.phongSo && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  router.push(`/bed-management?search=${encodeURIComponent(w.maNV || w.hoVaTen)}`);
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-surf border border-bdr2 text-lnk hover:bg-act transition-colors cursor-pointer"
+              >
+                <BedDouble size={12} />
+                <span>Đổi giường</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Body */}
@@ -480,12 +646,12 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
               <div>
                 <p className="text-[11px] font-bold text-ic uppercase tracking-wider mb-1 mt-1">Thông tin cá nhân</p>
-                <DetailRow label="Họ và Tên" value={w.hoVaTen} icon={User} />
-                <DetailRow label="Mã nhân viên" value={w.maNV} icon={CreditCard} mono />
+                <DetailRow label="Họ và Tên" value={w.hoVaTen} icon={User} copyable />
+                <DetailRow label="Mã nhân viên" value={w.maNV} icon={CreditCard} mono copyable />
                 <DetailRow label="Giới tính" value={w.gioiTinh} />
                 <DetailRow label="Ngày sinh" value={w.ngaySinh} icon={Calendar} mono />
-                <DetailRow label="Số điện thoại" value={w.soDienThoai} icon={Phone} mono />
-                <DetailRow label="CCCD" value={w.cccd} icon={CreditCard} mono />
+                <DetailRow label="Số điện thoại" value={w.soDienThoai} icon={Phone} mono copyable tel />
+                <DetailRow label="CCCD" value={w.cccd} icon={CreditCard} mono copyable />
                 <DetailRow label="Hộ khẩu Tỉnh/TP" value={w.hoKhauTinh} icon={MapPin} />
                 {lazyAvatar && (
                   <div className="py-2.5 border-b border-bdr">
@@ -517,7 +683,7 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
                 />
                 <p className="text-[11px] font-bold text-ic uppercase tracking-wider mb-1 mt-3">Tổ trưởng</p>
                 <DetailRow label="Họ tên tổ trưởng" value={w.toTruong} icon={Users} />
-                <DetailRow label="SĐT tổ trưởng" value={w.sdtToTruong} icon={Phone} mono />
+                <DetailRow label="SĐT tổ trưởng" value={w.sdtToTruong} icon={Phone} mono copyable tel />
                 {w.ghiChu && (
                   <>
                     <p className="text-[11px] font-bold text-ic uppercase tracking-wider mb-1 mt-3">Ghi chú</p>

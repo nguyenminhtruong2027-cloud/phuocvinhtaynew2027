@@ -402,12 +402,20 @@ export default function RoomDrawer({
 
             <div className="flex items-center gap-1 shrink-0">
               <Link
+                href={`/maintenance?create=1&ktx=${encodeURIComponent(ktx)}&day=${encodeURIComponent(resolveEffectiveDayNha())}&room=${encodeURIComponent(normalizeRoomLabel(room))}`}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl tint-wn hover:opacity-90 border border-wn/40 text-xs font-semibold text-wn transition-colors whitespace-nowrap"
+                title="Tạo phiếu báo hỏng thiết bị cho phòng này"
+              >
+                <Wrench size={13} />
+                <span className="hidden sm:inline">Báo hỏng</span>
+              </Link>
+              <Link
                 href={`/ktx-3d?ktx=${encodeURIComponent(ktx)}&day=${encodeURIComponent(resolveEffectiveDayNha())}&room=${encodeURIComponent(normalizeRoomLabel(room))}`}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-bdg hover:opacity-90 border border-bdr2 text-xs font-semibold text-lnk transition-colors whitespace-nowrap"
                 title="Mở phòng này trong Bản đồ 3D KTX"
               >
                 <Box size={14} />
-                <span className="hidden sm:inline">Phòng 3D</span>
+                <span className="hidden sm:inline">3D</span>
               </Link>
               {workers.length > 0 && (
                 <button
@@ -627,9 +635,14 @@ export default function RoomDrawer({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <p className="text-sm font-bold text-tx whitespace-normal break-words leading-tight">
+                            <Link
+                              href={`/worker-management?view=${encodeURIComponent(w.id)}`}
+                              onClick={onClose}
+                              className="text-sm font-bold text-tx hover:text-lnk hover:underline whitespace-normal break-words leading-tight transition-colors"
+                              title="Bấm để mở hồ sơ chi tiết công nhân"
+                            >
                               {w.hoVaTen}
-                            </p>
+                            </Link>
                             <StatusTag tone={isFemaleWorker ? 'pink' : 'blue'}>
                               {isFemaleWorker ? 'Nữ' : 'Nam'}
                             </StatusTag>
@@ -650,10 +663,14 @@ export default function RoomDrawer({
                         </div>
                         <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
                           {w.soDienThoai && (
-                            <span className="flex items-center gap-1 text-mu font-mono font-tabular whitespace-nowrap">
-                              <Phone size={11} className="text-ic shrink-0" />
+                            <a
+                              href={`tel:${w.soDienThoai.replace(/\s+/g, '')}`}
+                              className="flex items-center gap-1 text-lnk hover:underline font-mono font-tabular whitespace-nowrap"
+                              title={`Gọi nhanh ${w.soDienThoai}`}
+                            >
+                              <Phone size={11} className="shrink-0" />
                               {w.soDienThoai}
-                            </span>
+                            </a>
                           )}
                           {w.cccd && (
                             <span className="flex items-center gap-1 text-mu font-mono font-tabular whitespace-nowrap">

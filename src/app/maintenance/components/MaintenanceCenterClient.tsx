@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   Wrench,
   Plus,
@@ -119,6 +120,7 @@ export default function MaintenanceCenterClient() {
   } = useAuth();
   const { addLog } = useAudit();
   const { ktxGroups } = useKtxStructure();
+  const searchParams = useSearchParams();
   const supabase = useMemo(() => createClient(), []);
 
   type MaintenanceBundleCache = {
@@ -167,6 +169,26 @@ export default function MaintenanceCenterClient() {
   const [createDesc, setCreateDesc] = useState('');
   const [createReporterPhone, setCreateReporterPhone] = useState('');
   const [creating, setCreating] = useState(false);
+
+  // Deep link support from RoomDrawer "Báo hỏng" (?create=1&ktx=...&day=...&room=...)
+  const lastCreateQueryRef = useRef<string | null>(null);
+  useEffect(() => {
+    const createFlag = searchParams?.get('create');
+    if (createFlag !== '1' || !canCreateMaintenanceTicket) return;
+    const qs = searchParams.toString();
+    if (lastCreateQueryRef.current === qs) return;
+    lastCreateQueryRef.current = qs;
+
+    const ktxParam = searchParams.get('ktx')?.trim() || '';
+    const dayParam = searchParams.get('day')?.trim() || '';
+    const roomParam = searchParams.get('room')?.trim() || '';
+
+    if (ktxParam) setCreateKtx(ktxParam);
+    if (dayParam) setCreateDay(dayParam);
+    if (roomParam) setCreateRoom(normalizeRoomLabel(roomParam) || roomParam);
+    setActiveTab('tickets');
+    setShowCreateModal(true);
+  }, [searchParams, canCreateMaintenanceTicket]);
 
   const {
     hasDraft: hasCreateDraft,

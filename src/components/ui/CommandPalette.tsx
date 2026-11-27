@@ -28,6 +28,10 @@ import {
   UserMinus,
   ArrowLeftRight,
   BookmarkCheck,
+  Clock,
+  Sparkles,
+  RotateCcw,
+  ClipboardCheck,
 } from 'lucide-react';
 import { useWorkers } from '@/context/WorkerContext';
 import { useAuth } from '@/context/AuthContext';
@@ -38,10 +42,41 @@ import {
   formatRoomDisplay,
   normalizeRoomLabel,
 } from '@/lib/facilityCapacity';
+import { fetchMaintenanceTickets, MaintenanceTicket, getTicketCategoryShortLabel } from '@/lib/maintenanceTickets';
+
+interface RecentCommandRecord {
+  id: string;
+  label: string;
+  sublabel?: string;
+  href: string;
+}
+
+const RECENT_CMD_KEY = 'ktx_cmd_recent_v1';
+
+function loadRecentCommands(): RecentCommandRecord[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(RECENT_CMD_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.slice(0, 5) : [];
+  } catch {
+    return [];
+  }
+}
+
+function pushRecentCommand(rec: RecentCommandRecord): RecentCommandRecord[] {
+  const prev = loadRecentCommands().filter(r => r.href !== rec.href);
+  const next = [rec, ...prev].slice(0, 5);
+  try {
+    window.localStorage.setItem(RECENT_CMD_KEY, JSON.stringify(next));
+  } catch {}
+  return next;
+}
 
 interface CommandItem {
   id: string;
-  group: 'worker' | 'room' | 'route' | 'action';
+  group: 'recent' | 'worker' | 'room' | 'team' | 'ticket' | 'route' | 'action';
   label: string;
   sublabel?: string;
   badge?: React.ReactNode;
@@ -75,13 +110,23 @@ export default function CommandPalette() {
   const { isAdmin, isTechnician } = useAuth();
   const [themeMode, setThemeMode] = useState<'midnight' | 'light'>('midnight');
   const [roomsCatalog, setRoomsCatalog] = useState<FacilityItem[]>([]);
+  const [activeTickets, setActiveTickets] = useState<MaintenanceTicket[]>([]);
+  const [recentRecords, setRecentRecords] = useState<RecentCommandRecord[]>([]);
 
   useEffect(() => {
-    if (!open || roomsCatalog.length > 0) return;
+    if (!open) return;
+    setRecentRecords(loadRecentCommands());
     let active = true;
-    fetchFacilitiesList(false)
-      .then(list => {
-        if (active && list) setRoomsCatalog(list);
+    if (roomsCatalog.length === 0) {
+      fetchFacilitiesList(false)
+        .then(list => {
+          if (active && list) setRoomsCatalog(list);
+        })
+        .catch(() => {});
+    }
+    fetchMaintenanceTickets({ activeOnly: true })
+      .then(res => {
+        if (active && !res.tableMissing) setActiveTickets(res.tickets);
       })
       .catch(() => {});
     return () => { active = false; };
@@ -137,7 +182,10 @@ export default function CommandPalette() {
   }, [open]);
 
   const navigate = useCallback(
-    (href: string) => {
+    (href: string, recentMeta?: { id: string; label: string; sublabel?: string }) => {
+      if (recentMeta) {
+        setRecentRecords(pushRecentCommand({ ...recentMeta, href }));
+      }
       setOpen(false);
       router.push(href);
     },
@@ -308,6 +356,69 @@ export default function CommandPalette() {
       ...(!isTechnician
         ? [
             {
+              id: 'action-hallway-inspect',
+              group: 'action' as const,
+              label: 'Chế độ Đi Kiểm Phòng Thực Địa (Hành lang)',
+              sublabel: 'Kiểm nhanh từng phòng trên điện thoại, báo hỏng & xuất Zalo cuối lượt',
+              icon: ClipboardCheck,
+              onSelect: () =>
+                navigate('/bed-management?action=inspect', {
+                  id: 'action-hallway-inspect',
+                  label: 'Đi Kiểm Phòng Thực Địa',
+                  sublabel: 'Kiểm phòng theo hành lang',
+                }),
+            },
+            {
+              id: 'action-group-intake',
+              group: 'action' as const,
+              label: 'Trợ Lý Đón Đoàn & Tự Động Xếp Giường Hàng Loạt',
+              sublabel: 'Dự báo sức chứa Nam/Nữ, đặt giữ chỗ & gán giường liền kề',
+              icon: Sparkles,
+              onSelect: () =>
+                navigate('/bed-management?action=group-intake', {
+                  id: 'action-group-intake',
+                  label: 'Trợ Lý Đón Đoàn & Xếp Giường',
+                  sublabel: 'Dự báo sức chứa & xếp giường hàng loạt',
+                }),
+            },
+            {
+              id: 'action-quick-reentry',
+              group: 'action' as const,
+              label: 'Tái Nhập KTX 1 Chạm / Khôi Phục Check-out',
+              sublabel: 'Tìm công nhân đã rời KTX để điền sẵn hồ sơ & kiểm tra Blacklist',
+              icon: RotateCcw,
+              onSelect: () =>
+                navigate('/worker-management?open=reentry', {
+                  id: 'action-quick-reentry',
+                  label: 'Tái Nhập KTX 1 Chạm',
+                  sublabel: 'Khôi phục hồ sơ công nhân cũ',
+                }),
+            },
+            {
+              id: 'action-overdue-tamtru',
+              group: 'action' as const,
+              label: 'Lọc nhanh: Công nhân quá hạn tạm trú (>7 ngày)',
+              sublabel: 'Mở ngay danh sách chưa đăng ký tạm trú quá hạn',
+              icon: Clock,
+              onSelect: () => navigate('/worker-management?quick=overdue_tamtru'),
+            },
+            {
+              id: 'action-no-bed',
+              group: 'action' as const,
+              label: 'Lọc nhanh: Công nhân chưa gắn giường',
+              sublabel: 'Rà soát & bổ sung vị trí giường còn trống',
+              icon: BedDouble,
+              onSelect: () => navigate('/worker-management?quick=no_bed'),
+            },
+            {
+              id: 'action-hygiene',
+              group: 'action' as const,
+              label: 'Làm sạch & Chuẩn hóa Dữ liệu (Auto-Fix)',
+              sublabel: 'Rà trùng CCCD/SĐT, viết hoa chuẩn tên & gộp tên đơn vị sai chính tả',
+              icon: Sparkles,
+              onSelect: () => navigate('/worker-management?open=hygiene'),
+            },
+            {
               id: 'action-consolidate',
               group: 'action' as const,
               label: 'Dồn phòng thông minh (Smart Defragmentation)',
@@ -417,6 +528,95 @@ export default function CommandPalette() {
     });
   }, [query, roomsCatalog, navigate]);
 
+  const teamMatches: CommandItem[] = useMemo(() => {
+    if (isTechnician) return [];
+    const q = stripVN(query.trim());
+    if (!q || q.length < 2) return [];
+    const teamCounts = new Map<string, { label: string; kind: 'Tổ trưởng' | 'Đơn vị'; count: number }>();
+    for (const w of workers) {
+      if (w.ngayRaKTX) continue;
+      if (w.toTruong?.trim()) {
+        const key = `tt:${stripVN(w.toTruong.trim())}`;
+        const prev = teamCounts.get(key);
+        teamCounts.set(key, {
+          label: w.toTruong.trim(),
+          kind: 'Tổ trưởng',
+          count: (prev?.count || 0) + 1,
+        });
+      }
+      if (w.donVi?.trim()) {
+        const key = `dv:${stripVN(w.donVi.trim())}`;
+        const prev = teamCounts.get(key);
+        teamCounts.set(key, {
+          label: w.donVi.trim(),
+          kind: 'Đơn vị',
+          count: (prev?.count || 0) + 1,
+        });
+      }
+    }
+    return Array.from(teamCounts.entries())
+      .filter(([, v]) => stripVN(v.label).includes(q))
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 4)
+      .map(([key, v]) => ({
+        id: `team-${key}`,
+        group: 'team' as const,
+        label: v.label,
+        sublabel: `${v.kind} · ${v.count} công nhân đang ở KTX`,
+        badge: <MonoChip tone="blue">{v.kind}</MonoChip>,
+        icon: Users2,
+        onSelect: () =>
+          navigate(`/worker-management?search=${encodeURIComponent(v.label)}`, {
+            id: `team-${key}`,
+            label: `${v.kind}: ${v.label}`,
+            sublabel: `${v.count} công nhân`,
+          }),
+      }));
+  }, [isTechnician, query, workers, navigate]);
+
+  const ticketMatches: CommandItem[] = useMemo(() => {
+    const q = stripVN(query.trim());
+    if (!q || activeTickets.length === 0) return [];
+    return activeTickets
+      .filter(t => {
+        const hay = stripVN(
+          `${t.ticket_code} ${t.ktx} ${t.day} ${t.phong_so} ${t.description} ${getTicketCategoryShortLabel(t.category)}`
+        );
+        return hay.includes(q);
+      })
+      .slice(0, 4)
+      .map(t => ({
+        id: `ticket-${t.id}`,
+        group: 'ticket' as const,
+        label: `${t.ticket_code} · ${t.day} · ${formatRoomDisplay(t.phong_so)}`,
+        sublabel: `${getTicketCategoryShortLabel(t.category)} — ${t.description}`,
+        badge: (
+          <StatusTag tone={t.priority === 'urgent' ? 'rose' : 'amber'}>
+            {t.status === 'in_progress' ? 'Đang sửa' : 'Chờ xử lý'}
+          </StatusTag>
+        ),
+        icon: Wrench,
+        onSelect: () =>
+          navigate('/maintenance', {
+            id: `ticket-${t.id}`,
+            label: `Phiếu ${t.ticket_code}`,
+            sublabel: `${t.day} · ${formatRoomDisplay(t.phong_so)}`,
+          }),
+      }));
+  }, [query, activeTickets, navigate]);
+
+  const recentItems: CommandItem[] = useMemo(() => {
+    if (query.trim()) return [];
+    return recentRecords.map(r => ({
+      id: `recent-${r.id}`,
+      group: 'recent' as const,
+      label: r.label,
+      sublabel: r.sublabel || 'Truy cập gần đây',
+      icon: Clock,
+      onSelect: () => navigate(r.href),
+    }));
+  }, [query, recentRecords, navigate]);
+
   const filteredRoutes = useMemo(() => {
     const q = stripVN(query.trim());
     if (!q) return routeItems;
@@ -434,8 +634,16 @@ export default function CommandPalette() {
   }, [query, actionItems]);
 
   const allItems = useMemo(
-    () => [...roomMatches, ...workerMatches, ...filteredRoutes, ...filteredActions],
-    [roomMatches, workerMatches, filteredRoutes, filteredActions]
+    () => [
+      ...recentItems,
+      ...roomMatches,
+      ...workerMatches,
+      ...teamMatches,
+      ...ticketMatches,
+      ...filteredRoutes,
+      ...filteredActions,
+    ],
+    [recentItems, roomMatches, workerMatches, teamMatches, ticketMatches, filteredRoutes, filteredActions]
   );
 
   useEffect(() => {
@@ -572,10 +780,13 @@ export default function CommandPalette() {
                 </div>
               ) : (
                 <>
+                  {renderSection('Truy cập gần đây', recentItems)}
                   {renderSection(`Phòng KTX → Mở 3D (${roomMatches.length})`, roomMatches)}
                   {renderSection(`Công nhân (${workerMatches.length})`, workerMatches)}
+                  {renderSection(`Tổ trưởng & Đơn vị (${teamMatches.length})`, teamMatches)}
+                  {renderSection(`Phiếu bảo trì đang mở (${ticketMatches.length})`, ticketMatches)}
                   {renderSection('Điều hướng nhanh', filteredRoutes)}
-                  {renderSection('Tiện ích hệ thống', filteredActions)}
+                  {renderSection('Tiện ích & Lệnh nhanh', filteredActions)}
                 </>
               )}
             </div>
