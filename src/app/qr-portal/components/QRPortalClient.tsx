@@ -2316,7 +2316,146 @@ export default function QRPortalClient({
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            {/* Mobile Registration Approval Cards (< md) */}
+            <div className="md:hidden divide-y divide-bdr">
+              <div className="px-3.5 py-2.5 bg-page border-b border-bdr flex items-center justify-between text-xs">
+                <label className="inline-flex items-center gap-2 font-medium text-tx cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={toggleSelectAllVisible}
+                    className="rounded border-bdr bg-surf cursor-pointer"
+                  />
+                  <span>Chọn tất cả ({filtered.length})</span>
+                </label>
+              </div>
+
+              {filtered.map(reg => {
+                const cfg = STATUS_CONFIG[reg.status];
+                const isProcessing = processing === reg.id;
+                const isDone = reg.status === 'approved' || reg.status === 'rejected';
+                const dupMatch = checkDuplicateWorker(hierarchy.workers, reg.so_cccd, reg.so_dien_thoai);
+                const roomShort = extractRoomNumber(reg.phong_so) || reg.phong_so;
+                const bedShort = normalizeBedLabel(reg.giuong) || reg.giuong;
+
+                return (
+                  <div
+                    key={reg.id}
+                    className={`p-3.5 space-y-2.5 transition-colors ${
+                      selectedIds.has(reg.id)
+                        ? 'bg-bdg/30'
+                        : dupMatch
+                          ? 'tint-wn'
+                          : 'bg-surf'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(reg.id)}
+                          onChange={() => toggleSelectRow(reg.id)}
+                          className="rounded border-bdr bg-surf cursor-pointer mt-1 shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <div className="font-bold text-sm text-tx leading-snug">{reg.ho_va_ten}</div>
+                          <div className="flex items-center gap-1.5 flex-wrap mt-0.5 text-[11px] text-mu">
+                            {reg.ma_nv ? (
+                              <span className="font-mono text-ic bg-act px-1 rounded">{reg.ma_nv}</span>
+                            ) : (
+                              <span>Chưa có mã</span>
+                            )}
+                            {reg.gioi_tinh && <span>· {reg.gioi_tinh}</span>}
+                            {reg.don_vi && <span className="truncate">· {reg.don_vi}</span>}
+                          </div>
+                        </div>
+                      </div>
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold shrink-0 ${cfg.badgeCls}`}>
+                        {cfg.icon}
+                        <span>{cfg.label}</span>
+                      </span>
+                    </div>
+
+                    {dupMatch && (
+                      <div className="rounded-lg bg-dgrbg/70 border border-dgr/30 px-2.5 py-1.5 space-y-0.5">
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-dgr">
+                          <AlertTriangle size={11} /> Trùng {dupMatch.field}
+                        </span>
+                        <p className="text-[11px] text-dgr leading-tight">
+                          Khớp với: {dupMatch.worker.hoVaTen} [{dupMatch.worker.maNV || '—'}] ({dupMatch.worker.ktx} · {dupMatch.worker.day} · P.{extractRoomNumber(dupMatch.worker.phongSo) || dupMatch.worker.phongSo})
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-2 text-[11px] bg-act/50 rounded-xl p-2.5 font-tabular">
+                      <div>
+                        <div className="text-mu text-[10px]">Vị trí đăng ký</div>
+                        <div className="font-bold text-tx mt-0.5">{reg.ktx} · {reg.day}</div>
+                        <div className="text-mu">{roomShort ? `P.${roomShort}` : '—'}{bedShort ? ` · G.${bedShort}` : ''}</div>
+                      </div>
+                      <div>
+                        <div className="text-mu text-[10px]">CCCD &amp; Liên hệ</div>
+                        <div className="font-mono font-semibold text-tx mt-0.5 truncate">{reg.so_cccd || '—'}</div>
+                        <div className="text-mu flex items-center gap-1 truncate">
+                          <Phone size={10} /> {reg.so_dien_thoai || '—'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-bdr">
+                      <span className="text-[11px] text-mu font-tabular">
+                        {new Date(reg.created_at).toLocaleDateString('vi-VN')} · {new Date(reg.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+
+                      <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                        <button
+                          onClick={() => setDetailReg(reg)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-bdr bg-surf text-tx hover:bg-act rounded-lg text-xs font-medium cursor-pointer"
+                        >
+                          <Eye size={12} />
+                          <span>{reg.status === 'pending' ? 'Sửa' : 'Xem'}</span>
+                        </button>
+
+                        {reg.status === 'pending' && (
+                          <>
+                            <button
+                              onClick={() => handleReject(reg.id)}
+                              disabled={isProcessing}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-dgr text-dgr hover:bg-dgrbg rounded-lg text-xs font-medium cursor-pointer disabled:opacity-50"
+                            >
+                              {isProcessing ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />}
+                              <span>Từ chối</span>
+                            </button>
+                            <button
+                              onClick={() => handleApprove(reg)}
+                              disabled={isProcessing}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-ok2 hover:opacity-90 text-ok2-fg rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50"
+                            >
+                              {isProcessing ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                              <span>Duyệt</span>
+                            </button>
+                          </>
+                        )}
+
+                        {isDone && (
+                          <button
+                            onClick={() => setDeleteTarget(reg)}
+                            className="p-1.5 border border-bdr text-dgr hover:border-dgr rounded-lg cursor-pointer"
+                            title="Xóa hồ sơ"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop Table (md+) */}
+            <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-page border-b border-bdr text-[11px] font-bold text-mu uppercase tracking-wider">
@@ -2495,7 +2634,8 @@ export default function QRPortalClient({
                 })}
               </tbody>
             </table>
-          </div>
+            </div>
+          </>
         )}
       </div>
     </div>

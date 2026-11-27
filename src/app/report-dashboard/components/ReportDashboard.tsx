@@ -1796,7 +1796,123 @@ export default function ReportDashboard() {
                     </button>
                   </div>
                 </div>
-                <div className="overflow-x-auto scrollbar-thin">
+                {/* Mobile Expandable Daily Cards (< md) */}
+                <div className="md:hidden divide-y divide-bdr">
+                  {filteredDailyData.map(row => {
+                    const isToday = row.ngay === getVNDateString();
+                    const isExpanded = expandedDate === row.ngay;
+                    return (
+                      <div key={row.ngay} className={isToday ? 'bg-okbg/10' : 'bg-surf'}>
+                        <button
+                          type="button"
+                          onClick={() => setExpandedDate(prev => (prev === row.ngay ? null : row.ngay))}
+                          className="w-full px-3.5 py-3 flex items-center justify-between gap-2 text-left active:bg-act/60 transition-colors"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            {isExpanded ? <ChevronDown size={14} className="text-ok shrink-0" /> : <ChevronRight size={14} className="text-mu shrink-0" />}
+                            <span className="text-xs font-bold text-tx font-tabular">{formatDateVN(row.ngay)}</span>
+                            {isToday && (
+                              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-okbg text-ok">
+                                Hôm nay
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2.5 text-xs font-tabular shrink-0">
+                            <span className="font-bold text-ok">
+                              {row.so_tang > 0 ? `+${row.so_tang.toLocaleString('vi-VN')}` : '0'}
+                            </span>
+                            <span className="font-bold text-wn">
+                              {row.so_giam > 0 ? `-${row.so_giam.toLocaleString('vi-VN')}` : '0'}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded-md font-bold ${
+                              row.bien_dong_rong > 0
+                                ? 'bg-bdg/30 text-lnk'
+                                : row.bien_dong_rong < 0
+                                  ? 'tint-wn text-wn'
+                                  : 'bg-act text-mu'
+                            }`}>
+                              {row.bien_dong_rong > 0 ? `+${row.bien_dong_rong.toLocaleString('vi-VN')}` : row.bien_dong_rong.toLocaleString('vi-VN')}
+                            </span>
+                          </div>
+                        </button>
+
+                        {isExpanded && (
+                          <div className="px-3.5 pb-3.5 pt-1 space-y-2.5 bg-act/40 border-t border-bdr/60 text-xs">
+                            <div className="bg-surf rounded-xl border border-bdr p-2.5">
+                              <div className="font-bold text-ok flex items-center gap-1.5 pb-1.5 mb-1.5 border-b border-bdr">
+                                <UserPlus size={12} /> Vào ở ({row.entries.length.toLocaleString('vi-VN')})
+                              </div>
+                              {row.entries.length === 0 ? (
+                                <p className="text-mu text-[11px]">Không có công nhân vào</p>
+                              ) : (
+                                <div className="max-h-44 overflow-y-auto space-y-1.5">
+                                  {row.entries.slice(0, 50).map((p, i) => (
+                                    <div key={`m-in-${p.id}-${i}`} className="flex items-center justify-between gap-2 py-1 px-2 rounded-lg bg-act/60">
+                                      <div className="min-w-0">
+                                        <span className="font-semibold text-tx truncate block">{p.ho_va_ten}</span>
+                                        <span className="text-[10px] text-mu">
+                                          {p.ma_nv}{p.ktx ? ` · ${p.ktx}` : ''}{p.day ? ` · ${p.day}` : ''}
+                                        </span>
+                                      </div>
+                                      <span className="text-[10px] font-tabular text-ok shrink-0">{p.time_vn}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="bg-surf rounded-xl border border-bdr p-2.5">
+                              <div className="font-bold text-wn flex items-center gap-1.5 pb-1.5 mb-1.5 border-b border-bdr">
+                                <UserMinus size={12} /> Rời KTX ({row.exits.length.toLocaleString('vi-VN')})
+                              </div>
+                              {row.exits.length === 0 ? (
+                                <p className="text-mu text-[11px]">Không có công nhân rời khỏi</p>
+                              ) : (
+                                <div className="max-h-44 overflow-y-auto space-y-1.5">
+                                  {row.exits.slice(0, 50).map((p, i) => (
+                                    <div key={`m-out-${p.id}-${i}`} className="flex items-center justify-between gap-2 py-1 px-2 rounded-lg bg-act/60">
+                                      <div className="min-w-0">
+                                        <span className="font-semibold text-tx truncate block">{p.ho_va_ten}</span>
+                                        <span className="text-[10px] text-mu">
+                                          {p.ma_nv}{p.ktx ? ` · ${p.ktx}` : ''}{p.day ? ` · ${p.day}` : ''}
+                                        </span>
+                                      </div>
+                                      <span className="text-[10px] font-tabular text-wn shrink-0">{p.time_vn}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Mobile Summary Footer */}
+                  <div className="px-3.5 py-2.5 bg-act/80 flex items-center justify-between text-xs font-tabular">
+                    <span className="font-bold text-mu uppercase text-[11px]">Tổng cộng kỳ</span>
+                    <div className="flex items-center gap-3 font-extrabold">
+                      <span className="text-ok">
+                        +{filteredDailyData.reduce((s, r) => s + r.so_tang, 0).toLocaleString('vi-VN')}
+                      </span>
+                      <span className="text-wn">
+                        -{filteredDailyData.reduce((s, r) => s + r.so_giam, 0).toLocaleString('vi-VN')}
+                      </span>
+                      {(() => {
+                        const net = filteredDailyData.reduce((s, r) => s + r.bien_dong_rong, 0);
+                        return (
+                          <span className={net >= 0 ? 'text-lnk' : 'text-wn'}>
+                            {net > 0 ? `+${net.toLocaleString('vi-VN')}` : net.toLocaleString('vi-VN')}
+                          </span>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Desktop Table View (md+) */}
+                <div className="hidden md:block overflow-x-auto scrollbar-thin">
                   <table className="w-full text-sm min-w-[550px]">
                     <thead>
                       <tr className="bg-act/90 border-b border-bdr">

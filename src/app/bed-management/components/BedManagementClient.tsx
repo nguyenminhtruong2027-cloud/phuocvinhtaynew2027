@@ -9,6 +9,7 @@ import {
   AlertCircle, LayoutGrid, Table2, BarChart3, Wrench, DoorOpen, Calendar,
   ExternalLink, UserPlus, CheckCircle2, Printer, Lock, Download, Minimize2,
   BookmarkCheck, ArrowLeftRight, GripVertical, Move, Trash2, CalendarClock,
+  MoreHorizontal, SlidersHorizontal,
 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -279,12 +280,29 @@ export default function BedManagementClient() {
   }));
   const [dragMode, setDragMode] = useState(false);
   const [dragOverBedId, setDragOverBedId] = useState<string | null>(null);
+  const [showToolsMenu, setShowToolsMenu] = useState(false);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const toolsMenuRef = useRef<HTMLDivElement>(null);
   const [pendingDropMove, setPendingDropMove] = useState<{
     worker: WorkerLite;
     fromBed?: BedRow | null;
     targetBed: BedRow;
     targetReservation?: BedReservation | null;
   } | null>(null);
+
+  useEffect(() => {
+    if (!showToolsMenu) return;
+    const onOutside = (e: MouseEvent) => {
+      if (toolsMenuRef.current && !toolsMenuRef.current.contains(e.target as Node)) {
+        setShowToolsMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', onOutside);
+    return () => document.removeEventListener('mousedown', onOutside);
+  }, [showToolsMenu]);
+
+  const activeBedFilterCount =
+    (filterKtx ? 1 : 0) + (filterDay ? 1 : 0) + (filterRoom ? 1 : 0) + (filterStatus !== 'all' ? 1 : 0);
 
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
   if (!supabaseRef.current) supabaseRef.current = createClient();
@@ -1625,18 +1643,19 @@ export default function BedManagementClient() {
     <div className="px-3 sm:px-6 lg:px-8 xl:px-10 py-4 sm:py-5 max-w-screen-2xl mx-auto space-y-5 bg-transparent min-h-screen">
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 pb-3.5 border-b border-bdr">
-        <div className="flex items-center gap-3">
-          <CraftIconBadge icon={BedDouble} badgeIcon={LayoutGrid} tone="blue" size="md" />
-          <div>
-            <h1 className="text-lg sm:text-xl font-extrabold text-tx tracking-tight">
-              Sơ Đồ Mặt Bằng — Quản Lý Giường
+        <div className="flex items-center gap-3 min-w-0">
+          <CraftIconBadge icon={BedDouble} tone="blue" size="md" />
+          <div className="min-w-0">
+            <h1 className="text-base sm:text-xl font-extrabold text-tx tracking-tight truncate">
+              Quản Lý Giường &amp; Mặt Bằng
             </h1>
-            <p className="text-xs text-mu mt-0.5">
+            <p className="text-[11px] sm:text-xs text-mu mt-0.5 truncate">
               Đồng bộ thời gian thực trạng thái giường, công nhân và cơ sở vật chất
             </p>
           </div>
         </div>
-        {/* View switcher */}
+
+        {/* Clean Action Bar: View Switcher + Key Actions + Consolidated Tools Menu */}
         <div className="flex flex-wrap items-center gap-2">
           <SlidingTabs
             layoutId="bed-management-view"
@@ -1644,36 +1663,39 @@ export default function BedManagementClient() {
             value={view}
             onChange={setView}
             tabs={[
-              { id: 'grid', label: 'Sơ Đồ Ma Trận', icon: LayoutGrid },
+              { id: 'grid', label: 'Sơ Đồ', icon: LayoutGrid },
               { id: 'table', label: 'Danh Sách', icon: Table2 },
               { id: 'analytics', label: 'Lấp Đầy', icon: BarChart3 },
             ]}
           />
+
           <button
             type="button"
             onClick={() => setGlobalSwapState({ open: true })}
             disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-bdr2 bg-surf text-tx hover:bg-act text-sm font-bold transition-colors disabled:opacity-60 cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl btn-glow-primary text-xs font-bold disabled:opacity-60 cursor-pointer whitespace-nowrap"
             title="Hoán đổi trực tiếp giường của 2 công nhân bất kỳ (A ⇄ B)"
           >
-            <ArrowLeftRight size={14} className="text-lnk" />
-            <span>Hoán đổi giường</span>
+            <ArrowLeftRight size={14} />
+            <span>Hoán đổi</span>
           </button>
+
           <button
             type="button"
             onClick={() => setReserveModalState({ open: true, mode: reservations.length > 0 ? 'manage' : 'create', preselected: [] })}
             disabled={loading}
-            className="relative flex items-center gap-1.5 px-3 py-2 rounded-lg border border-purple-500/40 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 text-sm font-bold transition-colors disabled:opacity-60 cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl border border-purple-500/40 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 text-xs font-bold transition-colors disabled:opacity-60 cursor-pointer whitespace-nowrap"
             title="Đặt giữ chỗ giường trống cho đoàn công nhân sắp vào KTX"
           >
             <BookmarkCheck size={14} />
-            <span>Giữ chỗ đoàn</span>
+            <span>Giữ chỗ</span>
             {reservations.length > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full bg-purple-600 text-white text-[10px] font-mono font-bold">
+              <span className="px-1.5 py-0.2 rounded-md bg-purple-600 text-white text-[10px] font-mono font-bold">
                 {reservations.length}
               </span>
             )}
           </button>
+
           {view === 'grid' && (
             <button
               type="button"
@@ -1684,7 +1706,7 @@ export default function BedManagementClient() {
                   return next;
                 });
               }}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-bold transition-colors cursor-pointer ${
+              className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
                 dragMode
                   ? 'bg-pri text-white border-pri shadow-sm'
                   : 'border-bdr2 bg-surf text-tx hover:bg-act'
@@ -1695,50 +1717,80 @@ export default function BedManagementClient() {
               <span>{dragMode ? 'Đang Kéo–Thả' : 'Kéo–Thả'}</span>
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => setShowConsolidationModal(true)}
-            disabled={loading}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-pri2/40 bg-pri/10 text-pri2 hover:bg-pri/20 text-sm font-bold transition-colors disabled:opacity-60 cursor-pointer"
-            title="Phân tích và gom các phòng thưa người cùng giới tính để giải phóng phòng trống nguyên căn"
-          >
-            <Minimize2 size={14} />
-            <span>Dồn phòng thông minh</span>
-          </button>
-          {isAdmin && (
+
+          {/* Consolidated Tools Dropdown */}
+          <div ref={toolsMenuRef} className="relative">
             <button
-              onClick={handleSyncBeds}
-              disabled={syncingBeds || refreshing || loading}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-bdr2 bg-bdg text-lnk hover:bg-act text-sm font-bold transition-colors disabled:opacity-60"
-              title="Đối chiếu và dọn dẹp giường trống / công nhân đã xóa hoặc đổi phòng"
+              type="button"
+              onClick={() => setShowToolsMenu(prev => !prev)}
+              className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl border text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                showToolsMenu ? 'bg-act border-pri2/50 text-tx' : 'bg-surf border-bdr2 text-tx hover:bg-act'
+              }`}
+              aria-expanded={showToolsMenu}
+              aria-label="Công cụ quản lý giường"
             >
-              <ArrowRightLeft size={14} className={syncingBeds ? 'animate-spin' : ''} />
-              {syncingBeds ? 'Đang đồng bộ...' : 'Đồng bộ giường'}
+              <MoreHorizontal size={15} className="text-mu" />
+              <span className="hidden sm:inline">Công cụ</span>
             </button>
-          )}
-          <button
-            onClick={handleExportBeds}
-            disabled={loading || bedsFiltered.length === 0}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-ok2 hover:opacity-90 text-ok2-fg text-sm font-bold transition-colors disabled:opacity-50"
-            title="Xuất danh sách giường đang lọc ra Excel"
-          >
-            <Download size={14} /> Xuất Excel
-          </button>
-          <button
-            onClick={() => setShowQrPrint(true)}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-bdr3 bg-transparent text-tx hover:bg-act text-sm font-bold transition-colors"
-            title="In tem QR cho giường ở phạm vi đang chọn"
-          >
-            <Printer size={14} /> Xuất Danh Sách QR
-          </button>
-          <button
-            onClick={() => { loadBeds(); loadWorkers(); loadCapacities(); loadReservations(); }}
-            disabled={refreshing || loading}
-            className="flex items-center gap-2 px-3 py-2 border border-border rounded-lg text-sm text-muted-foreground hover:bg-muted transition-colors disabled:opacity-60"
-          >
-            <RefreshCw size={14} className={refreshing || loading ? 'animate-spin' : ''} />
-            Làm mới
-          </button>
+
+            {showToolsMenu && (
+              <div className="absolute right-0 top-full mt-1.5 w-60 rounded-xl dropdown-menu-panel p-1.5 z-40 fade-in space-y-0.5">
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => { setShowToolsMenu(false); setShowConsolidationModal(true); }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-tx hover:bg-act transition-colors text-left disabled:opacity-50 cursor-pointer"
+                >
+                  <Minimize2 size={14} className="text-pri2 shrink-0" />
+                  <span>Dồn phòng thông minh</span>
+                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    disabled={syncingBeds || refreshing || loading}
+                    onClick={() => { setShowToolsMenu(false); void handleSyncBeds(); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-tx hover:bg-act transition-colors text-left disabled:opacity-50 cursor-pointer"
+                  >
+                    <ArrowRightLeft size={14} className={`text-lnk shrink-0 ${syncingBeds ? 'animate-spin' : ''}`} />
+                    <span>{syncingBeds ? 'Đang đồng bộ giường...' : 'Đồng bộ giường'}</span>
+                  </button>
+                )}
+                <div className="my-1 border-t border-bdr" />
+                <button
+                  type="button"
+                  disabled={loading || bedsFiltered.length === 0}
+                  onClick={() => { setShowToolsMenu(false); handleExportBeds(); }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-tx hover:bg-act transition-colors text-left disabled:opacity-50 cursor-pointer"
+                >
+                  <Download size={14} className="text-ok shrink-0" />
+                  <span>Xuất danh sách Excel</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowToolsMenu(false); setShowQrPrint(true); }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-tx hover:bg-act transition-colors text-left cursor-pointer"
+                >
+                  <Printer size={14} className="text-mu shrink-0" />
+                  <span>In tem QR giường</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={refreshing || loading}
+                  onClick={() => {
+                    setShowToolsMenu(false);
+                    loadBeds();
+                    loadWorkers();
+                    loadCapacities();
+                    loadReservations();
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-tx hover:bg-act transition-colors text-left disabled:opacity-50 cursor-pointer"
+                >
+                  <RefreshCw size={14} className={`text-mu shrink-0 ${refreshing || loading ? 'animate-spin text-pri2' : ''}`} />
+                  <span>Làm mới dữ liệu</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1760,15 +1812,55 @@ export default function BedManagementClient() {
         </div>
       )}
 
-      {/* ─── Top Bar Controls ─── */}
-      <div className="bg-surf border border-bdr rounded-2xl p-4 sm:p-5 shadow-xl space-y-4">
-        <div className="flex flex-wrap gap-3 items-end">
+      {/* ─── Top Bar Controls (Mobile Collapsible Filters + Clean Stats) ─── */}
+      <div className="surface-elevated rounded-2xl p-3.5 sm:p-5 space-y-3.5">
+        {/* Always-visible Search + Mobile Filter Toggle */}
+        <div className="flex items-center gap-2 md:hidden">
+          <div className="relative flex-1 min-w-0">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ic" />
+            <input
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Tìm tên, mã NV, giường (G1)…"
+              className="w-full bg-page/70 border border-bdr2 text-tx placeholder-mu rounded-xl pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pri2/50"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ic hover:text-tx p-0.5"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setMobileFiltersOpen(prev => !prev)}
+            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold shrink-0 cursor-pointer transition-colors ${
+              mobileFiltersOpen || activeBedFilterCount > 0
+                ? 'bg-bdg border-pri2/50 text-lnk'
+                : 'bg-surf border-bdr2 text-tx'
+            }`}
+          >
+            <SlidersHorizontal size={14} />
+            <span>Lọc</span>
+            {activeBedFilterCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-md bg-pri text-white text-[10px] font-mono">
+                {activeBedFilterCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Filter Selects (Always visible on md+, collapsible on mobile) */}
+        <div className={`${mobileFiltersOpen ? 'grid grid-cols-2 gap-2.5 pt-1' : 'hidden'} md:flex md:flex-wrap md:gap-3 md:items-end`}>
           <div className="flex flex-col gap-1">
-            <label className="text-[11px] font-bold text-mu uppercase tracking-wider">KTX</label>
+            <label className="text-[11px] font-semibold text-mu">KTX</label>
             <select
               value={filterKtx}
               onChange={e => { setFilterKtx(e.target.value); setFilterDay(''); setFilterRoom(''); }}
-              className="bg-surf border border-bdr text-tx rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 min-w-[130px] cursor-pointer"
+              className="bg-page/60 border border-bdr2 text-tx rounded-xl px-3 py-2 text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 md:min-w-[130px] cursor-pointer"
             >
               <option value="">Tất cả KTX</option>
               {ktxList.map(k => <option key={k} value={k}>{k}</option>)}
@@ -1776,11 +1868,11 @@ export default function BedManagementClient() {
           </div>
           {filterKtx && (
             <div className="flex flex-col gap-1">
-              <label className="text-[11px] font-bold text-mu uppercase tracking-wider">Dãy</label>
+              <label className="text-[11px] font-semibold text-mu">Dãy</label>
               <select
                 value={filterDay}
                 onChange={e => { setFilterDay(e.target.value); setFilterRoom(''); }}
-                className="bg-surf border border-bdr text-tx rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 min-w-[110px] cursor-pointer"
+                className="bg-page/60 border border-bdr2 text-tx rounded-xl px-3 py-2 text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 md:min-w-[110px] cursor-pointer"
               >
                 <option value="">Tất cả dãy</option>
                 {dayList.map(d => <option key={d} value={d}>{d}</option>)}
@@ -1789,11 +1881,11 @@ export default function BedManagementClient() {
           )}
           {filterKtx && filterDay && (
             <div className="flex flex-col gap-1">
-              <label className="text-[11px] font-bold text-mu uppercase tracking-wider">Phòng</label>
+              <label className="text-[11px] font-semibold text-mu">Phòng</label>
               <select
                 value={filterRoom}
                 onChange={e => setFilterRoom(e.target.value)}
-                className="bg-surf border border-bdr text-tx rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 min-w-[110px] cursor-pointer"
+                className="bg-page/60 border border-bdr2 text-tx rounded-xl px-3 py-2 text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 md:min-w-[110px] cursor-pointer"
               >
                 <option value="">Tất cả phòng</option>
                 {roomList.map(r => <option key={r} value={r}>{formatRoomDisplay(r)}</option>)}
@@ -1801,11 +1893,11 @@ export default function BedManagementClient() {
             </div>
           )}
           <div className="flex flex-col gap-1">
-            <label className="text-[11px] font-bold text-mu uppercase tracking-wider">Trạng thái</label>
+            <label className="text-[11px] font-semibold text-mu">Trạng thái</label>
             <select
               value={filterStatus}
               onChange={e => setFilterStatus(e.target.value as BedFilterStatus)}
-              className="bg-surf border border-bdr text-tx rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 min-w-[130px] cursor-pointer"
+              className="bg-page/60 border border-bdr2 text-tx rounded-xl px-3 py-2 text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-pri2/50 md:min-w-[130px] cursor-pointer"
             >
               <option value="all">Tất cả trạng thái</option>
               <option value="occupied">Đã ở</option>
@@ -1814,15 +1906,15 @@ export default function BedManagementClient() {
               <option value="maintenance">Đang bảo trì</option>
             </select>
           </div>
-          <div className="flex-1 min-w-[220px]">
-            <label className="text-[11px] font-bold text-mu uppercase tracking-wider">Tìm kiếm nhanh</label>
+          <div className="hidden md:block flex-1 min-w-[220px]">
+            <label className="text-[11px] font-semibold text-mu">Tìm kiếm nhanh</label>
             <div className="relative mt-1">
               <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ic" />
               <input
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder="Tên công nhân, mã NV, số giường (G1), tên đoàn giữ chỗ…"
-                className="w-full bg-surf border border-bdr text-tx placeholder-mu rounded-xl pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pri2/50"
+                className="w-full bg-page/60 border border-bdr2 text-tx placeholder-mu rounded-xl pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pri2/50"
               />
               {searchQuery && (
                 <button
@@ -1836,19 +1928,19 @@ export default function BedManagementClient() {
           </div>
         </div>
 
-        {/* Stats strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+        {/* Clean Stats Strip (3-col mobile / 6-col desktop) */}
+        <div className="grid grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-2.5">
           {[
             { label: 'Tổng giường', value: bedsFiltered.length, color: 'text-tx' },
             { label: 'Đã ở', value: occupiedCount, color: 'text-ok' },
-            { label: 'Trống khả dụng', value: emptyCount, color: 'text-lnk' },
-            { label: 'Giữ chỗ đoàn', value: reservedCount, color: 'text-purple-400' },
+            { label: 'Còn trống', value: emptyCount, color: 'text-lnk' },
+            { label: 'Giữ chỗ', value: reservedCount, color: 'text-purple-400' },
             { label: 'Bảo trì', value: maintenanceCount, color: 'text-wn' },
-            { label: 'Tỷ lệ lấp đầy', value: `${fillRateInView}%`, color: 'text-lnk' },
+            { label: 'Lấp đầy', value: `${fillRateInView}%`, color: 'text-lnk' },
           ].map(s => (
-            <div key={s.label} className="rounded-xl border border-bdr bg-surf p-2.5">
-              <p className="text-[11px] text-mu font-semibold">{s.label}</p>
-              <p className={`text-xl font-bold font-tabular mt-0.5 ${s.color}`}>
+            <div key={s.label} className="rounded-xl border border-bdr bg-page/45 px-2.5 py-2">
+              <p className="text-[10.5px] sm:text-[11px] text-mu font-medium truncate">{s.label}</p>
+              <p className={`text-base sm:text-xl font-extrabold font-tabular mt-0.5 ${s.color}`}>
                 {typeof s.value === 'number' ? s.value.toLocaleString('vi-VN') : s.value}
               </p>
             </div>
@@ -1856,40 +1948,40 @@ export default function BedManagementClient() {
         </div>
 
         {/* Legend — Sơ Đồ Giường Tầng Trực Quan */}
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-2 border-t border-bdr">
-          <span className="text-[11px] font-extrabold text-tx uppercase tracking-wider">Sơ đồ màu giường:</span>
-          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-tx">
-            <span className="w-4 h-3.5 rounded border border-pri2/60 bg-surf relative overflow-hidden inline-block">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-2.5 border-t border-bdr text-[11px] sm:text-xs">
+          <span className="font-semibold text-mu">Chú thích:</span>
+          <span className="inline-flex items-center gap-1.5 font-medium text-tx">
+            <span className="w-3.5 h-3 rounded border border-pri2/60 bg-surf relative overflow-hidden inline-block">
               <span className="absolute inset-x-0 top-0 h-1 bg-pri2" />
             </span>
-            Nam (Đã ở)
+            Nam
           </span>
-          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-tx">
-            <span className="w-4 h-3.5 rounded border border-pink-tint bg-surf relative overflow-hidden inline-block">
+          <span className="inline-flex items-center gap-1.5 font-medium text-tx">
+            <span className="w-3.5 h-3 rounded border border-pink-tint bg-surf relative overflow-hidden inline-block">
               <span className="absolute inset-x-0 top-0 h-1 bg-[var(--pink-fg)]" />
             </span>
-            Nữ (Đã ở)
+            Nữ
           </span>
-          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-tx">
-            <span className="w-4 h-3.5 rounded border border-dashed border-ok/60 bg-page relative overflow-hidden inline-block">
+          <span className="inline-flex items-center gap-1.5 font-medium text-tx">
+            <span className="w-3.5 h-3 rounded border border-dashed border-ok/60 bg-page relative overflow-hidden inline-block">
               <span className="absolute inset-x-0 top-0 h-1 bg-ok2/50" />
             </span>
-            Còn trống
+            Trống
           </span>
-          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-tx">
-            <span className="w-4 h-3.5 rounded border border-purple-500/70 bg-purple-500/15 relative overflow-hidden inline-block">
+          <span className="inline-flex items-center gap-1.5 font-medium text-tx">
+            <span className="w-3.5 h-3 rounded border border-purple-500/70 bg-purple-500/15 relative overflow-hidden inline-block">
               <span className="absolute inset-x-0 top-0 h-1 bg-purple-500" />
             </span>
-            Giữ chỗ đoàn
+            Giữ chỗ
           </span>
-          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-tx">
-            <span className="w-4 h-3.5 rounded border border-wn/70 tint-wn relative overflow-hidden inline-block">
+          <span className="inline-flex items-center gap-1.5 font-medium text-tx">
+            <span className="w-3.5 h-3 rounded border border-wn/70 tint-wn relative overflow-hidden inline-block">
               <span className="absolute inset-x-0 top-0 h-1 bg-wn" />
             </span>
             Bảo trì
           </span>
-          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-tx">
-            <span className="w-3.5 h-3.5 rounded tint-dgr border border-dgr" /> Phòng quá tải
+          <span className="inline-flex items-center gap-1.5 font-medium text-dgr">
+            <span className="w-3 h-3 rounded tint-dgr border border-dgr" /> Quá tải
           </span>
         </div>
       </div>
@@ -2258,97 +2350,191 @@ export default function BedManagementClient() {
             </div>
           )}
 
-          {/* ─── TABLE VIEW ─── */}
+          {/* ─── TABLE VIEW (Mobile Cards + Desktop Table) ─── */}
           {view === 'table' && (
-            <div className="bg-surf border border-bdr rounded-2xl shadow-sm overflow-hidden">
-              <div className="overflow-x-auto scrollbar-thin">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-bdr text-left">
-                      {['KTX', 'Dãy', 'Phòng', 'Giường', 'Trạng thái', 'Họ tên', 'Mã NV', 'Đơn vị', 'SĐT', 'Ngày vào', 'Thao tác'].map(h => (
-                        <th key={h} className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-mu whitespace-nowrap">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-bdr">
-                    {bedsFiltered.map(bed => {
-                      const worker = bed?.worker_id ? (workerById.get(bed.worker_id) || null) : null;
-                      const female = isFemale(worker);
-                      return (
-                        <tr key={bed?.id} className="hover:bg-surf transition-colors">
-                          <td className="px-3 py-2 text-xs font-bold text-tx whitespace-nowrap">{bed?.ktx || '—'}</td>
-                          <td className="px-3 py-2 text-xs text-mu whitespace-nowrap">{bed?.day || '—'}</td>
-                          <td className="px-3 py-2 text-xs text-mu font-tabular whitespace-nowrap">P{bed?.phong_so || '—'}</td>
-                          <td className="px-3 py-2 text-xs text-tx font-tabular whitespace-nowrap">{formatGiuongTag(bed?.giuong)}</td>
-                          <td className="px-3 py-2 whitespace-nowrap">
-                            {bed?.status === 'occupied'
-                              ? <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${female ? 'tint-pink text-pink-tone border-pink-tint' : 'bg-bdg text-lnk border-pri2/40'}`}>{female ? '♀ Nữ · Đã ở' : '♂ Nam · Đã ở'}</span>
-                              : bed?.status === 'maintenance'
-                              ? <span className="px-2 py-0.5 rounded-md text-[10px] font-bold border tint-wn text-wn border-wn">Bảo trì</span>
-                              : <span className="px-2 py-0.5 rounded-md text-[10px] font-bold border border-dashed bg-okbg text-ok border-ok/40">Trống</span>}
-                          </td>
-                          <td className="px-3 py-2 text-xs text-tx font-semibold truncate max-w-[160px]">{bed?.ho_va_ten || worker?.hoVaTen || '—'}</td>
-                          <td className="px-3 py-2 text-xs text-mu font-tabular whitespace-nowrap">{bed?.ma_nv || worker?.maNV || '—'}</td>
-                          <td className="px-3 py-2 text-xs text-mu truncate max-w-[130px]">{worker?.donVi || '—'}</td>
-                          <td className="px-3 py-2 text-xs text-mu font-tabular whitespace-nowrap">{worker?.soDienThoai || '—'}</td>
-                          <td className="px-3 py-2 text-xs text-mu font-tabular whitespace-nowrap">{worker?.ngayVaoKTX || '—'}</td>
-                          <td className="px-3 py-2 whitespace-nowrap">
-                            <div className="flex items-center gap-1">
-                              {bed?.status === 'empty' && canWriteBed(bed) && (
-                                <button
-                                  type="button"
-                                  onClick={() => { setAssignTarget(bed); setCandidateSearch(''); }}
-                                  disabled={busy}
-                                  className="p-1.5 rounded-lg text-lnk hover:bg-bdg border border-bdr2 disabled:opacity-50"
-                                  title="Gán công nhân"
-                                >
-                                  <UserPlus size={13} />
-                                </button>
-                              )}
-                              {bed?.status === 'occupied' && (
-                                <button
-                                  type="button"
-                                  onClick={() => { setDrawerBed(bed); }}
-                                  className="p-1.5 rounded-lg text-ok hover:bg-okbg border border-bdr2"
-                                  title="Chi tiết / thao tác"
-                                >
-                                  <ExternalLink size={13} />
-                                </button>
-                              )}
-                              {bed?.status === 'empty' && canWriteBed(bed) && (
-                                <button
-                                  type="button"
-                                  onClick={() => setBedStatus(bed, 'maintenance')}
-                                  disabled={busy}
-                                  className="p-1.5 rounded-lg text-wn hover:bg-okbg border border-wn disabled:opacity-50"
-                                  title="Đánh dấu bảo trì"
-                                >
-                                  <Wrench size={13} />
-                                </button>
-                              )}
-                              {bed?.status === 'maintenance' && canWriteBed(bed) && (
-                                <button
-                                  type="button"
-                                  onClick={() => setBedStatus(bed, 'empty')}
-                                  disabled={busy}
-                                  className="p-1.5 rounded-lg text-ok hover:bg-okbg border border-bdr2 disabled:opacity-50"
-                                  title="Bỏ bảo trì"
-                                >
-                                  <CheckCircle2 size={13} />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {bedsFiltered.length === 0 && (
-                      <tr><td colSpan={11} className="px-3 py-10 text-center text-xs text-ic italic">Không có giường nào khớp bộ lọc.</td></tr>
-                    )}
-                  </tbody>
-                </table>
+            <>
+              {/* Mobile Cards (< md) */}
+              <div className="md:hidden space-y-2.5">
+                {bedsFiltered.length === 0 ? (
+                  <div className="surface-elevated rounded-2xl p-8 text-center text-xs text-mu">
+                    Không có giường nào khớp bộ lọc.
+                  </div>
+                ) : (
+                  bedsFiltered.slice(0, 120).map(bed => {
+                    const worker = bed?.worker_id ? (workerById.get(bed.worker_id) || null) : null;
+                    const female = isFemale(worker);
+                    const occupantName = bed?.ho_va_ten || worker?.hoVaTen || '';
+                    return (
+                      <div
+                        key={`m-${bed?.id}`}
+                        className="surface-elevated rounded-2xl p-3.5 space-y-2.5"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-xs font-mono font-bold text-lnk">
+                              {[bed?.ktx, bed?.day, `P${bed?.phong_so || '—'}`, formatGiuongTag(bed?.giuong)].filter(Boolean).join(' · ')}
+                            </p>
+                            <p className="text-sm font-bold text-tx mt-0.5 truncate">
+                              {occupantName || (bed?.status === 'maintenance' ? 'Đang bảo trì' : 'Giường trống')}
+                            </p>
+                          </div>
+                          {bed?.status === 'occupied' ? (
+                            <span className={`px-2 py-0.5 rounded-md text-[10.5px] font-bold border shrink-0 ${female ? 'tint-pink text-pink-tone border-pink-tint' : 'bg-bdg text-lnk border-pri2/40'}`}>
+                              {female ? '♀ Nữ' : '♂ Nam'}
+                            </span>
+                          ) : bed?.status === 'maintenance' ? (
+                            <span className="px-2 py-0.5 rounded-md text-[10.5px] font-bold border tint-wn text-wn border-wn shrink-0">Bảo trì</span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-md text-[10.5px] font-bold border border-dashed bg-okbg text-ok border-ok/40 shrink-0">Trống</span>
+                          )}
+                        </div>
+
+                        {occupantName && (
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-mu font-tabular">
+                            <span>MNV: <strong className="text-tx">{bed?.ma_nv || worker?.maNV || '—'}</strong></span>
+                            {worker?.donVi && <span>· {worker.donVi}</span>}
+                            {worker?.soDienThoai && <span>· {worker.soDienThoai}</span>}
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-bdr">
+                          {bed?.status === 'empty' && canWriteBed(bed) && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setBedStatus(bed, 'maintenance')}
+                                disabled={busy}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-wn border border-wn/40 tint-wn disabled:opacity-50"
+                              >
+                                <Wrench size={12} /> Bảo trì
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => { setAssignTarget(bed); setCandidateSearch(''); }}
+                                disabled={busy}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-pri text-white disabled:opacity-50"
+                              >
+                                <UserPlus size={12} /> Gán người
+                              </button>
+                            </>
+                          )}
+                          {bed?.status === 'occupied' && (
+                            <button
+                              type="button"
+                              onClick={() => setDrawerBed(bed)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-act border border-bdr2 text-tx"
+                            >
+                              <ExternalLink size={12} className="text-ok" /> Xem &amp; Thao tác
+                            </button>
+                          )}
+                          {bed?.status === 'maintenance' && canWriteBed(bed) && (
+                            <button
+                              type="button"
+                              onClick={() => setBedStatus(bed, 'empty')}
+                              disabled={busy}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-okbg border border-ok/40 text-ok disabled:opacity-50"
+                            >
+                              <CheckCircle2 size={12} /> Bỏ bảo trì
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
-            </div>
+
+              {/* Desktop Table (md+) */}
+              <div className="hidden md:block bg-surf border border-bdr rounded-2xl shadow-sm overflow-hidden">
+                <div className="overflow-x-auto scrollbar-thin">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-bdr text-left">
+                        {['KTX', 'Dãy', 'Phòng', 'Giường', 'Trạng thái', 'Họ tên', 'Mã NV', 'Đơn vị', 'SĐT', 'Ngày vào', 'Thao tác'].map(h => (
+                          <th key={h} className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-mu whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-bdr">
+                      {bedsFiltered.map(bed => {
+                        const worker = bed?.worker_id ? (workerById.get(bed.worker_id) || null) : null;
+                        const female = isFemale(worker);
+                        return (
+                          <tr key={bed?.id} className="hover:bg-act/45 transition-colors">
+                            <td className="px-3 py-2 text-xs font-bold text-tx whitespace-nowrap">{bed?.ktx || '—'}</td>
+                            <td className="px-3 py-2 text-xs text-mu whitespace-nowrap">{bed?.day || '—'}</td>
+                            <td className="px-3 py-2 text-xs text-mu font-tabular whitespace-nowrap">P{bed?.phong_so || '—'}</td>
+                            <td className="px-3 py-2 text-xs text-tx font-tabular whitespace-nowrap">{formatGiuongTag(bed?.giuong)}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              {bed?.status === 'occupied'
+                                ? <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${female ? 'tint-pink text-pink-tone border-pink-tint' : 'bg-bdg text-lnk border-pri2/40'}`}>{female ? '♀ Nữ · Đã ở' : '♂ Nam · Đã ở'}</span>
+                                : bed?.status === 'maintenance'
+                                ? <span className="px-2 py-0.5 rounded-md text-[10px] font-bold border tint-wn text-wn border-wn">Bảo trì</span>
+                                : <span className="px-2 py-0.5 rounded-md text-[10px] font-bold border border-dashed bg-okbg text-ok border-ok/40">Trống</span>}
+                            </td>
+                            <td className="px-3 py-2 text-xs text-tx font-semibold truncate max-w-[160px]">{bed?.ho_va_ten || worker?.hoVaTen || '—'}</td>
+                            <td className="px-3 py-2 text-xs text-mu font-tabular whitespace-nowrap">{bed?.ma_nv || worker?.maNV || '—'}</td>
+                            <td className="px-3 py-2 text-xs text-mu truncate max-w-[130px]">{worker?.donVi || '—'}</td>
+                            <td className="px-3 py-2 text-xs text-mu font-tabular whitespace-nowrap">{worker?.soDienThoai || '—'}</td>
+                            <td className="px-3 py-2 text-xs text-mu font-tabular whitespace-nowrap">{worker?.ngayVaoKTX || '—'}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              <div className="flex items-center gap-1">
+                                {bed?.status === 'empty' && canWriteBed(bed) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => { setAssignTarget(bed); setCandidateSearch(''); }}
+                                    disabled={busy}
+                                    className="p-1.5 rounded-lg text-lnk hover:bg-bdg border border-bdr2 disabled:opacity-50"
+                                    title="Gán công nhân"
+                                  >
+                                    <UserPlus size={13} />
+                                  </button>
+                                )}
+                                {bed?.status === 'occupied' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => { setDrawerBed(bed); }}
+                                    className="p-1.5 rounded-lg text-ok hover:bg-okbg border border-bdr2"
+                                    title="Chi tiết / thao tác"
+                                  >
+                                    <ExternalLink size={13} />
+                                  </button>
+                                )}
+                                {bed?.status === 'empty' && canWriteBed(bed) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setBedStatus(bed, 'maintenance')}
+                                    disabled={busy}
+                                    className="p-1.5 rounded-lg text-wn hover:bg-okbg border border-wn disabled:opacity-50"
+                                    title="Đánh dấu bảo trì"
+                                  >
+                                    <Wrench size={13} />
+                                  </button>
+                                )}
+                                {bed?.status === 'maintenance' && canWriteBed(bed) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setBedStatus(bed, 'empty')}
+                                    disabled={busy}
+                                    className="p-1.5 rounded-lg text-ok hover:bg-okbg border border-bdr2 disabled:opacity-50"
+                                    title="Bỏ bảo trì"
+                                  >
+                                    <CheckCircle2 size={13} />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {bedsFiltered.length === 0 && (
+                        <tr><td colSpan={11} className="px-3 py-10 text-center text-xs text-ic italic">Không có giường nào khớp bộ lọc.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
           )}
 
           {/* ─── ANALYTICS VIEW ─── */}
@@ -2425,18 +2611,21 @@ export default function BedManagementClient() {
       {/* Print QR labels modal */}
       <BedQrPrintModal open={showQrPrint} onClose={() => setShowQrPrint(false)} lockedBed={null} />
 
-      {/* ─── Assign Modal ─── */}
+      {/* ─── Assign Modal (Bottom Sheet on Mobile) ─── */}
       {assignTarget && (
-        <div className="fixed inset-0 z-50 modal-backdrop-scrim fade-in flex items-center justify-center p-4" onClick={() => setAssignTarget(null)}>
-          <div className="modal-enter bg-surf border border-bdr rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-4 border-b border-bdr">
+        <div className="fixed inset-0 z-50 modal-backdrop-scrim fade-in flex items-end sm:items-center justify-center sm:p-4" onClick={() => setAssignTarget(null)}>
+          <div className="sheet-enter-bottom bg-surf border-t sm:border border-bdr2 rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg flex flex-col max-h-[88vh] sm:max-h-[85vh]" onClick={e => e.stopPropagation()}>
+            <div className="sm:hidden flex justify-center pt-2.5 pb-1 shrink-0">
+              <span className="w-10 h-1 rounded-full bg-bdr3" />
+            </div>
+            <div className="flex items-center justify-between px-5 py-3.5 sm:py-4 border-b border-bdr">
               <div>
                 <h3 className="font-bold text-tx flex items-center gap-2"><UserCheck size={16} className="text-ok" /> Gán công nhân vào giường</h3>
                 <p className="text-xs text-mu mt-0.5">
                   {assignTarget.ktx || '(KTX)'} · {assignTarget.day || '(Dãy)'} · Phòng {assignTarget.phong_so || '?'} · Giường {assignTarget.giuong || '?'}
                 </p>
               </div>
-              <button onClick={() => { setAssignTarget(null); setActionError(''); }} className="p-2 rounded-lg hover:bg-surf text-mu hover:text-tx"><X size={16} /></button>
+              <button onClick={() => { setAssignTarget(null); setActionError(''); }} className="p-2 rounded-lg hover:bg-act text-mu hover:text-tx"><X size={16} /></button>
             </div>
             <div className="px-5 pt-4">
               <div className="relative">
@@ -2446,7 +2635,7 @@ export default function BedManagementClient() {
                   value={candidateSearch}
                   onChange={e => setCandidateSearch(e.target.value)}
                   placeholder="Tìm công nhân theo tên / mã NV / đơn vị…"
-                  className="w-full bg-surf border border-bdr text-tx placeholder-mu rounded-xl pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-pri2/50"
+                  className="w-full bg-page/60 border border-bdr2 text-tx placeholder-mu rounded-xl pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-pri2/50"
                 />
               </div>
             </div>
@@ -2460,7 +2649,7 @@ export default function BedManagementClient() {
                     type="button"
                     disabled={busy}
                     onClick={() => handleAssign(w)}
-                    className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl border border-bdr hover:border-pri2 hover:bg-surf transition-colors disabled:opacity-60"
+                    className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl border border-bdr hover:border-pri2 hover:bg-act/60 transition-colors disabled:opacity-60"
                   >
                     <div className="w-8 h-8 rounded-lg bg-bdg border border-bdr2 flex items-center justify-center text-lnk text-xs font-bold shrink-0">
                       {String(w?.hoVaTen || '?').charAt(0).toUpperCase()}
@@ -2483,14 +2672,17 @@ export default function BedManagementClient() {
         </div>
       )}
 
-      {/* ─── Quick Drawer (right side) ─── */}
+      {/* ─── Quick Drawer (Bottom Sheet on Mobile / Slide-Over on Desktop) ─── */}
       {drawerBed && (
         <>
           <div className="fixed inset-0 z-40 modal-backdrop-scrim fade-in" onClick={() => { setDrawerBed(null); setShowTransferModal(false); }} />
           <div
-            className="fixed z-50 animate-slide-in-right bottom-0 inset-x-0 max-h-[85vh] sm:max-h-full sm:top-0 sm:right-0 sm:left-auto sm:inset-x-auto sm:h-full w-full sm:max-w-md bg-surf border-t sm:border-t-0 sm:border-l border-bdr text-tx shadow-2xl flex flex-col rounded-t-2xl sm:rounded-none overflow-hidden"
+            className="fixed z-50 sheet-enter-bottom sm:animate-slide-in-right bottom-0 inset-x-0 max-h-[88vh] sm:max-h-full sm:top-0 sm:right-0 sm:left-auto sm:inset-x-auto sm:h-full w-full sm:max-w-md bg-surf border-t sm:border-t-0 sm:border-l border-bdr2 text-tx shadow-2xl flex flex-col rounded-t-3xl sm:rounded-none overflow-hidden"
           >
-            <div className="flex items-center justify-between px-5 py-4 border-b border-bdr bg-act">
+            <div className="sm:hidden flex justify-center pt-2.5 pb-1 bg-act/80 shrink-0">
+              <span className="w-10 h-1 rounded-full bg-bdr3" />
+            </div>
+            <div className="flex items-center justify-between px-5 py-3.5 sm:py-4 border-b border-bdr bg-act/80">
               <div className="min-w-0">
                 <h3 className="font-bold text-tx flex items-center gap-2">
                   <BedDouble size={16} className="text-pri2" /> Giường {drawerBed?.giuong || '?'}
@@ -2500,7 +2692,7 @@ export default function BedManagementClient() {
                 </p>
               </div>
               {drawerBed?.status === 'maintenance' && (
-                <span className="hidden sm:inline-flex mx-2 items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full tint-wn text-wn border border-wn shrink-0"><Wrench size={10} /> Bảo trì</span>
+                <span className="hidden sm:inline-flex mx-2 items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md tint-wn text-wn border border-wn shrink-0"><Wrench size={10} /> Bảo trì</span>
               )}
               <button onClick={() => { setDrawerBed(null); setShowTransferModal(false); }} className="p-2 rounded-xl hover:bg-surf text-mu hover:text-tx shrink-0"><X size={18} /></button>
             </div>

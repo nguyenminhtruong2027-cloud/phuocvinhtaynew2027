@@ -11,8 +11,8 @@ import {
   Users, LayoutGrid, FileSpreadsheet, Radio,
   ChevronDown, Search, X, Download, UserPlus, AlertTriangle,
   TrendingUp, TrendingDown, XCircle, GitBranch, HardHat,
-  VenusAndMars, Sparkles, Building2, Layers, UserCheck, CheckCircle, ArrowRight, Activity,
-  Wrench, Printer, FileText, ClipboardCheck, ShieldAlert,
+  VenusAndMars, Building2, Layers, UserCheck, CheckCircle, ArrowRight, Activity,
+  Wrench, Printer, FileText, ClipboardCheck, ShieldAlert, MoreHorizontal,
 } from 'lucide-react';
 import { CraftIconBadge, type CraftTone } from '@/components/ui/CraftIcon';
 import { AnimatedNumber, SlidingTabs, StaggerGrid, StaggerItem } from '@/components/ui/MotionPrimitives';
@@ -209,7 +209,7 @@ function ExecutiveKPICard({
 
   return (
     <div
-      className={`rounded-2xl p-4 sm:p-5 flex flex-col justify-between relative overflow-hidden group w-full ${
+      className={`rounded-2xl p-3.5 sm:p-5 flex flex-col justify-between relative overflow-hidden group w-full h-full ${
         alert
           ? 'tint-dgr border border-dgr'
           : 'surface-elevated'
@@ -219,42 +219,44 @@ function ExecutiveKPICard({
       {!alert && (
         <span
           aria-hidden="true"
-          className={`pointer-events-none absolute inset-0 ${glowClass} opacity-75 group-hover:opacity-100 transition-opacity duration-150`}
+          className={`pointer-events-none absolute inset-0 ${glowClass} opacity-65 group-hover:opacity-100 transition-opacity duration-150`}
         />
       )}
       <div className="relative z-10">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start justify-between gap-2.5 sm:gap-3">
           <div className="space-y-1 min-w-0 flex-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-mu block truncate">
+            <span className="text-[11px] font-semibold tracking-wide text-mu block truncate">
               {label}
             </span>
-            <div className="flex items-baseline gap-2 flex-wrap">
-              <div className={`text-2xl sm:text-3xl lg:text-[34px] font-extrabold font-tabular tracking-tight whitespace-nowrap leading-tight ${alert ? 'text-dgr' : 'text-tx'}`}>
+            <div className="flex items-baseline gap-1.5 sm:gap-2 flex-wrap">
+              <div className={`text-xl sm:text-3xl lg:text-[34px] font-extrabold font-tabular tracking-tight whitespace-nowrap leading-tight ${alert ? 'text-dgr' : 'text-tx'}`}>
                 {value}
               </div>
               {badge && (
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold tint-dgr text-dgr border border-dgr whitespace-nowrap">
+                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold tint-dgr text-dgr border border-dgr whitespace-nowrap">
                   {badge}
                 </span>
               )}
             </div>
-            {sub && <p className="text-xs text-mu mt-1 line-clamp-2">{sub}</p>}
+            {sub && <p className="text-[11px] sm:text-xs text-mu mt-0.5 line-clamp-2 leading-snug">{sub}</p>}
           </div>
 
           {rightVisual ? (
             rightVisual
           ) : (
-            <CraftIconBadge
-              icon={icon}
-              badgeIcon={badgeIcon}
-              tone={tone}
-              size="lg"
-            />
+            <div className="hidden sm:block shrink-0">
+              <CraftIconBadge
+                icon={icon}
+                badgeIcon={badgeIcon}
+                tone={tone}
+                size="md"
+              />
+            </div>
           )}
         </div>
       </div>
 
-      {bottomInfo && <div className="relative z-10 mt-3.5 pt-3 border-t border-bdr">{bottomInfo}</div>}
+      {bottomInfo && <div className="relative z-10 mt-3 sm:mt-3.5 pt-2.5 sm:pt-3 border-t border-bdr">{bottomInfo}</div>}
     </div>
   );
 }
@@ -710,9 +712,22 @@ export default function OccupancyDashboardPage() {
   const [showBriefingModal, setShowBriefingModal] = useState(false);
   const [bulkModalMode, setBulkModalMode] = useState<'gender' | 'print' | null>(null);
   const [dashboardTab, setDashboardTab] = useState<'overview' | 'heatmap' | 'analytics' | 'risk'>('overview');
+  const [showToolsMenu, setShowToolsMenu] = useState(false);
+  const toolsMenuRef = useRef<HTMLDivElement>(null);
   const [maintenanceBeds, setMaintenanceBeds] = useState<MaintenanceBedItem[]>(
     () => cachedDashboardSupport?.maintenanceBeds ?? []
   );
+
+  useEffect(() => {
+    if (!showToolsMenu) return;
+    const handleOutside = (e: MouseEvent) => {
+      if (toolsMenuRef.current && !toolsMenuRef.current.contains(e.target as Node)) {
+        setShowToolsMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [showToolsMenu]);
   const [pendingQrSummary, setPendingQrSummary] = useState<{ registrations: number; checkouts: number }>(
     () => cachedDashboardSupport?.pendingQrSummary ?? { registrations: 0, checkouts: 0 }
   );
@@ -1732,19 +1747,26 @@ export default function OccupancyDashboardPage() {
         <div className="px-2.5 sm:px-6 lg:px-8 xl:px-10 py-3 sm:py-5 max-w-screen-2xl mx-auto space-y-4 sm:space-y-5 w-full overflow-hidden">
 
           {/* ── 1. Sticky Executive Command Header ── */}
-          <div className="lg:sticky lg:top-0 lg:z-20 -mx-2.5 sm:-mx-6 lg:-mx-8 xl:-mx-10 px-2.5 sm:px-6 lg:px-8 xl:px-10 pt-2 pb-3 bg-page/95 border-b border-bdr space-y-3">
+          <div className="lg:sticky lg:top-0 lg:z-20 -mx-2.5 sm:-mx-6 lg:-mx-8 xl:-mx-10 px-2.5 sm:px-6 lg:px-8 xl:px-10 pt-2 pb-3 bg-page/95 border-b border-bdr space-y-2.5">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 sm:gap-3 w-full">
               {/* Title Section */}
-              <div className="flex items-center gap-3 min-w-0 shrink-0">
-                <CraftIconBadge icon={Building2} tone="blue" size="md" />
-                <div className="min-w-0">
-                  <h1 className="text-base sm:text-lg font-extrabold text-tx tracking-tight whitespace-nowrap leading-tight">
-                    Trung Tâm Điều Hành KTX
-                  </h1>
-                  <p className="text-[11px] text-mu font-medium whitespace-nowrap truncate">
-                    Phước Vĩnh Tây · {selectedKTX === 'all' ? `${totalKTXAll} khu KTX` : selectedKTX} · {kpiWorkers.toLocaleString('vi-VN')} công nhân
-                  </p>
+              <div className="flex items-center justify-between gap-3 min-w-0 shrink-0">
+                <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                  <CraftIconBadge icon={Building2} tone="blue" size="md" />
+                  <div className="min-w-0">
+                    <h1 className="text-base sm:text-lg font-extrabold text-tx tracking-tight whitespace-nowrap leading-tight">
+                      Trung Tâm Điều Hành KTX
+                    </h1>
+                    <p className="text-[11px] text-mu font-medium whitespace-nowrap truncate">
+                      Phước Vĩnh Tây · {selectedKTX === 'all' ? `${totalKTXAll} khu KTX` : selectedKTX} · {kpiWorkers.toLocaleString('vi-VN')} công nhân
+                    </p>
+                  </div>
                 </div>
+                {loading && (
+                  <span className="lg:hidden text-[11px] text-lnk font-medium inline-flex items-center gap-1 shrink-0">
+                    <Activity size={13} className="animate-spin text-pri2" />
+                  </span>
+                )}
               </div>
 
               {/* Global Search Bar */}
@@ -1760,14 +1782,14 @@ export default function OccupancyDashboardPage() {
               </div>
 
               {/* Right Controls: KTX Filter + Primary CTA */}
-              <div className="flex items-center gap-2 flex-wrap shrink-0">
+              <div className="flex items-center gap-2 shrink-0">
                 {!isEmpty && allKTX.length > 0 && (
-                  <div className="relative">
+                  <div className="relative flex-1 sm:flex-none">
                     <select
                       value={selectedKTX}
                       onChange={e => { setSelectedKTX(e.target.value); setSelectedBuilding(null); }}
                       aria-label="Lọc theo KTX"
-                      className="appearance-none bg-surf border border-bdr2 rounded-xl pl-3 pr-8 py-2 text-xs font-bold text-tx shadow-sm focus:outline-none focus:ring-2 focus:ring-pri2/50 cursor-pointer min-w-[124px]"
+                      className="w-full sm:w-auto appearance-none bg-surf border border-bdr2 rounded-xl pl-3 pr-8 py-2 text-xs font-bold text-tx focus:outline-none focus:ring-2 focus:ring-pri2/50 cursor-pointer sm:min-w-[124px]"
                     >
                       <option value="all">Tất cả KTX</option>
                       {allKTX.map(ktx => (
@@ -1781,7 +1803,7 @@ export default function OccupancyDashboardPage() {
                 <button
                   type="button"
                   onClick={() => setShowQuickAdd(true)}
-                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl btn-glow-primary text-xs font-bold cursor-pointer active:scale-[0.98] whitespace-nowrap shrink-0"
+                  className="inline-flex items-center justify-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-xl btn-glow-primary text-xs font-bold cursor-pointer active:scale-[0.98] whitespace-nowrap shrink-0"
                 >
                   <UserPlus size={15} />
                   <span>Xếp phòng nhanh</span>
@@ -1794,98 +1816,137 @@ export default function OccupancyDashboardPage() {
               </div>
             </div>
 
-            {/* Row 2: 3-Tab Executive Switcher + Compact Operational Actions */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5">
-              <SlidingTabs
-                layoutId="dashboard-main-tabs"
-                value={dashboardTab}
-                onChange={setDashboardTab}
-                tabs={[
-                  {
-                    id: 'overview',
-                    label: 'Điều hành nhanh',
-                    count: totalMaintenanceCount > 0 ? totalMaintenanceCount : undefined,
-                    tone: urgentTicketsCount > 0 || overdueSlaTicketsCount > 0 ? 'danger' : 'default',
-                  },
-                  {
-                    id: 'heatmap',
-                    label: 'Sơ đồ Heatmap',
-                    count: kpiRooms,
-                    tone: overloadedRooms > 0 ? 'danger' : 'default',
-                  },
-                  {
-                    id: 'analytics',
-                    label: 'Phân tích & Cơ cấu',
-                  },
-                  {
-                    id: 'risk',
-                    label: 'Radar Rủi ro',
-                    icon: ShieldAlert,
-                    count:
-                      riskReport.counts.critical + riskReport.counts.high > 0
-                        ? riskReport.counts.critical + riskReport.counts.high
-                        : undefined,
-                    tone: riskReport.counts.critical > 0 ? 'danger' : 'default',
-                  },
-                ]}
-              />
+            {/* Row 2: Executive Tab Switcher + Clean Consolidated Action Menu */}
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0 flex-1 overflow-x-auto scrollbar-thin">
+                <SlidingTabs
+                  layoutId="dashboard-main-tabs"
+                  compact
+                  value={dashboardTab}
+                  onChange={setDashboardTab}
+                  tabs={[
+                    {
+                      id: 'overview',
+                      label: 'Điều hành',
+                      count: totalMaintenanceCount > 0 ? totalMaintenanceCount : undefined,
+                      tone: urgentTicketsCount > 0 || overdueSlaTicketsCount > 0 ? 'danger' : 'default',
+                    },
+                    {
+                      id: 'heatmap',
+                      label: 'Sơ đồ phòng',
+                      count: kpiRooms,
+                      tone: overloadedRooms > 0 ? 'danger' : 'default',
+                    },
+                    {
+                      id: 'analytics',
+                      label: 'Phân tích',
+                    },
+                    {
+                      id: 'risk',
+                      label: 'Radar Rủi ro',
+                      icon: ShieldAlert,
+                      count:
+                        riskReport.counts.critical + riskReport.counts.high > 0
+                          ? riskReport.counts.critical + riskReport.counts.high
+                          : undefined,
+                      tone: riskReport.counts.critical > 0 ? 'danger' : 'default',
+                    },
+                  ]}
+                />
+              </div>
 
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <button
-                  type="button"
-                  onClick={handlePrintExecutiveA4}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-pri2/40 bg-pri/10 text-pri2 hover:bg-pri/20 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
-                  title="Xuất & In Báo cáo Lãnh đạo Trình ký khổ A4 chuẩn văn bản hành chính"
-                >
-                  <Printer size={14} />
-                  <span>Báo cáo A4</span>
-                </button>
-
+              <div className="flex items-center gap-1.5 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowBriefingModal(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-bdr2 bg-bdg text-lnk hover:opacity-90 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-bdr2 bg-surf text-tx hover:bg-act text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
                   title="Tạo bản tin giao ban cuối ngày gửi Zalo Ban Chỉ Huy hoặc in PDF 1 trang"
                 >
-                  <FileText size={14} />
+                  <FileText size={14} className="text-lnk" />
                   <span>Giao ban</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={handleExportReport}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-bdr2 bg-surf text-tx hover:bg-act text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
-                  title="Xuất báo cáo ngày ra Excel"
+                  onClick={handlePrintExecutiveA4}
+                  className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-bdr2 bg-surf text-tx hover:bg-act text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  title="Xuất & In Báo cáo Lãnh đạo Trình ký khổ A4 chuẩn văn bản hành chính"
                 >
-                  <Download size={14} className="text-lnk" />
-                  <span>Xuất Excel</span>
+                  <Printer size={14} className="text-pri2" />
+                  <span>Báo cáo A4</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => router.push('/worker-management')}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-bdr2 bg-surf text-tx hover:bg-act text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
-                  title="Đi tới Quản lý Công nhân & Import Excel"
-                >
-                  <FileSpreadsheet size={14} className="text-ok" />
-                  <span>Import</span>
-                </button>
-
-                {!showReadinessCard && dashboardTab === 'overview' && (
+                <div ref={toolsMenuRef} className="relative">
                   <button
                     type="button"
-                    onClick={() => toggleReadinessCard(true)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-bdr bg-surf text-mu hover:text-tx hover:bg-act text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                    onClick={() => setShowToolsMenu(prev => !prev)}
+                    className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                      showToolsMenu
+                        ? 'bg-act border-pri2/50 text-tx'
+                        : 'bg-surf border-bdr2 text-tx hover:bg-act'
+                    }`}
+                    aria-expanded={showToolsMenu}
+                    aria-label="Mở công cụ báo cáo và xuất dữ liệu"
                   >
-                    <ClipboardCheck size={14} />
-                    <span>Bảng kiểm</span>
+                    <MoreHorizontal size={15} className="text-mu" />
+                    <span className="hidden sm:inline">Công cụ</span>
                   </button>
-                )}
+
+                  {showToolsMenu && (
+                    <div className="absolute right-0 top-full mt-1.5 w-56 rounded-xl dropdown-menu-panel p-1.5 z-40 fade-in space-y-0.5">
+                      <button
+                        type="button"
+                        onClick={() => { setShowToolsMenu(false); setShowBriefingModal(true); }}
+                        className="md:hidden w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-tx hover:bg-act transition-colors text-left cursor-pointer"
+                      >
+                        <FileText size={14} className="text-lnk shrink-0" />
+                        <span>Bản tin giao ban Zalo</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShowToolsMenu(false); handlePrintExecutiveA4(); }}
+                        className="sm:hidden w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-tx hover:bg-act transition-colors text-left cursor-pointer"
+                      >
+                        <Printer size={14} className="text-pri2 shrink-0" />
+                        <span>In Báo cáo Lãnh đạo A4</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShowToolsMenu(false); handleExportReport(); }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-tx hover:bg-act transition-colors text-left cursor-pointer"
+                      >
+                        <Download size={14} className="text-lnk shrink-0" />
+                        <span>Xuất báo cáo Excel</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShowToolsMenu(false); router.push('/worker-management'); }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-tx hover:bg-act transition-colors text-left cursor-pointer"
+                      >
+                        <FileSpreadsheet size={14} className="text-ok shrink-0" />
+                        <span>Quản lý &amp; Import công nhân</span>
+                      </button>
+                      {!showReadinessCard && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowToolsMenu(false);
+                            setDashboardTab('overview');
+                            toggleReadinessCard(true);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-tx hover:bg-act transition-colors text-left cursor-pointer"
+                        >
+                          <ClipboardCheck size={14} className="text-wn shrink-0" />
+                          <span>Hiện bảng kiểm vận hành</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
 
                 {loading && (
-                  <span className="text-xs text-lnk font-medium inline-flex items-center gap-1.5 ml-1">
+                  <span className="hidden lg:inline-flex text-xs text-lnk font-medium items-center gap-1.5 ml-0.5">
                     <Activity size={13} className="animate-spin text-pri2" />
-                    <span className="hidden sm:inline">Đồng bộ...</span>
                   </span>
                 )}
               </div>
@@ -1895,24 +1956,23 @@ export default function OccupancyDashboardPage() {
           {/* ══════════════════ TAB 1: ĐIỀU HÀNH NHANH (OVERVIEW) ══════════════════ */}
           {dashboardTab === 'overview' && (
           <>
-          {/* ── 3. Top 3 Unified Stats Cards (Balanced 3-Column Grid) ── */}
-          <StaggerGrid className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
+          {/* ── 3. Top 3 Unified Stats Cards (2-col Compact Mobile / 3-col Desktop) ── */}
+          <StaggerGrid className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4 w-full">
             <StaggerItem>
               <ExecutiveKPICard
                 label="Tổng Công Nhân"
                 value={<AnimatedNumber value={kpiWorkers} />}
                 sub={selectedKTX !== 'all'
-                  ? `${selectedKTX} · ${kpiBuildings} dãy hiện hữu`
-                  : `${totalKTXAll} ký túc xá · ${kpiBuildings} dãy nhà`}
+                  ? `${selectedKTX} · ${kpiBuildings} dãy`
+                  : `${totalKTXAll} KTX · ${kpiBuildings} dãy nhà`}
                 icon={Users}
-                badgeIcon={Sparkles}
                 tone="blue"
                 bottomInfo={
-                  <div className="flex items-center justify-between text-xs text-mu font-medium">
-                    <span>Trạng thái hệ thống:</span>
-                    <span className="text-ok font-semibold flex items-center gap-1 font-tabular">
+                  <div className="flex items-center justify-between text-[11px] sm:text-xs text-mu font-medium gap-1">
+                    <span className="truncate">Hệ thống:</span>
+                    <span className="text-ok font-semibold inline-flex items-center gap-1 font-tabular shrink-0">
                       <CheckCircle size={12} />
-                      Đang hoạt động
+                      Hoạt động
                     </span>
                   </div>
                 }
@@ -1923,44 +1983,43 @@ export default function OccupancyDashboardPage() {
               <ExecutiveKPICard
                 label="Quy Mô Cơ Sở"
                 value={
-                  <span className="inline-flex items-baseline gap-1.5">
+                  <span className="inline-flex items-baseline gap-1">
                     <AnimatedNumber value={kpiBuildings} />
-                    <span className="text-lg sm:text-xl font-bold text-mu">Dãy /</span>
+                    <span className="text-xs sm:text-lg font-bold text-mu">Dãy /</span>
                     <AnimatedNumber value={kpiRooms} />
-                    <span className="text-lg sm:text-xl font-bold text-mu">Phòng</span>
+                    <span className="text-xs sm:text-lg font-bold text-mu">P</span>
                   </span>
                 }
-                sub={`Tổng sức chứa thiết kế: ${kpiCapacity.toLocaleString('vi-VN')} chỗ`}
+                sub={`Sức chứa: ${kpiCapacity.toLocaleString('vi-VN')} chỗ`}
                 icon={LayoutGrid}
-                badgeIcon={Building2}
                 tone="slate"
                 bottomInfo={
-                  <div className="flex items-center justify-between text-xs text-mu font-medium">
-                    <span>Định mức thiết kế:</span>
-                    <span className="text-lnk font-semibold font-tabular">
-                      Theo số giường thực tế
+                  <div className="flex items-center justify-between text-[11px] sm:text-xs text-mu font-medium gap-1">
+                    <span className="truncate">Định mức:</span>
+                    <span className="text-lnk font-semibold font-tabular shrink-0">
+                      Theo giường thực tế
                     </span>
                   </div>
                 }
               />
             </StaggerItem>
 
-            <StaggerItem>
+            <StaggerItem className="col-span-2 md:col-span-1">
               <ExecutiveKPICard
                 label="Tỷ Lệ Lấp Đầy"
                 value={<AnimatedNumber value={kpiFillRate} format={n => `${Math.round(n)}%`} />}
-                sub={`${kpiWithRoom.toLocaleString('vi-VN')}/${kpiCapacity.toLocaleString('vi-VN')} chỗ sử dụng · Trống ${kpiVacant.toLocaleString('vi-VN')} chỗ`}
+                sub={`${kpiWithRoom.toLocaleString('vi-VN')}/${kpiCapacity.toLocaleString('vi-VN')} đang ở · Trống ${kpiVacant.toLocaleString('vi-VN')} chỗ`}
                 icon={Layers}
                 tone="teal"
                 rightVisual={
-                  <ProgressRing progress={kpiFillRate} radius={34} stroke={5} color="var(--ok2)" trackColor="var(--bdr2)">
-                    <span className="text-xs font-extrabold text-ok font-tabular">{kpiFillRate}%</span>
+                  <ProgressRing progress={kpiFillRate} radius={32} stroke={5} color="var(--ok2)" trackColor="var(--bdr2)">
+                    <span className="text-[11px] font-extrabold text-ok font-tabular">{kpiFillRate}%</span>
                   </ProgressRing>
                 }
                 bottomInfo={
                   <div className="w-full space-y-1.5">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-mu font-medium">Tiến độ lấp đầy:</span>
+                    <div className="flex items-center justify-between text-[11px] sm:text-xs">
+                      <span className="text-mu font-medium">Tiến độ lấp đầy</span>
                       <span className="text-ok font-bold font-tabular">{kpiFillRate}% công suất</span>
                     </div>
                     <div className="w-full h-1.5 bg-bdr rounded-full overflow-hidden">
@@ -2414,37 +2473,36 @@ export default function OccupancyDashboardPage() {
               </div>
             </div>
 
-            {/* Heatmap Legend */}
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-4 mb-4 border-b border-bdr">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-semibold text-mu uppercase tracking-wider">Công năng:</span>
-                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-bdg text-lnk border border-pri2/35">
-                  <span>♂ Phòng Nam</span>
+            {/* Heatmap Legend (Clean typographic key) */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 pb-3.5 mb-4 border-b border-bdr text-xs">
+              <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5">
+                <span className="text-[11px] font-semibold text-mu">Công năng:</span>
+                <span className="inline-flex items-center gap-1 font-semibold text-lnk">
+                  <span>♂</span> Phòng Nam
                 </span>
-                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md tint-pink text-pink-tone border border-pink-tint">
-                  <span>♀ Phòng Nữ</span>
+                <span className="inline-flex items-center gap-1 font-semibold text-pink-tone">
+                  <span>♀</span> Phòng Nữ
                 </span>
-                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md tint-wn text-wn border border-wn/40">
-                  <span>⚡ Hỗn hợp</span>
+                <span className="inline-flex items-center gap-1 font-semibold text-wn">
+                  <span>⚡</span> Hỗn hợp
                 </span>
-                <span className="text-[11px] text-mu italic hidden sm:inline ml-1">
-                  (Nhấp vào nhãn trên ô phòng để đổi nhanh)
+                <span className="text-[11px] text-mu hidden sm:inline">
+                  · Bấm ký hiệu trên ô phòng để đổi nhanh
                 </span>
               </div>
 
-              {/* Legend 2: Occupancy Status */}
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-semibold text-mu uppercase tracking-wider">Công suất:</span>
+              <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5">
+                <span className="text-[11px] font-semibold text-mu">Công suất:</span>
                 {[
-                  { label: 'Còn trống', dot: 'bg-ok2', badge: 'bg-okbg border-ok2/35 text-ok' },
-                  { label: 'Đầy 100%', dot: 'bg-wn', badge: 'tint-wn border-wn/40 text-wn' },
-                  { label: 'Quá tải (>định mức)', dot: 'bg-dgr', badge: 'tint-dgr border-dgr/40 text-dgr' },
-                  { label: 'Trống (0)', dot: 'bg-mu', badge: 'bg-act border-bdr2 text-mu' },
+                  { label: 'Còn trống', dot: 'bg-ok2', tone: 'text-ok' },
+                  { label: 'Đầy 100%', dot: 'bg-wn', tone: 'text-wn' },
+                  { label: 'Quá tải', dot: 'bg-dgr', tone: 'text-dgr' },
+                  { label: 'Trống (0)', dot: 'bg-ic', tone: 'text-mu' },
                 ].map(leg => (
-                  <div key={leg.label} className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[11px] font-semibold ${leg.badge}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${leg.dot}`} />
+                  <span key={leg.label} className={`inline-flex items-center gap-1.5 font-semibold ${leg.tone}`}>
+                    <span className={`w-2 h-2 rounded-full ${leg.dot}`} />
                     <span>{leg.label}</span>
-                  </div>
+                  </span>
                 ))}
               </div>
             </div>

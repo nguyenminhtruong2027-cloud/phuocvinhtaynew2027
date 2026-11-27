@@ -987,14 +987,125 @@ export default function UserManagementClient() {
           </div>
         </div>
 
-        {/* Table */}
+        {/* Table & Mobile Account Cards */}
         {loading ? (
           <div className="py-16 text-center text-muted-foreground flex flex-col items-center gap-2">
             <RefreshCw size={24} className="animate-spin text-primary" />
             <p className="text-xs">Đang tải danh sách tài khoản...</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            {/* Mobile Account Cards (< md) */}
+            <div className="md:hidden divide-y divide-border">
+              {filteredProfiles.length === 0 ? (
+                <div className="px-4 py-12 text-center text-muted-foreground text-xs">
+                  Không có tài khoản nào.
+                </div>
+              ) : (
+                filteredProfiles.map(profile => {
+                  const perms = getAccountPermissions(profile.role, profile.id);
+                  const isSelf = profile.id === currentUser?.id;
+
+                  return (
+                    <div key={profile.id} className="p-3.5 space-y-2.5 bg-surf">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-sm font-bold text-foreground">
+                              {profile.full_name || '—'}
+                            </span>
+                            {isSelf && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-semibold">
+                                Bạn
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-muted-foreground font-mono truncate mt-0.5">
+                            {profile.email}
+                          </div>
+                        </div>
+
+                        <div className="shrink-0">
+                          {profile.role === 'super_admin' ? (
+                            <StatusTag tone="amber" size="sm" icon={Crown}>Super Admin</StatusTag>
+                          ) : profile.role === 'admin' ? (
+                            <StatusTag tone="rose" size="sm" icon={ShieldCheck}>Admin</StatusTag>
+                          ) : profile.role === 'technician' ? (
+                            <StatusTag tone="amber" size="sm" icon={Wrench}>Kỹ thuật viên</StatusTag>
+                          ) : (
+                            <StatusTag tone="blue" size="sm" icon={Shield}>Staff</StatusTag>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="text-xs space-y-1">
+                        <div className="text-[11px] text-muted-foreground">Phạm vi phụ trách:</div>
+                        <div>
+                          {profile.role === 'super_admin' ? (
+                            <span className="text-xs text-wn font-medium">Toàn quyền hệ thống • Toàn bộ KTX</span>
+                          ) : profile.role === 'admin' ? (
+                            <span className="text-xs text-muted-foreground italic font-medium">Toàn bộ KTX (Vận hành)</span>
+                          ) : profile.role === 'technician' && (!profile.assigned_blocks || profile.assigned_blocks.length === 0) ? (
+                            <span className="text-xs text-ok font-medium">Toàn bộ KTX (Bảo trì & 3D)</span>
+                          ) : (
+                            renderAssignedBlocks(profile.assigned_blocks)
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-bdr">
+                        <span className="text-[11px] text-muted-foreground font-tabular">
+                          Tạo: {profile.created_at ? new Date(profile.created_at).toLocaleDateString('vi-VN') : '—'}
+                        </span>
+
+                        {!perms.canEdit && !perms.canDelete ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-muted/60 text-muted-foreground text-[11px] font-medium">
+                            <Lock size={11} /> Được bảo vệ
+                          </span>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            {perms.canEdit && (
+                              <button
+                                onClick={() => openEdit(profile)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-bdr bg-surf text-tx hover:bg-act text-xs font-medium cursor-pointer"
+                              >
+                                <Pencil size={12} />
+                                <span>Sửa</span>
+                              </button>
+                            )}
+                            {perms.canEdit && !isSelf && (
+                              <button
+                                onClick={() => {
+                                  setResetTarget(profile);
+                                  setResetPassword('');
+                                  setResetError('');
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-bdr text-wn hover:bg-act text-xs font-medium cursor-pointer"
+                              >
+                                <KeyRound size={12} />
+                                <span>MK</span>
+                              </button>
+                            )}
+                            {perms.canDelete && (
+                              <button
+                                onClick={() => setDeleteTarget(profile)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-bdr text-dgr hover:bg-dgrbg text-xs font-medium cursor-pointer"
+                              >
+                                <Trash2 size={12} />
+                                <span>Xóa</span>
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Desktop Table (md+) */}
+            <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="bg-act text-mu text-[11px] uppercase tracking-wider font-bold border-b border-bdr2 sticky top-0 z-10">
                 <tr>
@@ -1116,7 +1227,8 @@ export default function UserManagementClient() {
                 )}
               </tbody>
             </table>
-          </div>
+            </div>
+          </>
         )}
       </div>
 

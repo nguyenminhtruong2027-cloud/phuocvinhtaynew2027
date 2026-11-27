@@ -1064,9 +1064,159 @@ export default function AuditLogClient() {
             </div>
           )}
 
-          {/* ─── High-Density Audit Log Table ─── */}
+          {/* ─── High-Density Audit Log Table & Mobile Timeline Cards ─── */}
           <div className="surface-elevated rounded-2xl overflow-hidden">
-            <div className="overflow-x-auto scrollbar-thin">
+            {/* Mobile Timeline Card View (< md) */}
+            <div className="md:hidden divide-y divide-bdr">
+              {isSuperAdmin && visibleRows.length > 0 && (
+                <div className="px-3.5 py-2.5 bg-act/60 flex items-center justify-between text-xs">
+                  <label className="inline-flex items-center gap-2 font-medium text-tx cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={toggleSelectAllVisible}
+                      className="rounded border-bdr accent-pri2 cursor-pointer"
+                    />
+                    <span>Chọn trang này ({visibleRows.length})</span>
+                  </label>
+                </div>
+              )}
+
+              {loadingPage || searchingServer ? (
+                Array.from({ length: 5 }).map((_, idx) => (
+                  <div key={`msk-${idx}`} className="p-3.5 space-y-2">
+                    <div className="h-4 w-2/3 rounded skeleton-pulse" />
+                    <div className="h-3.5 w-full rounded skeleton-pulse" />
+                    <div className="h-3 w-1/2 rounded skeleton-pulse" />
+                  </div>
+                ))
+              ) : visibleRows.length === 0 ? (
+                <div className="px-4 py-12 text-center space-y-2">
+                  <p className="text-sm font-semibold text-tx">Không có bản ghi nhật ký nào phù hợp</p>
+                  <p className="text-xs text-mu">Thử nới rộng khoảng thời gian hoặc xóa bộ lọc đang áp dụng.</p>
+                  {hasActiveFilter && (
+                    <button
+                      type="button"
+                      onClick={clearFilters}
+                      className="mt-2 px-3 py-1.5 rounded-lg bg-pri2 text-white text-xs font-semibold cursor-pointer"
+                    >
+                      Xóa toàn bộ bộ lọc
+                    </button>
+                  )}
+                </div>
+              ) : (
+                visibleRows.map(row => {
+                  const { primary, parsed, anomaly, pairedTechnical } = row;
+                  const meta = getActionMeta(primary.action);
+                  const actor = resolveActor(primary.account);
+                  const traceToken = parsed.cccd || parsed.maNv || parsed.workerName;
+                  const actionColorClass =
+                    meta.severity === 'critical'
+                      ? 'text-dgr'
+                      : meta.severity === 'warning'
+                        ? 'text-wn'
+                        : 'text-ok';
+
+                  return (
+                    <div
+                      key={primary.id}
+                      onClick={() => setSelectedRow({ entry: primary, pairedTechnical })}
+                      className={`p-3.5 space-y-2 active:bg-act/60 transition-colors cursor-pointer ${
+                        isSuperAdmin && selectedIds.has(primary.id) ? 'bg-pri2/5' : ''
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2.5 min-w-0">
+                          {isSuperAdmin && (
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(primary.id)}
+                              onClick={e => e.stopPropagation()}
+                              onChange={() => toggleSelectRow(row)}
+                              className="mt-0.5 rounded border-bdr accent-pri2 cursor-pointer shrink-0"
+                            />
+                          )}
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={`text-xs font-bold ${actionColorClass}`}>{meta.labelVi}</span>
+                              {anomaly.isAnomalous && (
+                                <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-dgr">
+                                  <AlertTriangle size={11} /> Bất thường
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-mu mt-0.5 truncate">
+                              <span className="font-semibold text-tx/90">
+                                <HighlightText text={actor.displayName} keyword={searchKeyword} />
+                              </span>
+                              <span> · {formatRelativeTimeVN(primary.timestamp)}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-tabular text-mu shrink-0 text-right">
+                          {formatTimestampVN(primary.timestamp)}
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-tx leading-relaxed break-words">
+                        <HighlightText text={parsed.summary} keyword={searchKeyword} />
+                      </p>
+
+                      {parsed.beforeAfter && (
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-mu bg-act/50 rounded-lg px-2.5 py-1.5">
+                          <span className="truncate max-w-[160px]">{parsed.beforeAfter.before}</span>
+                          {parsed.beforeAfter.isSwap ? (
+                            <ArrowLeftRight size={11} className="text-lnk shrink-0" />
+                          ) : (
+                            <ArrowRight size={11} className="text-lnk shrink-0" />
+                          )}
+                          <span className="font-semibold text-lnk truncate max-w-[180px]">
+                            {parsed.beforeAfter.after}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between gap-2 pt-1 text-[11px]">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {parsed.integrityVerified === true && (
+                            <span className="inline-flex items-center gap-1 text-ok font-medium">
+                              <ShieldCheck size={12} /> Xác minh sạch
+                            </span>
+                          )}
+                          {pairedTechnical.length > 0 && (
+                            <span className="text-lnk font-medium">
+                              +{pairedTechnical.length} bản ghi xác minh
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {traceToken && (
+                            <button
+                              type="button"
+                              onClick={e => {
+                                e.stopPropagation();
+                                handleTraceWorker(traceToken);
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-act text-lnk font-semibold"
+                            >
+                              <History size={12} />
+                              <span>Truy vết</span>
+                            </button>
+                          )}
+                          <span className="inline-flex items-center gap-0.5 text-mu font-medium">
+                            <span>Chi tiết</span>
+                            <ChevronRight size={13} />
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Desktop Table View (md+) */}
+            <div className="hidden md:block overflow-x-auto scrollbar-thin">
               <table className="w-full text-sm min-w-[820px]">
                 <thead className="bg-act border-b border-bdr2 sticky top-0 z-10">
                   <tr>

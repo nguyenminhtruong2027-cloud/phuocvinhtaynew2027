@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Search, X } from 'lucide-react';
+import { Search, X, SlidersHorizontal, ChevronDown, ChevronUp } from 'lucide-react';
 import type { FilterState } from './WorkerManagementClient';
 import {
   Worker,
@@ -244,47 +244,156 @@ export default function WorkerFilters({ filters, onChange, workers }: Props) {
   const platoonList = useMemo(() => getUniquePlatoons(workers), [workers]);
   const toTruongList = useMemo(() => getUniqueToTruongList(workers), [workers]);
 
-  const hasActive =
-    filters.search ||
-    filters.ktx ||
-    filters.building ||
-    filters.room ||
-    filters.platoon ||
-    filters.profileStatus ||
-    filters.toTruong ||
-    filters.province ||
-    filters.tamTruStatus;
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+
+  const activeAdvancedFilterCount = [
+    filters.ktx,
+    filters.building,
+    filters.room,
+    filters.platoon,
+    filters.profileStatus,
+    filters.toTruong,
+    filters.province,
+    filters.tamTruStatus,
+  ].filter(Boolean).length;
+
+  const hasActive = Boolean(filters.search || activeAdvancedFilterCount > 0);
+
+  const resetAllFilters = () =>
+    onChange({
+      search: '',
+      ktx: '',
+      building: '',
+      room: '',
+      platoon: '',
+      profileStatus: '',
+      toTruong: '',
+      province: '',
+      tamTruStatus: '',
+    });
 
   return (
-    <div className="bg-surf border border-bdr rounded-2xl p-4 sm:p-5 shadow-xl mb-5 space-y-4">
-      {/* ── Spacious Top Search Bar ── */}
+    <div className="bg-surf border border-bdr rounded-2xl p-3 sm:p-5 shadow-xl mb-4 sm:mb-5 space-y-3 sm:space-y-4">
+      {/* ── Top Search Bar + Mobile Filter Toggle ── */}
       <div className="relative w-full">
-        <label className="text-xs font-bold text-tx uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+        <label className="hidden md:flex text-xs font-bold text-tx uppercase tracking-wider mb-1.5 items-center gap-1.5">
           <Search size={14} className="text-blue-400" />
           <span>Tìm kiếm nhanh công nhân</span>
         </label>
-        <div className="relative">
-          <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-mu pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Nhập họ tên, mã nhân viên, tổ trưởng, số CCCD, SĐT, số phòng..."
-            value={filters.search}
-            onChange={e => set('search', e.target.value)}
-            className="w-full pl-11 pr-10 py-3 text-sm bg-surf border border-bdr text-tx placeholder-mu rounded-xl focus:outline-none focus:ring-2 focus:ring-pri2/50 focus:border-pri2 transition-all"
-          />
-          {filters.search && (
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1 min-w-0">
+            <Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-mu pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Tìm họ tên, mã NV, tổ trưởng, CCCD, SĐT, phòng..."
+              value={filters.search}
+              onChange={e => set('search', e.target.value)}
+              className="w-full pl-10 pr-9 py-2.5 sm:py-3 text-sm bg-act/60 sm:bg-surf border border-bdr text-tx placeholder-mu rounded-xl focus:outline-none focus:ring-2 focus:ring-pri2/50 focus:border-pri2 transition-all"
+            />
+            {filters.search && (
+              <button
+                type="button"
+                onClick={() => set('search', '')}
+                aria-label="Xóa từ khóa tìm kiếm"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 text-mu hover:text-tx transition-colors cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setMobileFiltersOpen(prev => !prev)}
+            className={`md:hidden shrink-0 inline-flex items-center justify-center gap-1.5 min-h-[42px] px-3 rounded-xl border text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+              mobileFiltersOpen || activeAdvancedFilterCount > 0
+                ? 'bg-bdg text-lnk border-pri2/50'
+                : 'bg-act text-tx border-bdr hover:bg-act/80'
+            }`}
+          >
+            <SlidersHorizontal size={15} />
+            <span>Bộ lọc{activeAdvancedFilterCount > 0 ? ` (${activeAdvancedFilterCount})` : ''}</span>
+            {mobileFiltersOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+        </div>
+
+        {/* ── Mobile 1-Tap Quick Filters (Always compact, 1 single scrollable line) ── */}
+        <div className="md:hidden flex items-center gap-1.5 overflow-x-auto scrollbar-thin pt-2.5 -mx-0.5 px-0.5">
+          {[
+            {
+              id: 'all',
+              label: 'Tất cả',
+              active: !filters.profileStatus && !filters.tamTruStatus,
+              onClick: () => onChange({ ...filters, profileStatus: '', tamTruStatus: '' }),
+            },
+            {
+              id: 'no_room',
+              label: 'Chưa phòng',
+              active: filters.profileStatus === 'no_room',
+              onClick: () =>
+                onChange({ ...filters, profileStatus: filters.profileStatus === 'no_room' ? '' : 'no_room' }),
+            },
+            {
+              id: 'missing',
+              label: 'Thiếu CCCD/SĐT',
+              active: filters.profileStatus === 'missing_cccd_sdt',
+              onClick: () =>
+                onChange({
+                  ...filters,
+                  profileStatus: filters.profileStatus === 'missing_cccd_sdt' ? '' : 'missing_cccd_sdt',
+                }),
+            },
+            {
+              id: 'unreg',
+              label: 'Chưa ĐK tạm trú',
+              active: filters.tamTruStatus === 'unregistered',
+              onClick: () =>
+                onChange({
+                  ...filters,
+                  tamTruStatus: filters.tamTruStatus === 'unregistered' ? '' : 'unregistered',
+                }),
+            },
+            {
+              id: 'overdue',
+              label: 'Quá hạn >7 ngày',
+              active: filters.tamTruStatus === 'overdue',
+              onClick: () =>
+                onChange({ ...filters, tamTruStatus: filters.tamTruStatus === 'overdue' ? '' : 'overdue' }),
+            },
+          ].map(chip => (
             <button
-              onClick={() => set('search', '')}
-              className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1 text-mu hover:text-white transition-colors cursor-pointer"
+              key={chip.id}
+              type="button"
+              onClick={chip.onClick}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 border transition-colors cursor-pointer ${
+                chip.active
+                  ? 'bg-pri text-white border-pri shadow-sm'
+                  : 'bg-act/80 text-mu border-bdr hover:text-tx'
+              }`}
             >
-              <X size={16} />
+              {chip.label}
+            </button>
+          ))}
+
+          {hasActive && (
+            <button
+              type="button"
+              onClick={resetAllFilters}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap shrink-0 bg-dgrbg/70 text-dgr border border-dgr/30 cursor-pointer flex items-center gap-1"
+            >
+              <X size={12} />
+              <span>Xóa lọc</span>
             </button>
           )}
         </div>
       </div>
 
-      {/* ── Multi-attribute Filter Grid ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-2.5 sm:gap-3 items-end pt-2 border-t border-bdr3">
+      {/* ── Multi-attribute Filter Grid (Collapsible on mobile, always expanded on md+) ── */}
+      <div
+        className={`${
+          mobileFiltersOpen ? 'grid' : 'hidden md:grid'
+        } grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-2.5 sm:gap-3 items-end pt-2 border-t border-bdr3`}
+      >
         {/* KTX */}
         <div className="flex flex-col gap-1">
           <label className="text-[11px] font-bold text-mu uppercase tracking-wider">KTX</label>

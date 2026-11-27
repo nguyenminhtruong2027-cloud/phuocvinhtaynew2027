@@ -366,10 +366,13 @@ export default function RoomDrawer({
 
       {/* Drawer / Bottom Sheet */}
       <div
-        className="fixed inset-x-0 bottom-0 max-h-[88vh] sm:max-h-full sm:top-0 sm:right-0 sm:left-auto sm:inset-x-auto sm:h-full z-50 w-full sm:max-w-md bg-surf border-t sm:border-t-0 sm:border-l border-bdr2 text-tx shadow-2xl flex flex-col rounded-t-2xl sm:rounded-none overflow-hidden animate-slide-in-right"
+        className="fixed inset-x-0 bottom-0 max-h-[90vh] sm:max-h-full sm:top-0 sm:right-0 sm:left-auto sm:inset-x-auto sm:h-full z-50 w-full sm:max-w-md bg-surf border-t sm:border-t-0 sm:border-l border-bdr2 text-tx shadow-2xl flex flex-col rounded-t-3xl sm:rounded-none overflow-hidden sheet-enter-bottom sm:animate-slide-in-right"
       >
+        <div className="sm:hidden flex justify-center pt-2.5 pb-1 bg-act/55 shrink-0">
+          <span className="w-10 h-1 rounded-full bg-bdr3" />
+        </div>
         {/* Header */}
-        <div className="px-5 py-4 border-b border-bdr bg-act/55 space-y-2.5">
+        <div className="px-4 sm:px-5 py-3.5 sm:py-4 border-b border-bdr bg-act/55 space-y-2.5 shrink-0">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-start gap-3 min-w-0">
               <CraftIconBadge

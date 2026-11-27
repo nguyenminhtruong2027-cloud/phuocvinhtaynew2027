@@ -6,7 +6,7 @@ import { Worker, getProfileStatus, calcSoNgay, DEFAULT_ROOM_CAPACITY, removeAcce
 import WorkerTable from './WorkerTable';
 import WorkerFilters from './WorkerFilters';
 import BulkActionBar from './BulkActionBar';
-import { Plus, Download, Upload, X, FileText, AlertCircle, AlertTriangle, FileCheck, ChevronLeft, ChevronRight, Trash2, Building2, CheckSquare, Filter, Users, ArrowRightLeft, ShieldAlert, UserMinus } from 'lucide-react';
+import { Plus, Download, Upload, X, FileText, AlertCircle, AlertTriangle, FileCheck, ChevronLeft, ChevronRight, Trash2, Building2, CheckSquare, Filter, Users, ArrowRightLeft, ShieldAlert, UserMinus, MoreHorizontal } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { exportToExcel } from '@/lib/exportExcel';
 import { CraftIconBadge } from '@/components/ui/CraftIcon';
@@ -1927,6 +1927,19 @@ export function WorkerManagementClient() {
     if (act === 'reconcile') return 'reconcile';
     return null;
   });
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const mobileMoreRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!mobileMoreOpen) return;
+    const handleOutside = (e: MouseEvent) => {
+      if (mobileMoreRef.current && !mobileMoreRef.current.contains(e.target as Node)) {
+        setMobileMoreOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [mobileMoreOpen]);
 
   useEffect(() => {
     let active = true;
@@ -2518,8 +2531,114 @@ export function WorkerManagementClient() {
             </div>
           </div>
 
-          {/* ── Action Buttons (dgr = delete only, pri = add, outline = rest) ── */}
-          <div className="flex items-center gap-2 flex-wrap">
+          {/* ── Mobile Compact Action Bar (< lg) ── */}
+          <div className="flex lg:hidden items-center gap-2 relative" ref={mobileMoreRef}>
+            {(isAdmin || (currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && (
+              <button
+                type="button"
+                onClick={() => setShowAddModal(true)}
+                className="flex-1 flex items-center justify-center gap-1.5 min-h-[42px] px-3.5 py-2 rounded-xl btn-glow-primary text-xs font-bold cursor-pointer whitespace-nowrap"
+              >
+                <Plus size={16} />
+                <span>Thêm Công Nhân</span>
+              </button>
+            )}
+
+            {(isAdmin || (currentUser?.assignedBlocks && currentUser.assignedBlocks.length > 0)) && (
+              <button
+                type="button"
+                onClick={() => setBatchReconcileTab('batch-checkout')}
+                className="flex items-center justify-center gap-1.5 min-h-[42px] px-3 py-2 rounded-xl border border-dgr/40 bg-dgrbg/60 text-dgr text-xs font-bold hover:bg-dgrbg transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <UserMinus size={15} />
+                <span>Check-out loạt</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setMobileMoreOpen(prev => !prev)}
+              aria-label="Thêm thao tác"
+              className="relative flex items-center justify-center min-h-[42px] min-w-[42px] px-2.5 rounded-xl border border-bdr3 bg-surf text-tx hover:bg-act transition-colors cursor-pointer shrink-0"
+            >
+              <MoreHorizontal size={18} />
+              {isAdmin && noKtxCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[17px] h-[17px] flex items-center justify-center rounded-full bg-dgr text-white text-[10px] font-bold px-1">
+                  {noKtxCount}
+                </span>
+              )}
+            </button>
+
+            {mobileMoreOpen && (
+              <div className="absolute right-0 top-full mt-2 w-60 bg-surf border border-bdr2 rounded-2xl shadow-2xl z-50 py-1.5 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => { setMobileMoreOpen(false); setShowImport(true); }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-tx hover:bg-act text-left cursor-pointer"
+                >
+                  <Upload size={15} className="text-lnk" />
+                  <span>Nhập từ Excel</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setMobileMoreOpen(false); handleExport(); }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-tx hover:bg-act text-left cursor-pointer"
+                >
+                  <Download size={15} className="text-lnk" />
+                  <span>Xuất Excel</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setMobileMoreOpen(false); setShowTamTruExport(true); }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-tx hover:bg-act text-left cursor-pointer"
+                >
+                  <FileCheck size={15} className="text-ok" />
+                  <span>Xuất danh sách Tạm Trú</span>
+                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => { setMobileMoreOpen(false); setShowBulkAssignKtx(true); }}
+                    className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-xs font-semibold text-tx hover:bg-act text-left cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <Building2 size={15} className="text-lnk" />
+                      <span>Gán KTX hàng loạt</span>
+                    </span>
+                    {noKtxCount > 0 && (
+                      <span className="min-w-[20px] h-5 flex items-center justify-center rounded-full bg-dgr text-white text-[10px] font-bold px-1.5">
+                        {noKtxCount}
+                      </span>
+                    )}
+                  </button>
+                )}
+                {(canBulkDelete || canDeleteAll) && <div className="my-1 border-t border-bdr" />}
+                {canBulkDelete && (
+                  <button
+                    type="button"
+                    onClick={() => { setMobileMoreOpen(false); setShowBulkDeleteFilter(true); }}
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-dgr hover:bg-dgrbg/60 text-left cursor-pointer"
+                  >
+                    <Filter size={15} />
+                    <span>Xóa theo bộ lọc</span>
+                  </button>
+                )}
+                {canDeleteAll && (
+                  <button
+                    type="button"
+                    onClick={() => { setMobileMoreOpen(false); setShowDeleteAll(true); }}
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-bold text-dgr hover:bg-dgrbg/60 text-left cursor-pointer"
+                  >
+                    <Trash2 size={15} />
+                    <span>Xóa tất cả hồ sơ</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* ── Desktop Action Buttons (lg+) ── */}
+          <div className="hidden lg:flex items-center gap-2 flex-wrap">
             {/* Đỏ xóa: Xóa theo bộ lọc (Admin + Super Admin) / Xóa tất cả (chỉ Super Admin) */}
             {(canBulkDelete || canDeleteAll) && (
               <>
@@ -2642,22 +2761,22 @@ export function WorkerManagementClient() {
       <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-xs sm:text-sm text-mu">
           <span>Hiển thị</span>
-          <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }} className="bg-surf border border-bdr text-tx rounded-lg px-2 py-1 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-pri2">
+          <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }} className="bg-surf border border-bdr text-tx rounded-lg px-2.5 py-1.5 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-pri2">
             {[20, 50, 100, 200].map(n => <option key={n} value={n}>{n}</option>)}
           </select>
           <span>bản ghi (Tổng: <strong className="text-tx font-tabular">{filtered.length.toLocaleString('vi-VN')}</strong>)</span>
         </div>
         <div className="flex items-center gap-1">
-          <button onClick={() => setPage(1)} disabled={page === 1} className="btn-ghost px-2 py-1 text-xs disabled:opacity-40">«</button>
-          <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="btn-ghost px-2 py-1 text-xs disabled:opacity-40">‹</button>
+          <button onClick={() => setPage(1)} disabled={page === 1} className="btn-ghost min-w-[36px] min-h-[36px] px-2 py-1 text-xs disabled:opacity-40">«</button>
+          <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="btn-ghost min-w-[36px] min-h-[36px] px-2 py-1 text-xs disabled:opacity-40">‹</button>
           {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
             const p = Math.max(1, Math.min(totalPages - 4, page - 2)) + i;
             return (
-              <button key={p} onClick={() => setPage(p)} className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${page === p ? 'bg-primary text-primary-foreground' : 'btn-ghost'}`}>{p}</button>
+              <button key={p} onClick={() => setPage(p)} className={`min-w-[36px] min-h-[36px] px-3 py-1 rounded-lg text-xs font-semibold transition-all ${page === p ? 'bg-primary text-primary-foreground' : 'btn-ghost'}`}>{p}</button>
             );
           })}
-          <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages || totalPages === 0} className="btn-ghost px-2 py-1 text-xs disabled:opacity-40">›</button>
-          <button onClick={() => setPage(totalPages)} disabled={page === totalPages || totalPages === 0} className="btn-ghost px-2 py-1 text-xs disabled:opacity-40">»</button>
+          <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages || totalPages === 0} className="btn-ghost min-w-[36px] min-h-[36px] px-2 py-1 text-xs disabled:opacity-40">›</button>
+          <button onClick={() => setPage(totalPages)} disabled={page === totalPages || totalPages === 0} className="btn-ghost min-w-[36px] min-h-[36px] px-2 py-1 text-xs disabled:opacity-40">»</button>
         </div>
       </div>
 

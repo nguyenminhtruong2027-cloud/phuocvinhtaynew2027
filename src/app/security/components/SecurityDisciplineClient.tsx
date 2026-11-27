@@ -798,7 +798,75 @@ export default function SecurityDisciplineClient() {
                 <p className="text-xs text-mu">Nhấn &quot;Lập biên bản vi phạm&quot; khi phát sinh sự việc cần ghi nhận kỷ luật.</p>
               </div>
             ) : (
-              <table className="w-full text-left text-xs">
+              <>
+                {/* Mobile Discipline Cards (< md) */}
+                <div className="md:hidden divide-y divide-bdr">
+                  {filteredDisciplines.map(rec => {
+                    const sev = DISCIPLINE_SEVERITY_META[rec.severity];
+                    const cat = DISCIPLINE_CATEGORY_META[rec.category];
+                    return (
+                      <div key={rec.id} className="p-3.5 space-y-2 bg-surf">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-sm font-bold text-tx">{rec.ho_va_ten}</div>
+                            <div className="text-[11px] text-mu mt-0.5">
+                              {rec.incident_date} · {rec.cccd ? `CCCD: ${rec.cccd}` : 'Chưa có CCCD'}
+                              {rec.don_vi ? ` · ${rec.don_vi}` : ''}
+                            </div>
+                            {(rec.day || rec.phong_so) && (
+                              <div className="text-[11px] text-lnk mt-0.5 font-medium">
+                                {[rec.ktx, rec.day, rec.phong_so ? formatRoomDisplay(rec.phong_so) : ''].filter(Boolean).join(' · ')}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-col items-end gap-1 shrink-0">
+                            <StatusTag tone={sev.tone} size="sm">{sev.label}</StatusTag>
+                            {rec.status === 'resolved' ? (
+                              <StatusTag tone="teal" size="sm">Đã xử lý</StatusTag>
+                            ) : (
+                              <StatusTag tone="amber" size="sm">Đang theo dõi</StatusTag>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl bg-act/50 p-2.5 space-y-1 text-xs">
+                          <div className="font-semibold text-tx">
+                            {rec.title} <span className="text-[11px] font-normal text-mu">({cat?.shortLabel || rec.category})</span>
+                          </div>
+                          {rec.description && <p className="text-mu leading-relaxed">{rec.description}</p>}
+                          {rec.action_taken && <p className="text-[11px] text-lnk">Xử lý: {rec.action_taken}</p>}
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-bdr">
+                          <span className="text-[10px] text-mu truncate">Ghi nhận: {rec.recorded_by}</span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleDisciplineStatus(rec)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-bdr bg-surf text-ok text-xs font-semibold cursor-pointer"
+                            >
+                              <CheckCircle2 size={13} />
+                              <span>{rec.status === 'open' ? 'Xong' : 'Mở lại'}</span>
+                            </button>
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteDiscipline(rec)}
+                                className="p-1.5 rounded-lg border border-bdr text-dgr hover:bg-dgrbg cursor-pointer"
+                                title="Xóa bản ghi"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Desktop Table (md+) */}
+                <table className="hidden md:table w-full text-left text-xs">
                 <thead className="bg-act text-mu uppercase tracking-wider text-[11px] font-bold border-b border-bdr2">
                   <tr>
                     <th className="px-4 py-3">Ngày</th>
@@ -880,6 +948,7 @@ export default function SecurityDisciplineClient() {
                   })}
                 </tbody>
               </table>
+              </>
             )}
           </div>
         )}
@@ -899,7 +968,67 @@ export default function SecurityDisciplineClient() {
                 <p className="text-xs text-mu">Các số CCCD bị cấm tái nhập KTX sẽ hiển thị tại đây và được tự động khóa trên toàn hệ thống.</p>
               </div>
             ) : (
-              <table className="w-full text-left text-xs">
+              <>
+                {/* Mobile Blacklist Cards (< md) */}
+                <div className="md:hidden divide-y divide-bdr">
+                  {filteredBlacklist.map(item => {
+                    const effective = isBlacklistRecordEffective(item);
+                    return (
+                      <div key={item.id} className={`p-3.5 space-y-2 bg-surf ${!effective ? 'opacity-65' : ''}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-sm font-bold text-tx">{item.ho_va_ten}</div>
+                            <div className="text-[11px] text-mu mt-0.5">{item.don_vi || 'Chưa rõ nhà thầu'}</div>
+                            <div className="text-xs font-mono font-bold text-dgr font-tabular mt-1">
+                              CCCD: {item.cccd}
+                              {item.ma_nv && <span className="text-mu font-normal ml-1.5">· MN: {item.ma_nv}</span>}
+                            </div>
+                          </div>
+                          <div className="shrink-0">
+                            {effective ? (
+                              <StatusTag tone="rose" size="sm" icon={Ban}>
+                                {item.severity === 'permanent' ? 'Vĩnh viễn' : `Đến ${item.banned_until}`}
+                              </StatusTag>
+                            ) : (
+                              <StatusTag tone="slate" size="sm">Đã gỡ</StatusTag>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl bg-act/50 p-2.5 text-xs space-y-1">
+                          <div className="font-medium text-tx">{item.reason}</div>
+                          <div className="text-[11px] text-mu">
+                            Đưa vào: {item.banned_by} · {new Date(item.created_at).toLocaleDateString('vi-VN')}
+                          </div>
+                          {item.revoked_by && (
+                            <div className="text-[11px] text-ok">
+                              Đã gỡ bởi {item.revoked_by}: {item.revoke_note || '—'}
+                            </div>
+                          )}
+                        </div>
+
+                        {effective && isAdmin && (
+                          <div className="flex justify-end pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRevokeTarget(item);
+                                setRevokeNote('');
+                              }}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surf border border-bdr2 text-tx hover:bg-act text-xs font-semibold cursor-pointer"
+                            >
+                              <Undo2 size={12} />
+                              <span>Gỡ lệnh cấm</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Desktop Table (md+) */}
+                <table className="hidden md:table w-full text-left text-xs">
                 <thead className="bg-act text-mu uppercase tracking-wider text-[11px] font-bold border-b border-bdr2">
                   <tr>
                     <th className="px-4 py-3">Đối tượng bị hạn chế</th>
@@ -964,6 +1093,7 @@ export default function SecurityDisciplineClient() {
                   })}
                 </tbody>
               </table>
+              </>
             )}
           </div>
         )}
@@ -1001,7 +1131,56 @@ export default function SecurityDisciplineClient() {
                 <p className="text-xs text-mu">Quân số hiện diện đang khớp tốt với các phiên điểm danh gần đây.</p>
               </div>
             ) : (
-              <table className="w-full text-left text-xs">
+              <>
+                {/* Mobile Ghost Worker Cards (< md) */}
+                <div className="md:hidden divide-y divide-bdr">
+                  {ghostCandidates.map(cand => (
+                    <div key={cand.worker.id} className="p-3.5 space-y-2 bg-surf">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-sm font-bold text-tx">{cand.worker.hoVaTen}</div>
+                          <div className="text-[11px] text-mu font-tabular mt-0.5">
+                            {cand.worker.maNV || '—'} · {cand.worker.soDienThoai || 'Chưa có SĐT'}
+                          </div>
+                          {cand.worker.donVi && (
+                            <div className="text-[11px] text-mu truncate mt-0.5">{cand.worker.donVi}</div>
+                          )}
+                        </div>
+                        <StatusTag tone={cand.riskLevel === 'high' ? 'rose' : 'amber'} size="sm">
+                          Vắng {cand.consecutiveMissed} phiên
+                        </StatusTag>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-[11px] bg-act/50 rounded-xl p-2.5 font-tabular">
+                        <div>
+                          <div className="text-mu text-[10px]">Vị trí giữ giường</div>
+                          <div className="font-bold text-tx mt-0.5">
+                            {cand.worker.day} · {formatRoomDisplay(cand.worker.phongSo)}
+                            {cand.worker.giuong ? ` · G${cand.worker.giuong}` : ''}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-mu text-[10px]">Tổng vắng / Lần cuối</div>
+                          <div className="font-bold text-tx mt-0.5">{cand.missedCount}/{cand.totalSessionsInScope} phiên</div>
+                          <div className="text-mu truncate">{cand.lastPresentDate || 'Chưa điểm danh'}</div>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end pt-1">
+                        <Link
+                          href={`/worker-management?search=${encodeURIComponent(cand.worker.maNV || cand.worker.hoVaTen)}`}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surf border border-bdr2 text-lnk hover:bg-act text-xs font-semibold"
+                        >
+                          <span>Rà soát hồ sơ</span>
+                          <ExternalLink size={12} />
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop Table (md+) */}
+                <table className="hidden md:table w-full text-left text-xs">
                 <thead className="bg-act text-mu uppercase tracking-wider text-[11px] font-bold border-b border-bdr2">
                   <tr>
                     <th className="px-4 py-3">Công nhân</th>
@@ -1053,6 +1232,7 @@ export default function SecurityDisciplineClient() {
                   ))}
                 </tbody>
               </table>
+              </>
             )}
           </div>
         )}
@@ -1060,9 +1240,12 @@ export default function SecurityDisciplineClient() {
 
       {/* Modal: Create Discipline Record */}
       {showDisciplineModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 overflow-y-auto">
-          <div className="surface-elevated rounded-2xl shadow-2xl border border-bdr3 w-full max-w-xl max-h-[92vh] flex flex-col overflow-hidden my-auto">
-            <div className="px-5 py-4 border-b border-bdr flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/65 backdrop-blur-sm overflow-y-auto">
+          <div className="surface-elevated rounded-t-3xl sm:rounded-2xl shadow-2xl border border-bdr3 w-full max-w-xl max-h-[92vh] flex flex-col overflow-hidden sm:my-auto sheet-enter-bottom">
+            <div className="sm:hidden flex justify-center pt-2.5 pb-1 shrink-0">
+              <div className="w-10 h-1 rounded-full bg-bdr2" />
+            </div>
+            <div className="px-5 py-3.5 sm:py-4 border-b border-bdr flex items-center justify-between">
               <div>
                 <h2 className="text-base font-bold text-tx">Lập biên bản Vi phạm & Kỷ luật KTX</h2>
                 <p className="text-xs text-mu mt-0.5">Chọn nhanh công nhân đang ở hoặc nhập trực tiếp thông tin</p>

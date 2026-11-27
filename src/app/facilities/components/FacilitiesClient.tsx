@@ -2442,7 +2442,246 @@ export default function FacilitiesClient() {
             <p className="text-sm">{hasActiveFilters ? 'Không tìm thấy kết quả phù hợp' : `Chưa có dữ liệu cho ${activeKtx}`}</p>
           </div>
         ) : (
-          <div className="overflow-x-auto scrollbar-thin">
+          <>
+            {/* Mobile / Tablet Card View (< lg) */}
+            <div className="lg:hidden divide-y divide-border">
+              {/* Mobile select-all + summary strip */}
+              <div className="px-3.5 py-2.5 bg-act/60 flex items-center justify-between gap-2 text-xs">
+                <label className="inline-flex items-center gap-2 font-medium text-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isAllSelected}
+                    onChange={toggleSelectAll}
+                    className="w-4 h-4 rounded border-border text-primary cursor-pointer"
+                  />
+                  <span>Chọn tất cả ({sortedRows.length})</span>
+                </label>
+                <span className="text-[11px] text-muted-foreground font-tabular">
+                  Giường: <strong className="text-foreground">{(totals.giuong || 0).toLocaleString()}</strong> · ĐH: <strong className="text-foreground">{(totals.dieu_hoa || 0).toLocaleString()}</strong>
+                </span>
+              </div>
+
+              {sortedRows.map(row => {
+                const isEditing = editingId === row.id;
+                const isSelected = selectedIds.has(row.id);
+                const isHiddenRow = row.is_visible === false;
+                const equipmentItems = [
+                  { label: 'Giường', val: row.giuong },
+                  { label: 'Điều hòa', val: row.dieu_hoa },
+                  { label: 'Tủ', val: row.tu },
+                  { label: 'Quạt', val: row.quat },
+                  { label: 'Ổ cắm', val: row.o_cam_dien },
+                  { label: 'Remote', val: row.remote },
+                  { label: 'Bóng tuýp', val: row.bong_tuyp },
+                  { label: 'Bàn ăn', val: row.ban_an },
+                  { label: 'Ghế ăn', val: row.ghe_an },
+                ];
+
+                return (
+                  <div
+                    key={row.id}
+                    className={`p-3.5 space-y-2.5 transition-colors ${
+                      isEditing
+                        ? 'bg-primary/5'
+                        : isSelected
+                          ? 'bg-primary/10'
+                          : isHiddenRow
+                            ? 'bg-muted/25 opacity-75'
+                            : 'bg-surf'
+                    }`}
+                  >
+                    {/* Header: Checkbox + Location + Quick Toggles */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelectRow(row.id)}
+                          className="w-4 h-4 mt-0.5 rounded border-border text-primary cursor-pointer shrink-0"
+                          title={`Chọn phòng ${row.phong_khu_vuc}`}
+                        />
+                        <div className="min-w-0">
+                          <div className="text-sm font-bold text-foreground leading-snug truncate">
+                            {row.phong_khu_vuc}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground mt-0.5">
+                            {row.ktx} · {row.day}
+                          </div>
+                        </div>
+                      </div>
+
+                      {!isEditing && (
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => toggleRoomType(row)}
+                            className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border transition-opacity ${
+                              row.room_type === 'functional'
+                                ? 'tint-pink text-pink-tone border-pink-tint'
+                                : 'bg-bdg text-lnk border-bdr2'
+                            }`}
+                          >
+                            {row.room_type === 'functional' ? 'Chức năng' : 'Phòng ở'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleVisibility(row)}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold border ${
+                              row.is_visible !== false
+                                ? 'bg-okbg text-ok border-bdr2'
+                                : 'bg-muted text-muted-foreground border-border'
+                            }`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${row.is_visible !== false ? 'bg-ok2' : 'bg-gray-400'}`} />
+                            {row.is_visible !== false ? 'Hiện' : 'Ẩn'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {isEditing && editingRow ? (
+                      <div className="space-y-2.5 pt-1">
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="text-[11px] text-muted-foreground space-y-1">
+                            <span>Loại phòng</span>
+                            <select
+                              value={editingRow.room_type}
+                              onChange={e => setEditingRow(r => r ? { ...r, room_type: e.target.value as any } : r)}
+                              className="w-full px-2 py-1.5 text-xs border border-border rounded-lg bg-background text-foreground"
+                            >
+                              <option value="accommodation">Phòng ở</option>
+                              <option value="functional">Chức năng</option>
+                            </select>
+                          </label>
+                          <label className="flex items-center gap-2 text-xs text-foreground pt-4 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={editingRow.is_visible}
+                              onChange={e => setEditingRow(r => r ? { ...r, is_visible: e.target.checked } : r)}
+                              className="w-4 h-4 rounded border-border text-primary"
+                            />
+                            <span>Hiển thị trên Dashboard</span>
+                          </label>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {NUMERIC_FIELDS.map(f => {
+                            const metric = METRIC_CARDS.find(m => m.key === f);
+                            return (
+                              <label key={f as string} className="text-[10px] text-muted-foreground space-y-0.5">
+                                <span className="truncate block">{metric?.label || String(f)}</span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={(editingRow as any)[f as string]}
+                                  onChange={e => setEditingRow(r => r ? { ...r, [f as string]: Number(e.target.value) } : r)}
+                                  className="w-full px-2 py-1 text-xs border border-border rounded-lg bg-background text-foreground font-tabular"
+                                />
+                              </label>
+                            );
+                          })}
+                        </div>
+                        <input
+                          type="text"
+                          value={editingRow.ghi_chu}
+                          onChange={e => setEditingRow(r => r ? { ...r, ghi_chu: e.target.value } : r)}
+                          placeholder="Ghi chú CSVC / sự cố..."
+                          className="w-full px-2.5 py-1.5 text-xs border border-border rounded-lg bg-background text-foreground"
+                        />
+                        <div className="flex items-center justify-end gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={cancelEdit}
+                            className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold"
+                          >
+                            Hủy
+                          </button>
+                          <button
+                            type="button"
+                            onClick={saveEdit}
+                            disabled={saving}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-okbg text-ok text-xs font-bold disabled:opacity-50"
+                          >
+                            {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                            <span>Lưu</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Compact Equipment Strip */}
+                        <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5 text-[11px] font-tabular">
+                          {equipmentItems.map(eq => (
+                            <div
+                              key={eq.label}
+                              className={`flex items-center justify-between px-2 py-1 rounded-lg border ${
+                                eq.val > 0
+                                  ? 'bg-act/60 border-bdr text-tx'
+                                  : 'bg-surf border-bdr/50 text-mu opacity-60'
+                              }`}
+                            >
+                              <span className="truncate">{eq.label}</span>
+                              <strong className="ml-1">{eq.val}</strong>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Notes / Issues */}
+                        {row.ghi_chu && (
+                          hasFacilityIssue(row.ghi_chu) ? (
+                            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold tint-wn text-wn border border-wn max-w-full">
+                              <AlertTriangle size={12} className="shrink-0" />
+                              <span className="truncate">{row.ghi_chu}</span>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">{row.ghi_chu}</p>
+                          )
+                        )}
+
+                        {/* Card Footer Actions */}
+                        <div className="flex items-center justify-between gap-2 pt-2 border-t border-bdr">
+                          <Link
+                            href={`/ktx-3d?ktx=${encodeURIComponent(row.ktx)}&day=${encodeURIComponent(row.day)}&room=${encodeURIComponent(normalizeRoomLabel(row.phong_khu_vuc))}`}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-lnk bg-bdg/60 hover:bg-bdg transition-colors"
+                          >
+                            <Box size={13} />
+                            <span>Bản đồ 3D</span>
+                          </Link>
+
+                          {canWriteFacility(row.ktx, row.day) ? (
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => startEdit(row)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-bdr bg-surf text-tx hover:bg-act text-xs font-medium"
+                              >
+                                <Edit2 size={12} />
+                                <span>Sửa</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRequestDelete(row)}
+                                disabled={checkingDeleteId === row.id}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-bdr text-dgr hover:bg-dgrbg text-xs font-medium disabled:opacity-50"
+                              >
+                                {checkingDeleteId === row.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                                <span>Xóa</span>
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                              <Lock size={11} /> Chỉ xem
+                            </span>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop Table View (lg+) */}
+            <div className="hidden lg:block overflow-x-auto scrollbar-thin">
             <table className="w-full min-w-[1000px]">
               <thead className="bg-act border-b border-bdr2 sticky top-0 z-10">
                 <tr>
@@ -2663,7 +2902,8 @@ export default function FacilitiesClient() {
                 </tr>
               </tfoot>
             </table>
-          </div>
+            </div>
+          </>
         )}
       </div>
 

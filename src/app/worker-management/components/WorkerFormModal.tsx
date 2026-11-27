@@ -857,17 +857,23 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
   return (
     <>
       {showScanner && <CCCDScanner onScanned={handleScanned} onClose={() => setShowScanner(false)} />}
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 fade-in">
-        <div className="modal-enter bg-card rounded-xl shadow-modal w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-            <h2 className="text-base font-bold text-foreground">
+      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 modal-backdrop-scrim fade-in" onClick={onClose}>
+        <div
+          onClick={e => e.stopPropagation()}
+          className="sheet-enter-bottom bg-surf border-t sm:border border-bdr2 rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-2xl max-h-[93vh] sm:max-h-[92vh] flex flex-col overflow-hidden"
+        >
+          <div className="sm:hidden flex justify-center pt-2.5 pb-1 bg-act/40 shrink-0">
+            <span className="w-10 h-1 rounded-full bg-bdr3" />
+          </div>
+          <div className="flex items-center justify-between px-4 sm:px-5 py-3.5 sm:py-4 border-b border-bdr bg-act/40 shrink-0">
+            <h2 className="text-sm sm:text-base font-extrabold text-tx truncate pr-2">
               {isEdit ? `Chỉnh sửa: ${worker.hoVaTen}` : 'Thêm Công Nhân Mới'}
             </h2>
-            <button onClick={onClose} className="p-2 rounded-lg hover:bg-muted transition-colors"><X size={16} /></button>
+            <button type="button" onClick={onClose} className="p-2 rounded-xl hover:bg-act text-mu hover:text-tx transition-colors shrink-0"><X size={16} /></button>
           </div>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="flex-1 overflow-y-auto scrollbar-thin">
-            <div className="px-5 py-4 space-y-5">
+          <form onSubmit={handleSubmit(onSubmit)} className="flex-1 flex flex-col min-h-0">
+            <div className="flex-1 overflow-y-auto scrollbar-thin px-4 sm:px-5 py-4 space-y-5">
 
               {/* Thông tin cá nhân */}
               <div>
@@ -1197,20 +1203,20 @@ export default function WorkerFormModal({ worker, onSave, onClose, allWorkers = 
               </div>
             </div>
 
-            <div className="sticky bottom-0 bg-card border-t border-border px-5 py-3 flex items-center justify-between gap-3">
+            <div className="shrink-0 bg-surf border-t border-bdr px-4 sm:px-5 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
               {submitBlockedReason ? (
-                <span className="text-[11px] font-semibold text-dgr">
+                <span className="text-[11px] font-semibold text-dgr leading-snug">
                   ⚠ {submitBlockedReason}
                 </span>
               ) : (
-                <span />
+                <span className="hidden sm:inline" />
               )}
-              <div className="flex gap-2">
-                <button type="button" onClick={onClose} className="btn-secondary text-xs">Hủy bỏ</button>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <button type="button" onClick={onClose} className="btn-secondary flex-1 sm:flex-none justify-center text-xs">Hủy bỏ</button>
                 <button
                   type="submit"
                   disabled={saving || Boolean(submitBlockedReason)}
-                  className="btn-primary text-xs min-w-[110px] justify-center disabled:opacity-50"
+                  className="btn-glow-primary flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-bold min-w-[120px] inline-flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
                 >
                   {saving ? <><Loader2 size={13} className="animate-spin" />Đang lưu...</> : <><Save size={13} />{isEdit ? 'Lưu thay đổi' : 'Thêm công nhân'}</>}
                 </button>

@@ -332,13 +332,16 @@ export default function WorkerDetailModal({ worker: w, onClose, onEdit, onDelete
     .join(' · ');
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop-scrim fade-in" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 modal-backdrop-scrim fade-in" onClick={onClose}>
       <div
         onClick={e => e.stopPropagation()}
-        className="surface-elevated rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden border border-bdr2 modal-enter"
+        className="surface-elevated rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg max-h-[92vh] sm:max-h-[90vh] flex flex-col overflow-hidden border-t sm:border border-bdr2 sheet-enter-bottom"
       >
+        <div className="sm:hidden flex justify-center pt-2.5 pb-1 bg-act/50 shrink-0">
+          <span className="w-10 h-1 rounded-full bg-bdr3" />
+        </div>
         {/* Header */}
-        <div className="flex items-center gap-3.5 px-5 py-4 border-b border-bdr bg-act/50">
+        <div className="flex items-center gap-3.5 px-4 sm:px-5 py-3.5 sm:py-4 border-b border-bdr bg-act/50 shrink-0">
           <div
             className={`w-12 h-12 rounded-xl flex items-center justify-center text-lg font-extrabold flex-shrink-0 ${
               isFemale ? 'craft-icon-pink' : 'craft-icon-blue'

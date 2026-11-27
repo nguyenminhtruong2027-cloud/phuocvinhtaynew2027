@@ -15,6 +15,8 @@ import { openCommandPalette } from '@/components/ui/CommandPalette';
 import NotificationCenter from '@/components/NotificationCenter';
 import PWAInstallButton from '@/components/PWAInstallButton';
 
+type NavGroupKey = 'executive' | 'residents' | 'operations' | 'admin';
+
 interface NavItem {
   id: string;
   label: string;
@@ -22,20 +24,27 @@ interface NavItem {
   icon: React.ComponentType<{ size?: number; className?: string; strokeWidth?: number }>;
   adminOnly?: boolean;
   dynamicBadge?: boolean;
-  group?: 'main' | 'tools' | 'admin';
+  group: NavGroupKey;
 }
 
+const NAV_GROUPS: Array<{ key: NavGroupKey; label: string }> = [
+  { key: 'executive', label: 'Điều hành' },
+  { key: 'residents', label: 'Nhân sự & Lưu trú' },
+  { key: 'operations', label: 'Cơ sở & Vận hành' },
+  { key: 'admin', label: 'Quản trị hệ thống' },
+];
+
 const NAV_ITEMS: NavItem[] = [
-  { id: 'nav-dashboard', label: 'Tổng Quan', href: '/', icon: LayoutDashboard, group: 'main' },
-  { id: 'nav-report', label: 'Báo Cáo Biến Động', href: '/report-dashboard', icon: BarChart2, group: 'main' },
-  { id: 'nav-workers', label: 'Quản Lý Công Nhân', href: '/worker-management', icon: Users, dynamicBadge: true, group: 'main' },
-  { id: 'nav-teams', label: 'Quản Lý Tổ Đội', href: '/teams', icon: Users2, group: 'main' },
-  { id: 'nav-facilities', label: 'Cơ Sở Vật Chất', href: '/facilities', icon: Building2, group: 'main' },
-  { id: 'nav-beds', label: 'Quản Lý Giường', href: '/bed-management', icon: BedDouble, group: 'main' },
-  { id: 'nav-ktx-3d', label: 'Bản Đồ 3D KTX', href: '/ktx-3d', icon: Box, group: 'main' },
-  { id: 'nav-maintenance', label: 'Kỹ Thuật & Bảo Trì', href: '/maintenance', icon: Wrench, group: 'main' },
-  { id: 'nav-security', label: 'An Ninh & Kỷ Luật', href: '/security', icon: ShieldAlert, group: 'main' },
-  { id: 'nav-qr', label: 'QR Portal', href: '/qr-portal', icon: QrCode, group: 'main' },
+  { id: 'nav-dashboard', label: 'Tổng Quan', href: '/', icon: LayoutDashboard, group: 'executive' },
+  { id: 'nav-report', label: 'Báo Cáo Biến Động', href: '/report-dashboard', icon: BarChart2, group: 'executive' },
+  { id: 'nav-workers', label: 'Quản Lý Công Nhân', href: '/worker-management', icon: Users, dynamicBadge: true, group: 'residents' },
+  { id: 'nav-teams', label: 'Quản Lý Tổ Đội', href: '/teams', icon: Users2, group: 'residents' },
+  { id: 'nav-beds', label: 'Quản Lý Giường', href: '/bed-management', icon: BedDouble, group: 'residents' },
+  { id: 'nav-qr', label: 'QR Portal', href: '/qr-portal', icon: QrCode, group: 'residents' },
+  { id: 'nav-facilities', label: 'Cơ Sở Vật Chất', href: '/facilities', icon: Building2, group: 'operations' },
+  { id: 'nav-ktx-3d', label: 'Bản Đồ 3D KTX', href: '/ktx-3d', icon: Box, group: 'operations' },
+  { id: 'nav-maintenance', label: 'Kỹ Thuật & Bảo Trì', href: '/maintenance', icon: Wrench, group: 'operations' },
+  { id: 'nav-security', label: 'An Ninh & Kỷ Luật', href: '/security', icon: ShieldAlert, group: 'operations' },
   { id: 'nav-user-mgmt', label: 'Quản Lý Tài Khoản', href: '/user-management', icon: UserCog, adminOnly: true, group: 'admin' },
   { id: 'nav-audit', label: 'Nhật Ký Hệ Thống', href: '/audit-log', icon: ClipboardList, adminOnly: true, group: 'admin' },
 ];
@@ -78,22 +87,28 @@ const SidebarNavLink = React.memo(function SidebarNavLink({
       <Link
         href={item.href}
         onClick={onMobileClose}
-        className={`flex items-center gap-3.5 px-4 py-3.5 rounded-xl transition-colors duration-100 ${
+        className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-colors duration-120 ${
           isActive
-            ? 'bg-act text-tx font-bold border border-bdr2 shadow-sm'
-            : 'text-nav hover:bg-act/70 hover:text-tx'
+            ? 'bg-act text-tx font-bold border border-bdr2'
+            : 'text-nav hover:bg-act/60 hover:text-tx border border-transparent'
         }`}
       >
         <span className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-          isActive ? 'craft-icon-blue' : 'bg-surf border border-bdr text-ic'
+          isActive ? 'craft-icon-blue' : 'bg-surf/70 border border-bdr text-ic'
         }`}>
-          <IconComponent size={17} strokeWidth={2.1} />
+          <IconComponent size={16} strokeWidth={isActive ? 2.2 : 1.9} />
         </span>
-        <span className="text-sm flex-1">{item.label}</span>
+        <span className="text-[13.5px] flex-1 truncate">{item.label}</span>
         {badge !== undefined && badge > 0 && (
           <span
-            className={`text-xs rounded-full px-2 py-0.5 font-bold font-tabular ${
-              isActive ? 'bg-pri text-white' : 'bg-surf text-mu border border-bdr'
+            className={`text-[11px] rounded-md px-1.5 py-0.5 font-bold font-mono font-tabular ${
+              isQrPending
+                ? 'tint-wn text-wn border border-wn/35'
+                : isMaintPending
+                ? 'tint-dgr text-dgr border border-dgr/35'
+                : isActive
+                ? 'bg-pri text-white'
+                : 'bg-surf text-mu border border-bdr'
             }`}
           >
             {badge}
@@ -107,54 +122,53 @@ const SidebarNavLink = React.memo(function SidebarNavLink({
     <Link
       href={item.href}
       title={collapsed ? item.label : undefined}
-      className={`group relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors duration-100 ${
+      className={`group relative flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-[12.5px] font-medium transition-colors duration-120 ${
         isActive
-          ? 'text-tx font-bold'
+          ? 'text-tx font-semibold'
           : 'text-nav hover:text-tx'
       }`}
     >
       {isActive ? (
         <span
           aria-hidden="true"
-          className="absolute inset-0 rounded-xl bg-act border border-bdr2 shadow-sm"
+          className="absolute inset-0 rounded-xl bg-act border border-bdr2"
           style={{ boxShadow: 'inset 0 1px 0 var(--specular)' }}
         />
       ) : (
         <span
           aria-hidden="true"
-          className="absolute inset-0 rounded-xl bg-act/0 group-hover:bg-act/60 transition-colors duration-100"
+          className="absolute inset-0 rounded-xl bg-act/0 group-hover:bg-act/55 transition-colors duration-120"
         />
       )}
 
       {isActive && (
         <span
           aria-hidden="true"
-          className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full z-10"
-          style={{ background: 'var(--pri2)', boxShadow: '0 0 10px var(--pri2)' }}
+          className="absolute left-0 top-1/2 -translate-y-1/2 h-4 w-[3px] rounded-r-full z-10 bg-pri2"
         />
       )}
 
       <span
-        className={`relative z-10 w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-transform duration-100 group-hover:scale-105 ${
-          isActive ? 'craft-icon-blue' : 'text-ic group-hover:text-lnk'
+        className={`relative z-10 w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors duration-120 ${
+          isActive ? 'text-lnk bg-bdg/80' : 'text-ic group-hover:text-tx'
         }`}
       >
-        <IconComponent size={16} strokeWidth={isActive ? 2.25 : 2} />
+        <IconComponent size={15} strokeWidth={isActive ? 2.2 : 1.9} />
       </span>
 
       {!collapsed && (
-        <span className="relative z-10 flex-1 leading-snug truncate transition-transform duration-100 group-hover:translate-x-0.5">
+        <span className="relative z-10 flex-1 leading-snug truncate">
           {item.label}
         </span>
       )}
       {!collapsed && badge !== undefined && badge > 0 && (
         <span
-          className={`relative z-10 text-[11px] rounded-md px-1.5 py-0.5 font-mono font-tabular font-bold ${
+          className={`relative z-10 text-[10.5px] rounded-md px-1.5 py-0.5 font-mono font-tabular font-bold ${
             isQrPending
-              ? 'tint-wn text-wn border border-wn/40'
+              ? 'tint-wn text-wn border border-wn/35'
               : isMaintPending
-              ? 'tint-dg text-dgr border border-dgr/40'
-              : 'bg-bdg text-lnk border border-bdr2'
+              ? 'tint-dgr text-dgr border border-dgr/35'
+              : 'bg-bdg/90 text-lnk border border-bdr2'
           }`}
           title={
             isQrPending
@@ -169,7 +183,7 @@ const SidebarNavLink = React.memo(function SidebarNavLink({
       )}
       {collapsed && badge !== undefined && badge > 0 && (
         <span
-          className={`relative z-10 absolute top-1.5 right-1.5 w-2 h-2 rounded-full ${
+          className={`absolute top-1.5 right-1.5 z-10 w-1.5 h-1.5 rounded-full ${
             isQrPending ? 'bg-wn' : isMaintPending ? 'bg-dgr' : 'bg-pri2'
           }`}
         />
@@ -300,8 +314,10 @@ export default function Sidebar() {
     if (isTechnician) return TECHNICIAN_NAV_IDS.has(item.id);
     return !item.adminOnly || isAdmin;
   });
-  const mainItems = visibleNavItems.filter(i => i.group === 'main');
-  const adminItems = visibleNavItems.filter(i => i.group === 'admin');
+  const groupedNavSections = NAV_GROUPS.map(g => ({
+    ...g,
+    items: visibleNavItems.filter(i => i.group === g.key),
+  })).filter(g => g.items.length > 0);
 
   const handleLogout = async () => {
     try { await signOut(); } catch {}
@@ -351,95 +367,92 @@ export default function Sidebar() {
         </div>
 
         {/* Navigation List */}
-        <nav className="flex-1 px-2.5 pt-3.5 pb-8 flex flex-col gap-1 overflow-y-auto scrollbar-thin">
-          {/* Quick Command Palette Trigger (Ctrl+K) */}
-          <button
-            type="button"
-            onClick={openCommandPalette}
-            title="Tìm kiếm nhanh (Ctrl + K)"
-            className={`mb-2.5 w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-surf hover:bg-act border border-bdr2 text-xs text-mu hover:text-tx transition-colors cursor-pointer ${
-              collapsed ? 'justify-center px-2' : ''
-            }`}
-            style={{ boxShadow: 'inset 0 1px 0 var(--specular)' }}
-          >
-            <Search size={14} className="text-lnk shrink-0" />
-            {!collapsed && (
-              <>
-                <span className="flex-1 text-left truncate font-medium">Tìm nhanh...</span>
-                <kbd className="px-1.5 py-0.5 rounded bg-act border border-bdr2 font-mono text-[10px] font-semibold text-ic">
-                  ⌘K
-                </kbd>
-              </>
-            )}
-          </button>
-
-          {/* Centralized Realtime Notification Center */}
-          <div className="mb-2.5">
-            <NotificationCenter collapsed={collapsed} />
-          </div>
-
-          {!collapsed && (
-            <p className="px-3 pt-1 pb-1.5 text-[10px] font-bold text-ic uppercase tracking-widest">
-              CHỨC NĂNG CHÍNH
-            </p>
-          )}
-          {mainItems.map(item => (
-            <SidebarNavLink
-              key={item.id}
-              item={item}
-              pathname={pathname}
-              collapsed={collapsed}
-              workerCount={workerCount}
-              pendingQrCount={pendingQrCount}
-              pendingMaintenanceCount={pendingMaintenanceCount}
-            />
-          ))}
-
-          {adminItems.length > 0 && (
-            <>
+        <nav className="flex-1 px-2.5 pt-3 pb-4 flex flex-col gap-0.5 overflow-y-auto scrollbar-thin">
+          {/* Quick Command Palette + Notification Row */}
+          <div className={`mb-2.5 flex items-center gap-1.5 ${collapsed ? 'flex-col' : ''}`}>
+            <button
+              type="button"
+              onClick={openCommandPalette}
+              title="Tìm kiếm nhanh (Ctrl + K)"
+              className={`flex-1 flex items-center gap-2 px-2.5 py-2 rounded-xl bg-surf hover:bg-act border border-bdr2 text-xs text-mu hover:text-tx transition-colors cursor-pointer min-w-0 ${
+                collapsed ? 'w-full justify-center px-2' : ''
+              }`}
+              style={{ boxShadow: 'inset 0 1px 0 var(--specular)' }}
+            >
+              <Search size={14} className="text-lnk shrink-0" />
               {!collapsed && (
-                <p className="px-3 pt-4 pb-1.5 text-[10px] font-bold text-ic uppercase tracking-widest">
-                  QUẢN TRỊ HỆ THỐNG
-                </p>
+                <>
+                  <span className="flex-1 text-left truncate font-medium">Tìm nhanh...</span>
+                  <kbd className="px-1.5 py-0.5 rounded bg-act border border-bdr text-[10px] font-mono font-semibold text-ic shrink-0">
+                    ⌘K
+                  </kbd>
+                </>
               )}
-              {collapsed && <div className="my-2 border-t border-bdr mx-1" />}
-              {adminItems.map(item => (
-                <SidebarNavLink
-                  key={item.id}
-                  item={item}
-                  pathname={pathname}
-                  collapsed={collapsed}
-                  workerCount={workerCount}
-                />
-              ))}
-            </>
-          )}
-
-          {/* Data Sync & Theme Tool */}
-          <div className="mt-4 pt-3 border-t border-bdr space-y-1">
-            {!collapsed && <p className="px-3 mb-1 text-[10px] font-bold text-ic uppercase tracking-widest">TIỆN ÍCH</p>}
-            {!isTechnician && (
-              <button
-                onClick={() => { void refreshWorkers(); }}
-                disabled={refreshing}
-                title="Đồng bộ lại toàn bộ dữ liệu"
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-nav hover:text-tx hover:bg-act/80 border border-transparent hover:border-bdr2 transition-colors duration-100 active:scale-[0.98] ${
-                  refreshing ? 'opacity-60 cursor-not-allowed' : ''
-                }`}
-              >
-                <RefreshCw size={16} className={`text-ic flex-shrink-0 ${refreshing ? 'animate-spin text-pri2' : ''}`} />
-                {!collapsed && <span className="truncate">{refreshing ? 'Đang đồng bộ...' : 'Đồng bộ dữ liệu'}</span>}
-              </button>
-            )}
-            <PWAInstallButton collapsed={collapsed} />
-            <ThemeSwitcher showLabel={!collapsed} />
+            </button>
+            <div className={collapsed ? 'w-full' : 'shrink-0'}>
+              <NotificationCenter compact={!collapsed} collapsed={collapsed} />
+            </div>
           </div>
+
+          {groupedNavSections.map((section, idx) => (
+            <div key={section.key} className={idx > 0 ? 'mt-3' : ''}>
+              {!collapsed ? (
+                <p className="px-2.5 pb-1 text-[10px] font-bold text-ic tracking-wider uppercase">
+                  {section.label}
+                </p>
+              ) : (
+                idx > 0 && <div className="my-2 border-t border-bdr mx-1.5" />
+              )}
+              <div className="space-y-0.5">
+                {section.items.map(item => (
+                  <SidebarNavLink
+                    key={item.id}
+                    item={item}
+                    pathname={pathname}
+                    collapsed={collapsed}
+                    workerCount={workerCount}
+                    pendingQrCount={pendingQrCount}
+                    pendingMaintenanceCount={pendingMaintenanceCount}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
         </nav>
 
-        {/* User Card + Collapse Toggle */}
-        <div className="border-t border-bdr p-3 bg-surf/60">
-          {!collapsed && (
-            <div className="w-full p-2 rounded-xl bg-act border border-bdr2 flex items-center gap-2 mb-2 shadow-sm hover:border-pri2/40 transition-colors" style={{ boxShadow: 'inset 0 1px 0 var(--specular)' }}>
+        {/* Compact Utility Strip + User Card */}
+        <div className="border-t border-bdr px-2.5 py-2.5 bg-surf/50 space-y-2">
+          {/* Compact Utility Controls */}
+          <div className={`flex items-center ${collapsed ? 'flex-col gap-1' : 'justify-between gap-1 px-0.5'}`}>
+            <div className={`flex items-center ${collapsed ? 'flex-col gap-1' : 'gap-0.5'}`}>
+              {!isTechnician && (
+                <button
+                  type="button"
+                  onClick={() => { void refreshWorkers(); }}
+                  disabled={refreshing}
+                  title={refreshing ? 'Đang đồng bộ dữ liệu...' : 'Đồng bộ lại dữ liệu'}
+                  className="p-2 rounded-xl text-nav hover:text-tx hover:bg-act border border-transparent hover:border-bdr2 transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  <RefreshCw size={15} className={refreshing ? 'animate-spin text-pri2' : ''} />
+                </button>
+              )}
+              <ThemeSwitcher compact />
+              <PWAInstallButton compact />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setCollapsed(!collapsed)}
+              title={collapsed ? 'Mở rộng menu' : 'Thu gọn menu'}
+              aria-label={collapsed ? 'Mở rộng menu' : 'Thu gọn menu'}
+              className="p-2 rounded-xl text-mu hover:text-tx hover:bg-act border border-transparent hover:border-bdr2 transition-colors cursor-pointer"
+            >
+              {collapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
+            </button>
+          </div>
+
+          {!collapsed ? (
+            <div className="w-full p-2 rounded-xl bg-act/80 border border-bdr2 flex items-center gap-2 hover:border-pri2/40 transition-colors" style={{ boxShadow: 'inset 0 1px 0 var(--specular)' }}>
               <Link
                 href="/profile"
                 title="Mở hồ sơ cá nhân & cài đặt phiên"
@@ -454,17 +467,15 @@ export default function Sidebar() {
                 </div>
               </Link>
               <button
-                className="p-1.5 rounded-lg text-mu hover:text-dgr hover:bg-surf transition-all duration-100 hover:scale-105 active:scale-95 shrink-0"
+                className="p-1.5 rounded-lg text-mu hover:text-dgr hover:bg-surf transition-colors shrink-0 cursor-pointer"
                 title="Đăng xuất"
                 onClick={handleLogout}
               >
                 <LogOut size={15} />
               </button>
             </div>
-          )}
-
-          {collapsed && (
-            <div className="flex flex-col items-center py-1 gap-1.5 mb-1.5">
+          ) : (
+            <div className="flex flex-col items-center gap-1.5 pt-0.5">
               <Link
                 href="/profile"
                 title={`${displayName} — Hồ sơ cá nhân`}
@@ -474,20 +485,13 @@ export default function Sidebar() {
               </Link>
               <button
                 onClick={handleLogout}
-                className="p-1.5 rounded-lg text-mu hover:text-dgr hover:bg-surf transition-colors duration-100"
+                className="p-1.5 rounded-lg text-mu hover:text-dgr hover:bg-surf transition-colors cursor-pointer"
                 title="Đăng xuất"
               >
                 <LogOut size={14} />
               </button>
             </div>
           )}
-
-          <button
-            onClick={() => setCollapsed(!collapsed)}
-            className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-semibold text-nav hover:text-tx hover:bg-act transition-colors duration-150"
-          >
-            {collapsed ? <ChevronRight size={16} /> : <><ChevronLeft size={16} /><span>Thu gọn menu</span></>}
-          </button>
         </div>
       </aside>
 
@@ -574,44 +578,29 @@ export default function Sidebar() {
                 </button>
               </div>
 
-              <div className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto scrollbar-thin">
-                <p className="px-3 pb-1 text-[10px] font-bold text-ic uppercase tracking-widest">
-                  Chức năng chính
-                </p>
-                {mainItems.map(item => (
-                  <SidebarNavLink
-                    key={`m-${item.id}`}
-                    item={item}
-                    pathname={pathname}
-                    collapsed={false}
-                    workerCount={workerCount}
-                    pendingQrCount={pendingQrCount}
-                    pendingMaintenanceCount={pendingMaintenanceCount}
-                    isMobile
-                    onMobileClose={() => setMobileOpen(false)}
-                  />
-                ))}
-
-                {adminItems.length > 0 && (
-                  <>
-                    <p className="px-3 pt-4 pb-1 text-[10px] font-bold text-ic uppercase tracking-widest">
-                      Quản trị hệ thống
+              <div className="flex-1 px-3 py-3.5 space-y-3.5 overflow-y-auto scrollbar-thin">
+                {groupedNavSections.map(section => (
+                  <div key={`m-${section.key}`} className="space-y-1">
+                    <p className="px-3 pb-0.5 text-[10px] font-bold text-ic uppercase tracking-wider">
+                      {section.label}
                     </p>
-                    {adminItems.map(item => (
+                    {section.items.map(item => (
                       <SidebarNavLink
                         key={`m-${item.id}`}
                         item={item}
                         pathname={pathname}
                         collapsed={false}
                         workerCount={workerCount}
+                        pendingQrCount={pendingQrCount}
+                        pendingMaintenanceCount={pendingMaintenanceCount}
                         isMobile
                         onMobileClose={() => setMobileOpen(false)}
                       />
                     ))}
-                  </>
-                )}
+                  </div>
+                ))}
 
-                <div className="pt-4 border-t border-bdr mt-3 space-y-1">
+                <div className="pt-3 border-t border-bdr space-y-1">
                   <PWAInstallButton />
                   {!isTechnician && (
                     <button
@@ -619,7 +608,7 @@ export default function Sidebar() {
                       disabled={refreshing}
                       className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-nav hover:bg-act hover:text-tx transition-colors duration-100 disabled:opacity-60 text-sm font-semibold"
                     >
-                      <RefreshCw size={18} className={refreshing ? 'animate-spin text-pri2' : ''} />
+                      <RefreshCw size={17} className={refreshing ? 'animate-spin text-pri2' : ''} />
                       <span>{refreshing ? 'Đang đồng bộ...' : 'Đồng bộ dữ liệu'}</span>
                     </button>
                   )}
